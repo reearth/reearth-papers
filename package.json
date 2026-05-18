@@ -10,11 +10,10 @@
     "types": "wrangler types"
   },
   "dependencies": {
-    "@cloudflare/containers": "^0.0.20"
+    "@cloudflare/containers": "^0.3.4"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260109.0",
-    "typescript": "^5.9.3",
+    "typescript": "^6.0.3",
     "wrangler": "^4.58.0"
   }
 }

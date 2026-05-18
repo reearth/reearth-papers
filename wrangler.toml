@@ -9,6 +9,14 @@ account_id = "6bec0134af3a47eff814c2581f42993f"
 [observability]
 enabled = true
 
+# Custom domain. `custom_domain = true` makes Cloudflare provision the
+# DNS record + TLS cert and route all traffic for the hostname to this
+# Worker (no path matching, no zone_name needed when the zone is on the
+# same account).
+[[routes]]
+pattern = "papers.reearth.land"
+custom_domain = true
+
 # -----------------------------------------------------------------------------
 # Container: MapLibre raster renderer
 # -----------------------------------------------------------------------------
@@ -31,7 +39,7 @@ enabled = true
 # instance per shard when load grows; for a tile renderer 5 is a soft start.
 [[containers]]
 class_name = "TileContainer"
-image = "../container/Dockerfile"
+image = "./container/Dockerfile"
 max_instances = 5
 instance_type = { vcpu = 1, memory_mib = 3072, disk_mb = 4000 }
 

@@ -9,7 +9,7 @@ Containers.
 client
   │  GET /tile/{z}/{x}/{y}.png?style=<url>
   ▼
-Cloudflare Worker  (worker/)
+Cloudflare Worker  (./)
   │  containerInstance.fetch()
   ▼
 Workers Container  (container/)
@@ -37,8 +37,7 @@ docker run --rm -p 8080:8080 \
   papers-tile
 curl 'http://localhost:8080/tile/0/0/0' -o tile.png
 
-# Or run end-to-end through wrangler (requires Docker)
-cd worker
+# Or run end-to-end through wrangler (requires Docker, from repo root)
 npm install
 npx wrangler dev
 curl 'http://localhost:8787/tile/0/0/0.png?style=https://demotiles.maplibre.org/style.json' -o tile.png

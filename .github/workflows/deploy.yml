@@ -22,9 +22,6 @@ jobs:
     # GitHub Environment scopes the CLOUDFLARE_API_TOKEN to deploys and
     # (if configured) gates them behind required reviewers.
     environment: production
-    defaults:
-      run:
-        working-directory: worker
     steps:
       - uses: actions/checkout@v4
 
@@ -32,7 +29,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: worker/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - run: npm ci
 
