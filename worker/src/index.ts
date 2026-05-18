@@ -1,0 +1,70 @@
+/**
+ * papers-tile worker
+ *
+ * Routes XYZ tile requests to a Workers Container running maplibre-native.
+ * Path: /tile/{z}/{x}/{y}.png?style=<url>
+ */
+import { Container, getContainer } from "@cloudflare/containers";
+
+export class TileContainer extends Container<Env> {
+  defaultPort = 8080;
+  // Cold starts are the expensive event for this container (image pull +
+  // Xvfb + maplibre OpenGL init). Keep it warm longer between requests
+  // — at 30 min idle, a single tile during business hours pays for the
+  // wake-up amortized over the next half hour of traffic.
+  sleepAfter = "30m";
+
+  override async fetch(request: Request): Promise<Response> {
+    // Default fetch already proxies to defaultPort. We override only to
+    // forward DEFAULT_STYLE_URL via header when the client didn't supply
+    // ?style=, so the container can fall back without an env-var redeploy.
+    return this.containerFetch(request);
+  }
+}
+
+const TILE_RE = /^\/tile\/(\d+)\/(\d+)\/(\d+)\.png$/;
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    if (url.pathname === "/health") {
+      return new Response("ok");
+    }
+
+    const m = url.pathname.match(TILE_RE);
+    if (!m) {
+      return new Response("not found", { status: 404 });
+    }
+    const [, z, x, y] = m;
+
+    // Pass through the client's ?style= as-is; fall back to env default.
+    const style = url.searchParams.get("style") ?? env.DEFAULT_STYLE_URL;
+    if (!style) {
+      return new Response("missing style URL", { status: 400 });
+    }
+
+    // Route every request to the same singleton container instance for
+    // now — a shared style cache and warm GL context across requests
+    // matters more than per-tenant isolation in this PoC.
+    const id = env.TILE_CONTAINER.idFromName("singleton");
+    const container = env.TILE_CONTAINER.get(id);
+
+    const inner = new URL(`http://container/tile/${z}/${x}/${y}`);
+    inner.searchParams.set("style", style);
+
+    const upstream = await container.fetch(inner.toString(), {
+      method: "GET",
+      headers: { accept: "image/png" },
+    });
+
+    // Re-wrap so we can tweak headers without re-streaming.
+    const headers = new Headers(upstream.headers);
+    headers.set("Cache-Control", "public, max-age=300");
+    return new Response(upstream.body, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers,
+    });
+  },
+} satisfies ExportedHandler<Env>;

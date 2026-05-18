@@ -1,0 +1,51 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never run two deploys for the same ref at once, and don't cancel a
+# deploy mid-flight — a half-rolled container is worse than a queued one.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    name: Deploy worker + container
+    runs-on: ubuntu-latest
+    # GitHub Environment scopes the CLOUDFLARE_API_TOKEN to deploys and
+    # (if configured) gates them behind required reviewers.
+    environment: production
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+
+      - run: npm ci
+
+      # `wrangler deploy` builds the container image from
+      # `container/Dockerfile` on the GitHub runner (linux/amd64 native —
+      # no QEMU), pushes it to Cloudflare's registry, and bumps the
+      # Worker. `scripts/deploy.sh` then polls until the new image is
+      # live so a failed rollout doesn't show as a green deploy.
+      - name: Deploy
+        run: npm run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # `CLOUDFLARE_ACCOUNT_ID` is required only when wrangler.toml
+          # doesn't pin `account_id`. Setting it via secrets keeps the
+          # config file environment-agnostic.
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

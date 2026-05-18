@@ -1,0 +1,29 @@
+[package]
+name = "papers-tile"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+image = { version = "0.25", default-features = false, features = ["png"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+
+maplibre_native = { version = "0.4", features = ["pool", "vulkan"] }
+
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+# Strip debug symbols from the release binary. Shaves ~30–60 MB off the
+# final image and the binary-only Docker layer that gets pulled on cold
+# start. No effect on backtraces from the running binary — only debuginfo.
+strip = "symbols"

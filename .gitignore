@@ -1,0 +1,25 @@
+# Rust build artifacts
+target/
+
+# Cargo
+Cargo.lock.bak
+
+# Node.js / wrangler
+node_modules/
+.wrangler/
+dist/
+
+# Local env / secrets
+.dev.vars
+.env
+.env.local
+*.log
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Build outputs not committed to the repo
+/tmp/
