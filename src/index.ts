@@ -1,42 +1,62 @@
 /**
  * papers-tile worker
  *
- * Routes:
- *   /tile/{z}/{x}/{y}.png       — render a tile via the renderer container
- *   /style.json                 — generated MapLibre style
- *   /v/{z}/{x}/{y}.mvt          — mirrored Protomaps vector tiles
- *   /watercolor/{z}/{x}/{y}.jpg — watercolor raster tiles (R2)
+ * Public routes:
+ *   /styles/{theme}/tile/{z}/{x}/{y}.png — rendered raster tile
+ *   /styles/{theme}/tilejson.json        — TileJSON for the above
+ *   /styles/{theme}/style.json           — MapLibre style with that theme
+ *   /v/{z}/{x}/{y}.mvt                   — mirrored Protomaps vector tiles
+ *   /v/tilejson.json                     — TileJSON for the vector tiles
+ *   /watercolor/{z}/{x}/{y}.jpg          — watercolor raster tiles (R2)
+ *   /watercolor/tilejson.json            — TileJSON for the watercolor tiles
+ *   /catalog.json                        — index of all tilesets
+ *   /                                    — preview page (public/index.html)
+ *
+ * `{theme}` is one of light / dark / white / black / grayscale.
  */
 import { Container, getContainer } from "@cloudflare/containers";
+import { lookupCachedTile, storeRenderedTile, tileCacheKey } from "./cache.js";
+import { handleCatalog } from "./catalog.js";
 import { handleVectorTile } from "./pmtiles.js";
-import { handleStyle } from "./style.js";
+import { handleStyle, isTheme, type Theme } from "./style.js";
+import {
+  handleRasterTilejson,
+  handleVectorTilejson,
+  handleWatercolorTilejson,
+} from "./tilejson.js";
 import { handleWatercolorTile } from "./watercolor.js";
 
 export class TileRenderer extends Container<Env> {
   defaultPort = 8080;
   // Cold starts are the expensive event for this container (image pull +
-  // maplibre OpenGL/Vulkan init). Keep it warm longer between requests
-  // — at 30 min idle, a single tile during business hours pays for the
+  // maplibre Vulkan init). Keep it warm longer between requests — at
+  // 30 min idle, a single tile during business hours pays for the
   // wake-up amortized over the next half hour of traffic.
   sleepAfter = "30m";
 }
 
-const TILE_RE = /^\/tile\/(\d+)\/(\d+)\/(\d+)\.png$/;
+const STYLE_TILE_RE = /^\/styles\/([a-z]+)\/tile\/(\d+)\/(\d+)\/(\d+)\.png$/;
+const STYLE_TILEJSON_RE = /^\/styles\/([a-z]+)\/tilejson\.json$/;
+const STYLE_STYLE_RE = /^\/styles\/([a-z]+)\/style\.json$/;
 const VECTOR_RE = /^\/v\/(\d+)\/(\d+)\/(\d+)\.mvt$/;
 const WATERCOLOR_RE = /^\/watercolor\/(\d+)\/(\d+)\/(\d+)\.jpg$/;
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
       return new Response("ok");
     }
 
-    if (url.pathname === "/style.json") {
-      return handleStyle(url, request);
+    if (url.pathname === "/catalog.json") {
+      return handleCatalog(request);
     }
 
+    // Vector tile endpoints — theme-independent.
+    if (url.pathname === "/v/tilejson.json") {
+      return handleVectorTilejson(request);
+    }
     const v = url.pathname.match(VECTOR_RE);
     if (v) {
       return handleVectorTile(
@@ -45,6 +65,10 @@ export default {
       );
     }
 
+    // Watercolor raster passthrough + its TileJSON.
+    if (url.pathname === "/watercolor/tilejson.json") {
+      return handleWatercolorTilejson(request);
+    }
     const w = url.pathname.match(WATERCOLOR_RE);
     if (w) {
       return handleWatercolorTile(
@@ -53,38 +77,70 @@ export default {
       );
     }
 
-    const m = url.pathname.match(TILE_RE);
-    if (!m) {
-      return new Response("not found", { status: 404 });
+    // Themed routes. We validate the theme once at parse time and pass
+    // the narrowed type into the handlers.
+    const styleJson = url.pathname.match(STYLE_STYLE_RE);
+    if (styleJson) {
+      const theme = requireTheme(styleJson[1]);
+      return theme instanceof Response ? theme : handleStyle(theme, request);
     }
-    const [, z, x, y] = m;
-
-    // Pass through the client's ?style= as-is; fall back to env default.
-    const style = url.searchParams.get("style") ?? env.DEFAULT_STYLE_URL;
-    if (!style) {
-      return new Response("missing style URL", { status: 400 });
+    const tilejson = url.pathname.match(STYLE_TILEJSON_RE);
+    if (tilejson) {
+      const theme = requireTheme(tilejson[1]);
+      return theme instanceof Response ? theme : handleRasterTilejson(request, theme);
+    }
+    const tile = url.pathname.match(STYLE_TILE_RE);
+    if (tile) {
+      const theme = requireTheme(tile[1]);
+      if (theme instanceof Response) return theme;
+      return renderRasterTile(request, env, ctx, theme, {
+        z: Number(tile[2]),
+        x: Number(tile[3]),
+        y: Number(tile[4]),
+      });
     }
 
-    // Route every request to the same singleton container instance for
-    // now — a shared style cache and warm GL context across requests
-    // matters more than per-tenant isolation in this PoC.
-    const container = getContainer(env.TILE_CONTAINER);
-
-    const inner = new URL(`http://container/tile/${z}/${x}/${y}`);
-    inner.searchParams.set("style", style);
-
-    const upstream = await container.fetch(inner.toString(), {
-      method: "GET",
-      headers: { accept: "image/png" },
-    });
-
-    // Re-wrap so we can tweak headers without re-streaming.
-    const headers = new Headers(upstream.headers);
-    headers.set("Cache-Control", "public, max-age=300");
-    return new Response(upstream.body, {
-      status: upstream.status,
-      statusText: upstream.statusText,
-      headers,
-    });
+    return new Response("not found", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
+
+function requireTheme(raw: string | undefined): Theme | Response {
+  if (raw && isTheme(raw)) return raw;
+  return new Response(`unknown theme: ${raw ?? ""}`, { status: 404 });
+}
+
+async function renderRasterTile(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  theme: Theme,
+  coords: { z: number; x: number; y: number },
+): Promise<Response> {
+  // The renderer container fetches its style from the mirror worker
+  // (see CONTRIBUTING.md §1 — Workers Containers + maplibre-native).
+  // The theme is selected via a query string on that URL.
+  const styleUrl = `${env.DEFAULT_STYLE_URL}?theme=${theme}`;
+
+  // Two-layer cache (Cache API → R2). Key embeds a style hash + the
+  // current PMTiles mirror date, so monthly mirror updates and style
+  // edits invalidate exactly the tiles they should.
+  const key = await tileCacheKey(env, coords, styleUrl);
+  const cached = await lookupCachedTile(request, env, key);
+  if (cached) return cached;
+
+  // Cache miss → render via container. Singleton DO so the container's
+  // in-memory style cache and warm GL pool are shared across requests.
+  const container = getContainer(env.TILE_CONTAINER);
+  const inner = new URL(`http://container/tile/${coords.z}/${coords.x}/${coords.y}`);
+  inner.searchParams.set("style", styleUrl);
+  const upstream = await container.fetch(inner.toString(), {
+    method: "GET",
+    headers: { accept: "image/png" },
+  });
+  if (!upstream.ok) {
+    // Don't pollute the cache with errors; pass the failure through.
+    return upstream;
+  }
+  const body = await upstream.arrayBuffer();
+  return storeRenderedTile(request, env, key, body, ctx);
+}

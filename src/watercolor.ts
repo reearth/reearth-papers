@@ -12,7 +12,13 @@ const WATERCOLOR_KEY = "mirror/watercolor/v1.pmtiles";
 // Attribution required by both upstreams:
 //   - Stamen Design (map tiles, CC BY 4.0)
 //   - OpenStreetMap contributors (underlying data, ODbL)
-const ATTRIBUTION = "Map tiles by Stamen Design, under CC BY 4.0. Data by OpenStreetMap, under ODbL.";
+// Re:Earth Papers added per our own hosting attribution.
+export const WATERCOLOR_ATTRIBUTION =
+  '<a href="https://papers.reearth.land">Re:Earth Papers</a> · ' +
+  '<a href="https://stamen.com">Stamen Design</a> (CC BY 4.0) · ' +
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+const ATTRIBUTION = WATERCOLOR_ATTRIBUTION;
 
 let archiveCache: PMTiles | null = null;
 

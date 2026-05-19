@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Re:Earth Papers — preview</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    .meta {
+      position: absolute; top: 12px; left: 12px; z-index: 1;
+      font: 13px/1.4 system-ui, -apple-system, sans-serif;
+      background: rgba(255,255,255,0.92); padding: 10px 14px;
+      border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.15);
+    }
+    .meta h1 { margin: 0 0 4px; font-size: 14px; }
+    .meta a { color: #444; text-decoration: none; border-bottom: 1px dotted #888; }
+    .meta select { margin-top: 6px; max-width: 240px; }
+    .meta label { display: block; margin-top: 4px; }
+    .meta .pending { color: #888; font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="meta">
+    <h1>Re:Earth Papers — preview</h1>
+    <label>Tileset:
+      <select id="tileset" disabled>
+        <option class="pending">loading /catalog.json…</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="vector" />
+      Render client-side (vector)
+    </label>
+  </div>
+  <div id="map"></div>
+  <script src="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"></script>
+  <script>
+    // Build the preview's tileset menu from /catalog.json so adding a
+    // new theme or raster source on the server side shows up here
+    // without any HTML edit.
+
+    function rasterStyle(tilejsonUrl) {
+      return {
+        version: 8,
+        sources: {
+          raster: { type: 'raster', url: tilejsonUrl, tileSize: 256 },
+        },
+        layers: [{ id: 'raster', type: 'raster', source: 'raster' }],
+      };
+    }
+
+    let map = null;
+
+    async function init() {
+      const sel = document.getElementById('tileset');
+      const vectorToggle = document.getElementById('vector');
+
+      let catalog;
+      try {
+        catalog = await fetch('/catalog.json').then((r) => r.json());
+      } catch (e) {
+        sel.innerHTML = '<option>failed to load catalog</option>';
+        return;
+      }
+
+      const tilesets = catalog.tilesets || [];
+      sel.innerHTML = '';
+      for (const t of tilesets) {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = t.name + '  (' + t.type + ')';
+        opt.dataset.tilejson = t.tilejson;
+        if (t.style) opt.dataset.style = t.style;
+        opt.dataset.type = t.type;
+        sel.appendChild(opt);
+      }
+      sel.disabled = false;
+
+      const params = new URLSearchParams(location.search);
+      const initialId = params.get('id') || tilesets[0]?.id;
+      if (initialId) sel.value = initialId;
+      if (params.get('mode') === 'vector') vectorToggle.checked = true;
+
+      const refreshToggleState = () => {
+        const o = sel.selectedOptions[0];
+        if (!o) return;
+        // Vector mode requires a MapLibre style to load; raster
+        // tilesets without a style entry can't toggle.
+        const hasStyle = !!o.dataset.style;
+        const isVectorTileset = o.dataset.type === 'vector';
+        if (isVectorTileset) {
+          vectorToggle.checked = true;
+          vectorToggle.disabled = true;
+        } else if (!hasStyle) {
+          vectorToggle.checked = false;
+          vectorToggle.disabled = true;
+        } else {
+          vectorToggle.disabled = false;
+        }
+      };
+
+      const showSelected = () => {
+        const o = sel.selectedOptions[0];
+        if (!o) return;
+        refreshToggleState();
+
+        const u = new URL(location.href);
+        u.searchParams.set('id', o.value);
+        if (vectorToggle.checked) u.searchParams.set('mode', 'vector');
+        else u.searchParams.delete('mode');
+        history.replaceState(null, '', u.toString());
+
+        const useVector =
+          vectorToggle.checked && (o.dataset.style || o.dataset.type === 'vector');
+        // For the bare protomaps-vector tileset we don't ship a default
+        // style, so fall back to the light theme's full style so it has
+        // something to render with.
+        const styleUrl = o.dataset.style || '/styles/light/style.json';
+        const style = useVector ? styleUrl : rasterStyle(o.dataset.tilejson);
+
+        if (!map) {
+          map = new maplibregl.Map({
+            container: 'map',
+            style,
+            center: [139.7, 35.7],
+            zoom: 4,
+            hash: true,
+          });
+          map.addControl(new maplibregl.NavigationControl());
+          map.addControl(new maplibregl.ScaleControl());
+        } else {
+          map.setStyle(style);
+        }
+      };
+
+      sel.addEventListener('change', showSelected);
+      vectorToggle.addEventListener('change', showSelected);
+      showSelected();
+    }
+
+    init();
+  </script>
+</body>
+</html>

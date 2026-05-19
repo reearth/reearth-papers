@@ -12,47 +12,79 @@ flowchart TD
 
   subgraph main["reearth-papers (Worker)"]
     direction TB
-    main_routes["routes: /tile, /v, /style.json"]
+    main_routes["routes: /styles/&#123;theme&#125;/..., /v/..., assets"]
+    cache["cache layer: Cache API → R2"]
     do["DurableObject: TileRenderer"]
-    main_routes --> do
+    main_routes --> cache --> do
   end
 
   subgraph container["TileRenderer container"]
     direction TB
     axum["axum :8080<br/>/tile/:z/:x/:y → maplibre-native render → PNG"]
-    proxy["loopback proxy :9000<br/>/proxy/{scheme}/{host}/* — plain HTTP only<br/>(bypasses maplibre-native's libcurl/OpenSSL)"]
+    proxy["loopback proxy :9000<br/>/proxy/&#123;scheme&#125;/&#123;host&#125;/* — plain HTTP only<br/>(bypasses maplibre-native's libcurl/OpenSSL)"]
     axum -->|"HTTP fetches: style, tiles, glyphs, sprites"| proxy
   end
 
   subgraph mirror["reearth-papers-mirror (Worker)"]
     direction TB
-    m_style["/style.json"]
-    m_v["/v/{z}/{x}/{y}.mvt"]
+    m_style["/style.json?theme=..."]
+    m_v["/v/&#123;z&#125;/&#123;x&#125;/&#123;y&#125;.mvt"]
     m_latest["/latest"]
   end
 
   subgraph r2["R2 bucket: reearth-papers"]
     direction TB
-    r2_archive["mirror/protomaps/{YYYYMMDD}.pmtiles"]
+    r2_archive["mirror/protomaps/&#123;YYYYMMDD&#125;.pmtiles"]
     r2_pointer["mirror/protomaps/latest.json"]
+    r2_cache["cache/tile/&#123;styleHash&#125;/&#123;date&#125;/&#123;z&#125;/&#123;x&#125;/&#123;y&#125;.png"]
   end
 
   pubcdn["protomaps.github.io<br/>(glyphs + sprites)"]
 
-  client -->|"GET /tile/{z}/{x}/{y}.png"| main_routes
+  client -->|"GET /styles/&#123;theme&#125;/tile/..."| main_routes
   do -->|"container.fetch()"| axum
   proxy -->|"reqwest (rustls)"| mirror
   proxy -->|"reqwest (rustls)"| pubcdn
-  main_routes -->|"R2 range-read"| r2
-  mirror -->|"R2 range-read"| r2
+  main_routes -->|"R2 range-read"| r2_archive
+  mirror -->|"R2 range-read"| r2_archive
+  cache <-->|"get / put"| r2_cache
 ```
 
 Two workers, one shared R2 bucket:
 
 | Worker                      | Where                                         | Job                                                                                                                       |
 |----------------------------|-----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
-| `reearth-papers`           | `papers.reearth.land` (custom domain)         | Public entry. Hosts the renderer container. Serves `/tile`, `/v`, `/style.json`.                                          |
-| `reearth-papers-mirror`    | `reearth-papers-mirror.reearth.workers.dev`   | Monthly Workflow that snapshots Protomaps' daily PMTiles into R2. Also serves `/style.json` + `/v` that the container fetches from. |
+| `reearth-papers`           | `papers.reearth.land` (custom domain)         | Public entry. Hosts the renderer container, the rendered-tile cache, and the static preview page.                          |
+| `reearth-papers-mirror`    | `reearth-papers-mirror.reearth.workers.dev`   | Monthly Workflow that snapshots Protomaps' daily PMTiles into R2. Also serves the `/style.json` + `/v` that the renderer container fetches from. |
+
+The mirror duplicates `/style.json` (and `/v`) on purpose. The renderer
+container has to source those from somewhere; routing it through the
+mirror's `workers.dev` hostname (rather than the main worker's custom
+domain) gave us a cleaner debugging surface while we were chasing the
+maplibre-native HTTP bug (see gotcha §1).
+
+### Tile cache
+
+Rendered raster tiles are cached in two layers:
+
+1. **Cache API** (`caches.default`) — per-colo edge cache. Hot tiles
+   are served from here without ever touching R2 or the worker
+   handler's storage path.
+2. **R2** under the `cache/tile/...` prefix — global, survives isolate
+   recycles. On a Cache API miss we promote the R2 entry back into the
+   edge cache so the next request from the same colo is fast.
+
+The cache key embeds:
+- A **style hash** computed from `STYLE_VERSION:<resolved-style-url>`
+  (see `src/cache.ts`). Bumping `STYLE_VERSION` invalidates every
+  default-style tile in one deploy.
+- The **PMTiles mirror date** (from `mirror/protomaps/latest.json`).
+  A fresh monthly snapshot orphans the previous month's tiles
+  automatically.
+
+Old cache entries are not actively cleaned — they're simply
+unreachable. If R2 storage becomes a concern, add a lifecycle rule on
+the `cache/tile/` prefix.
 
 The mirror duplicates `/style.json` (and `/v`) on purpose. The renderer
 container has to source those from somewhere; routing it through the
@@ -63,6 +95,12 @@ maplibre-native HTTP bug (see gotcha §1).
 ## Repository layout
 
 - `src/` — `reearth-papers` worker (TypeScript).
+  - `index.ts` — route table + tile pipeline.
+  - `cache.ts` — Cache API + R2 layered tile cache.
+  - `style.ts` — generated MapLibre style per theme.
+  - `tilejson.ts` — TileJSON for raster + vector endpoints.
+  - `pmtiles.ts` — R2-backed PMTiles vector tile reader.
+- `public/` — static assets served via Workers Assets (preview page).
 - `container/` — renderer container (Rust + axum + maplibre-native).
   - `src/main.rs` — tile-server entry point.
   - `src/proxy.rs` — loopback HTTP proxy (the maplibre-native workaround).
@@ -91,7 +129,7 @@ For the **worker + container chain** locally (needs Docker):
 ```bash
 npm install
 npx wrangler dev
-curl 'http://localhost:8787/tile/0/0/0.png' -o tile.png
+curl 'http://localhost:8787/styles/light/tile/0/0/0.png' -o tile.png
 ```
 
 For the **mirror worker** locally:

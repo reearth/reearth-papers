@@ -11,7 +11,7 @@ import { PMTiles, type RangeResponse, type Source } from "pmtiles";
 
 const POINTER_TTL_MS = 60 * 60 * 1000;
 
-interface MirrorPointer {
+export interface MirrorPointer {
   date: string;
   key: string;
   size: number;
@@ -59,7 +59,7 @@ class R2PmtilesSource implements Source {
   }
 }
 
-async function readMirrorPointer(env: Env): Promise<MirrorPointer> {
+export async function readMirrorPointer(env: Env): Promise<MirrorPointer> {
   const now = Date.now();
   if (pointerCache && pointerCache.expires > now) return pointerCache.value;
 

@@ -25,6 +25,13 @@ workers_dev = true
 pattern = "papers.reearth.land"
 custom_domain = true
 
+# Static assets (preview page, etc.) served from ./public. Assets are
+# matched before the worker handler runs, so `/` and `/preview.html`
+# fall through to public/index.html automatically without any code in
+# src/index.ts.
+[assets]
+directory = "./public"
+
 # Container bound as `TileRenderer`. Renders MapLibre styles to PNG
 # tiles via maplibre-native + lavapipe (software Vulkan). See
 # `container/Dockerfile`.
