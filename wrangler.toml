@@ -1,4 +1,4 @@
-name = "papers-tile-worker"
+name = "reearth-papers"
 main = "src/index.ts"
 compatibility_date = "2026-01-09"
 
@@ -38,21 +38,25 @@ custom_domain = true
 # `max_instances` caps the autoscale fanout. Workers Containers wakes a new
 # instance per shard when load grows; for a tile renderer 5 is a soft start.
 [[containers]]
-class_name = "TileContainer"
+class_name = "TileRenderer"
 image = "./container/Dockerfile"
 max_instances = 5
-instance_type = { vcpu = 1, memory_mib = 3072, disk_mb = 4000 }
+# Was a custom 1 vCPU / 3 GiB / 4 GB disk shape; new container apps
+# refused to provision any instances under that config (CF-side issue
+# we couldn't pin down). `standard-1` is the predefined equivalent and
+# does come up.
+instance_type = "standard-1"
 
 # Containers are addressed through a Durable Object binding.
 [[durable_objects.bindings]]
 name = "TILE_CONTAINER"
-class_name = "TileContainer"
+class_name = "TileRenderer"
 
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["TileContainer"]
+new_sqlite_classes = ["TileRenderer"]
 
-# Shared with the mirror worker — `papers-pmtiles-mirror` writes
+# Shared with the mirror worker — `reearth-papers-mirror` writes
 # `mirror/protomaps/{date}.pmtiles` and `mirror/protomaps/latest.json`
 # into this bucket, and the tile worker range-reads them here.
 [[r2_buckets]]
@@ -62,6 +66,6 @@ bucket_name = "reearth-papers"
 [vars]
 # Default style to render when the client doesn't pass ?style=
 DEFAULT_STYLE_URL = "https://papers.reearth.land/style.json"
-# R2 prefix the mirror writes under. Must match
-# `mirror/wrangler.toml`'s MIRROR_PREFIX.
+# R2 prefix the Protomaps mirror writes under. Must match
+# `mirror/protomaps/wrangler.toml`'s MIRROR_PREFIX.
 MIRROR_PREFIX = "mirror/protomaps"

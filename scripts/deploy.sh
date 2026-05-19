@@ -9,8 +9,8 @@ set -euo pipefail
 
 # Worker + container class names — must match wrangler.toml. Cloudflare
 # names the deployed container `<worker_name>-<class_name_lowercase>`.
-WORKER_NAME="papers-tile-worker"
-CONTAINER_CLASS="tilecontainer"
+WORKER_NAME="reearth-papers"
+CONTAINER_CLASS="tilerenderer"
 CONTAINER_NAME="${WORKER_NAME}-${CONTAINER_CLASS}"
 
 echo "▶ wrangler deploy"
@@ -32,7 +32,7 @@ if echo "$DEPLOY_OUTPUT" | grep -qiE "no changes to be made|no changes"; then
 fi
 
 # The wrangler deploy log line looks like:
-#   ... papers-tile-worker-tilecontainer:abcdef0123 ...
+#   ... reearth-papers-tilerenderer:abcdef0123 ...
 # We extract the trailing image tag (a git-sha-like hex) and poll
 # `wrangler containers info` until that tag is the live one.
 DEPLOYED_TAG=$(echo "$DEPLOY_OUTPUT" \

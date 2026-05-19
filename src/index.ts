@@ -7,8 +7,9 @@
 import { Container } from "@cloudflare/containers";
 import { handleVectorTile } from "./pmtiles.js";
 import { handleStyle } from "./style.js";
+import { handleWatercolorTile } from "./watercolor.js";
 
-export class TileContainer extends Container<Env> {
+export class TileRenderer extends Container<Env> {
   defaultPort = 8080;
   // Cold starts are the expensive event for this container (image pull +
   // Xvfb + maplibre OpenGL init). Keep it warm longer between requests
@@ -26,6 +27,7 @@ export class TileContainer extends Container<Env> {
 
 const TILE_RE = /^\/tile\/(\d+)\/(\d+)\/(\d+)\.png$/;
 const VECTOR_RE = /^\/v\/(\d+)\/(\d+)\/(\d+)\.mvt$/;
+const WATERCOLOR_RE = /^\/watercolor\/(\d+)\/(\d+)\/(\d+)\.jpg$/;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -50,6 +52,16 @@ export default {
     if (v) {
       return handleVectorTile(
         { z: Number(v[1]), x: Number(v[2]), y: Number(v[3]) },
+        env,
+      );
+    }
+
+    // Raster passthrough from the watercolor PMTiles archive (also in
+    // R2). See src/watercolor.ts and watercolor/README.md.
+    const w = url.pathname.match(WATERCOLOR_RE);
+    if (w) {
+      return handleWatercolorTile(
+        { z: Number(w[1]), x: Number(w[2]), y: Number(w[3]) },
         env,
       );
     }

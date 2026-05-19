@@ -1,3 +1,6 @@
+// build-bust: rev a1 — force a new container image hash so Cloudflare
+// reprovisions from scratch (the previously deployed image was sitting
+// in a state where new container instances refused to leave "inactive").
 //! papers-tile — minimal MapLibre style → raster tile server.
 //!
 //! Designed to run inside a Cloudflare Workers Container. Renders a
