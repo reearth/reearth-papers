@@ -1,4 +1,4 @@
-name = "papers-pmtiles-mirror"
+name = "reearth-papers-mirror"
 main = "src/index.ts"
 compatibility_date = "2026-01-09"
 compatibility_flags = ["nodejs_compat"]

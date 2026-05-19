@@ -23,3 +23,6 @@ dist/
 
 # Build outputs not committed to the repo
 /tmp/
+
+# Go builder binary (watercolor subproject)
+/mirror/watercolor/builder/builder
