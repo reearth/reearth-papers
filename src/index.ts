@@ -15,6 +15,14 @@
  * `{theme}` is one of light / dark / white / black / grayscale.
  */
 import { Container, getContainer } from "@cloudflare/containers";
+
+// Number of container shards used to parallelise renders. Each tile is
+// routed to a stable shard derived from its coordinates so the same
+// tile keeps hitting the same container (preserving its in-memory
+// style cache and warm GL pool), while *different* tiles can land on
+// different shards and render concurrently. Keep this ≤ max_instances
+// in wrangler.toml so CF can actually spin up that many.
+const SHARD_COUNT = 4;
 import { lookupCachedTile, storeRenderedTile, tileCacheKey } from "./cache.js";
 import { handleCatalog } from "./catalog.js";
 import { handleVectorTile } from "./pmtiles.js";
@@ -104,6 +112,15 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
+function tileShard(coords: { z: number; x: number; y: number }): number {
+  // Cheap, deterministic 32-bit mix of the three coords. The exact
+  // distribution doesn't matter much — we just need different tiles to
+  // land on different shards reliably.
+  const mixed =
+    (coords.z * 73856093) ^ (coords.x * 19349663) ^ (coords.y * 83492791);
+  return (mixed >>> 0) % SHARD_COUNT;
+}
+
 function requireTheme(raw: string | undefined): Theme | Response {
   if (raw && isTheme(raw)) return raw;
   return new Response(`unknown theme: ${raw ?? ""}`, { status: 404 });
@@ -128,9 +145,12 @@ async function renderRasterTile(
   const cached = await lookupCachedTile(request, env, key);
   if (cached) return cached;
 
-  // Cache miss → render via container. Singleton DO so the container's
-  // in-memory style cache and warm GL pool are shared across requests.
-  const container = getContainer(env.TILE_CONTAINER);
+  // Cache miss → render via container. We pin each tile to a shard
+  // derived from its (z,x,y) so the same tile always hits the same
+  // container instance (warm style + GL pool) and different tiles can
+  // render in parallel across shards.
+  const shard = tileShard(coords);
+  const container = getContainer(env.TILE_CONTAINER, `shard-${shard}`);
   const inner = new URL(`http://container/tile/${coords.z}/${coords.x}/${coords.y}`);
   inner.searchParams.set("style", styleUrl);
   const upstream = await container.fetch(inner.toString(), {

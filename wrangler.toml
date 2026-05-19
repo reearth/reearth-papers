@@ -38,12 +38,13 @@ directory = "./public"
 [[containers]]
 class_name = "TileRenderer"
 image = "./container/Dockerfile"
-max_instances = 5
-# 1 vCPU because the rendering is software-Vulkan and CPU bound.
-# Custom shape with CF's required ratios: ≥3 GiB RAM per vCPU and
-# disk ≤ 2× memory (GB ≤ 2 × GiB). 4000 MB disk leaves headroom for
-# the temp style cache atop the ~350 MiB image.
-instance_type = { vcpu = 1, memory_mib = 3072, disk_mb = 4000 }
+# Up to 4 instances so the SHARD_COUNT shards in src/index.ts can run
+# in parallel under load.
+max_instances = 4
+# 2 vCPU: software-Vulkan (lavapipe) rasterization is CPU bound, and
+# doubling the cores roughly halves single-tile render time. CF's
+# custom-shape ratios require ≥3 GiB RAM per vCPU and disk ≤ 2× RAM.
+instance_type = { vcpu = 2, memory_mib = 6144, disk_mb = 12000 }
 
 [[durable_objects.bindings]]
 name = "TILE_CONTAINER"
