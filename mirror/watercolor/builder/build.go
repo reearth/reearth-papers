@@ -26,7 +26,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -39,6 +38,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -62,7 +62,7 @@ func runBuild(ctx context.Context, args []string) error {
 		fs.StringVar(&manifestPath, "manifest", "manifest.tsv", "sorted manifest from `list` phase")
 		fs.StringVar(&outPath, "out", "watercolor.pmtiles", "output PMTiles path")
 		fs.StringVar(&checkpointPath, "checkpoint", "", "path to checkpoint json (default: <out>.ckpt)")
-		fs.IntVar(&concurrency, "concurrency", 256, "in-flight S3 GETs")
+		fs.IntVar(&concurrency, "concurrency", 64, "in-flight S3 GETs")
 		fs.IntVar(&lookahead, "lookahead", 4096, "reorder buffer size (entries)")
 		fs.BoolVar(&resume, "resume", false, "resume from checkpoint if present")
 	})
@@ -80,7 +80,13 @@ func runBuild(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("aws config: %w", err)
 	}
-	client := s3.NewFromConfig(cfg)
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.Retryer = retry.NewAdaptiveMode(func(am *retry.AdaptiveModeOptions) {
+			am.StandardOptions = append(am.StandardOptions, func(so *retry.StandardOptions) {
+				so.MaxAttempts = 10
+			})
+		})
+	})
 
 	writer, startIdx, err := openWriter(outPath, checkpointPath, resume)
 	if err != nil {
@@ -187,28 +193,41 @@ func runBuild(ctx context.Context, args []string) error {
 }
 
 func fetchTile(ctx context.Context, client *s3.Client, bucket, key string) ([]byte, error) {
-	out, err := client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket:       aws.String(bucket),
-		Key:          aws.String(key),
-		RequestPayer: types.RequestPayerRequester,
-	})
-	if err != nil {
-		return nil, err
+	// Same retry shape as headTile in list.go: defend against the SDK's
+	// adaptive limiter exhausting its quota under sustained pressure.
+	const maxAttempts = 6
+	backoff := 500 * time.Millisecond
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		out, err := client.GetObject(ctx, &s3.GetObjectInput{
+			Bucket:       aws.String(bucket),
+			Key:          aws.String(key),
+			RequestPayer: types.RequestPayerRequester,
+		})
+		if err == nil {
+			body, readErr := io.ReadAll(out.Body)
+			out.Body.Close()
+			if readErr == nil {
+				return body, nil
+			}
+			lastErr = readErr
+		} else {
+			if isMissing(err) || !isTransient(err) {
+				return nil, err
+			}
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+		if backoff > 30*time.Second {
+			backoff = 30 * time.Second
+		}
 	}
-	defer out.Body.Close()
-	return io.ReadAll(out.Body)
-}
-
-func isMissing(err error) bool {
-	var nsk *types.NoSuchKey
-	if errors.As(err, &nsk) {
-		return true
-	}
-	// S3 may return a 403 for keys that exist but aren't readable, or
-	// for keys our LIST saw but were deleted between list+get. Treat
-	// 403 the same as 404 for build purposes.
-	s := err.Error()
-	return strings.Contains(s, "StatusCode: 403") || strings.Contains(s, "StatusCode: 404")
+	return nil, fmt.Errorf("after %d attempts: %w", maxAttempts, lastErr)
 }
 
 func readManifest(path string) ([]manifestEntry, error) {
