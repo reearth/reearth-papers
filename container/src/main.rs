@@ -1,11 +1,10 @@
-// build-bust: rev a1 — force a new container image hash so Cloudflare
-// reprovisions from scratch (the previously deployed image was sitting
-// in a state where new container instances refused to leave "inactive").
 //! papers-tile — minimal MapLibre style → raster tile server.
 //!
 //! Designed to run inside a Cloudflare Workers Container. Renders a
 //! 256×256 PNG for an XYZ tile using `maplibre-native` (software GL via
 //! Xvfb + llvmpipe; see `Dockerfile`).
+
+mod proxy;
 
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
@@ -40,6 +39,12 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
+    // maplibre-native's libcurl crashes the process on HTTPS inside
+    // this Workers Container; we route all its outbound through a
+    // plain-HTTP loopback proxy that reqwest-fetches the real upstream.
+    // See src/proxy.rs.
+    proxy::spawn_loopback_proxy().await?;
+
     let state = AppState {
         default_style_url: std::env::var("STYLE_URL").ok(),
         style_cache: Arc::new(RwLock::new(Default::default())),
@@ -58,45 +63,14 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("listening on {addr}");
 
-    // Prewarm maplibre's GL context in the background so Cloudflare
-    // Workers Containers' startup port-readiness check (~8 s default)
-    // sees the listener immediately. The first /tile request still
-    // serializes on `SingleThreadedRenderPool::global_pool()`, so it
-    // effectively waits for prewarm — but the container is alive and
-    // responsive to /health from the start.
-    if let Some(url) = state.default_style_url.clone() {
-        let state = state.clone();
-        tokio::spawn(async move {
-            let t0 = std::time::Instant::now();
-            match prewarm(&state, &url).await {
-                Ok(()) => tracing::info!(
-                    "prewarm complete in {:.2}s (style={url})",
-                    t0.elapsed().as_secs_f32()
-                ),
-                Err(e) => tracing::warn!("prewarm failed (continuing anyway): {e:?}"),
-            }
-        });
-    } else {
-        tracing::info!("STYLE_URL not set, skipping prewarm");
-    }
+    // Prewarm is disabled: maplibre-native's C++ side throws on certain
+    // network/source-load failures and `std::terminate` takes down the
+    // whole process — including the running axum server. Running it as
+    // a `tokio::spawn` doesn't help because that's a process-level
+    // abort, not a Rust panic. We pay a cold-start penalty on the first
+    // /tile request instead.
 
     axum::serve(listener, app).await?;
-    Ok(())
-}
-
-/// Render z=0 of the given style and discard the pixels. The expensive
-/// parts — Xvfb attach, GL context creation, font/sprite resolution,
-/// style.json parsing — all happen on this first render and are reused
-/// by `SingleThreadedRenderPool::global_pool()` from then on.
-async fn prewarm(state: &AppState, style_url: &str) -> anyhow::Result<()> {
-    let style_path = ensure_style(state, style_url)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    let pool = maplibre_native::SingleThreadedRenderPool::global_pool();
-    let _ = pool
-        .render_tile(style_path, 0, 0, 0)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e:?}"))?;
     Ok(())
 }
 
@@ -156,6 +130,12 @@ async fn ensure_style(state: &AppState, url: &str) -> Result<PathBuf, AppError> 
         .bytes()
         .await
         .map_err(|e| AppError::Fetch(format!("{e}")))?;
+
+    // Rewrite the style's outbound URLs (tiles / glyphs / sprite /
+    // TileJSON) to point at the loopback proxy. maplibre-native sees
+    // plain-HTTP localhost URLs and never goes near TLS itself.
+    let body = proxy::rewrite_style_urls(&body)
+        .map_err(|e| AppError::Internal(format!("style rewrite: {e}")))?;
 
     let dir = std::env::temp_dir().join("papers-tile-styles");
     tokio::fs::create_dir_all(&dir).await.map_err(io_err)?;

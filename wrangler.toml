@@ -9,6 +9,14 @@ account_id = "6bec0134af3a47eff814c2581f42993f"
 [observability]
 enabled = true
 
+# Keep the workers.dev subdomain alive alongside the custom domain.
+# We need it because maplibre-native's libcurl (OpenSSL) was failing
+# TLS to `papers.reearth.land:443` from inside the container with
+# SSL_ERROR_SYSCALL — reqwest (rustls) on the same URL works fine.
+# Routing the container's vector-tile fetches via the workers.dev
+# hostname dodges whatever cert/ALPN combination is upsetting it.
+workers_dev = true
+
 # Custom domain. `custom_domain = true` makes Cloudflare provision the
 # DNS record + TLS cert and route all traffic for the hostname to this
 # Worker (no path matching, no zone_name needed when the zone is on the
@@ -17,37 +25,19 @@ enabled = true
 pattern = "papers.reearth.land"
 custom_domain = true
 
-# -----------------------------------------------------------------------------
-# Container: MapLibre raster renderer
-# -----------------------------------------------------------------------------
-# `instance_type` controls vCPU / RAM / disk. Predefined sizes exist
-# ("dev", "basic", "standard-1" … "standard-4"); we use a custom shape
-# tuned for MapLibre rendering. Cloudflare enforces two ratios on custom
-# shapes, so the numbers below are the *minimum* compliant set for 1 vCPU:
-#
-#   - 1 vCPU       — software-GL rasterization is CPU bound; <1 vCPU made
-#                    single-tile render visibly slow in local testing.
-#   - 3072 MiB RAM — Cloudflare requires ≥3 GiB per vCPU (up to the first
-#                    4). 1 GiB would be plenty for maplibre-native itself
-#                    but the platform won't accept it at vcpu=1.
-#   - 4000 MB disk — Cloudflare caps disk at 2× memory (GB ≤ 2 × GiB), so
-#                    with 3 GiB RAM the ceiling is 6000 MB. Our image is
-#                    ~350 MiB; 4000 MB leaves comfortable headroom for the
-#                    temp style cache.
-#
-# `max_instances` caps the autoscale fanout. Workers Containers wakes a new
-# instance per shard when load grows; for a tile renderer 5 is a soft start.
+# Container bound as `TileRenderer`. Renders MapLibre styles to PNG
+# tiles via maplibre-native + lavapipe (software Vulkan). See
+# `container/Dockerfile`.
 [[containers]]
 class_name = "TileRenderer"
 image = "./container/Dockerfile"
 max_instances = 5
-# Was a custom 1 vCPU / 3 GiB / 4 GB disk shape; new container apps
-# refused to provision any instances under that config (CF-side issue
-# we couldn't pin down). `standard-1` is the predefined equivalent and
-# does come up.
-instance_type = "standard-1"
+# 1 vCPU because the rendering is software-Vulkan and CPU bound.
+# Custom shape with CF's required ratios: ≥3 GiB RAM per vCPU and
+# disk ≤ 2× memory (GB ≤ 2 × GiB). 4000 MB disk leaves headroom for
+# the temp style cache atop the ~350 MiB image.
+instance_type = { vcpu = 1, memory_mib = 3072, disk_mb = 4000 }
 
-# Containers are addressed through a Durable Object binding.
 [[durable_objects.bindings]]
 name = "TILE_CONTAINER"
 class_name = "TileRenderer"
@@ -65,7 +55,13 @@ bucket_name = "reearth-papers"
 
 [vars]
 # Default style to render when the client doesn't pass ?style=
-DEFAULT_STYLE_URL = "https://papers.reearth.land/style.json"
+# Must NOT be `papers.reearth.land` (this worker's custom domain) —
+# Workers Containers drop self-loop egress, so the renderer container
+# can't fetch the style from its own worker. Point at the mirror's
+# workers.dev hostname; the style payload it serves embeds vector tile
+# URLs on the same origin, so the whole render chain stays off the
+# self-loop path.
+DEFAULT_STYLE_URL = "https://reearth-papers-mirror.reearth.workers.dev/style.json"
 # R2 prefix the Protomaps mirror writes under. Must match
 # `mirror/protomaps/wrangler.toml`'s MIRROR_PREFIX.
 MIRROR_PREFIX = "mirror/protomaps"

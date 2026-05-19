@@ -1,49 +1,23 @@
-# reearth-papers
+# Re:Earth Papers
 
-PoC: render MapLibre vector tiles to raster tiles on Cloudflare Workers
-Containers.
+A tile service that renders OpenStreetMap (via Protomaps) into beautiful
+raster tiles across a curated set of styles.
 
-## Architecture
+## Endpoints
 
-```
-client
-  │  GET /tile/{z}/{x}/{y}.png?style=<url>
-  ▼
-Cloudflare Worker  (./)
-  │  containerInstance.fetch()
-  ▼
-Workers Container  (container/)
-  │  Rust + maplibre-native (software GL via Xvfb + llvmpipe)
-  ▼
-  256×256 PNG
-```
-
-The Worker is a thin router/proxy; the container does the actual MapLibre
-style rendering. The container speaks plain HTTP on `$PORT` and exposes:
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET`  | `/health` | liveness |
-| `GET`  | `/tile/:z/:x/:y` | render a 256×256 PNG for the given XYZ tile. `?style=<url>` overrides `STYLE_URL` env. |
-
-## Run locally
-
-```bash
-# Build & run the container directly (no Workers)
-cd container
-docker build -t papers-tile .
-docker run --rm -p 8080:8080 \
-  -e STYLE_URL=https://demotiles.maplibre.org/style.json \
-  papers-tile
-curl 'http://localhost:8080/tile/0/0/0' -o tile.png
-
-# Or run end-to-end through wrangler (requires Docker, from repo root)
-npm install
-npx wrangler dev
-curl 'http://localhost:8787/tile/0/0/0.png?style=https://demotiles.maplibre.org/style.json' -o tile.png
-```
+- `https://papers.reearth.land/tile/{z}/{x}/{y}.png` — rendered raster
+  tile. Pass `?style=<url>` to render against an arbitrary MapLibre
+  style; omit it for the default Protomaps basemap.
+- `https://papers.reearth.land/v/{z}/{x}/{y}.mvt` — Protomaps vector
+  tiles, served directly from our mirror.
+- `https://papers.reearth.land/style.json` — the default MapLibre
+  style. `?theme=light|dark|white|black|grayscale` switches between
+  Protomaps' published themes.
 
 ## Status
 
-PoC — verifies that a maplibre-native–based renderer works inside a
-Workers Container, called synchronously from a Worker.
+PoC. The end-to-end path is live; expect ~10 s on the first cold
+request and 3–7 s thereafter.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development and
+deployment.

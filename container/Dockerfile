@@ -60,6 +60,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       libvulkan1 mesa-vulkan-drivers \
+      curl \
       libcurl4 libuv1 libpng16-16 libicu74 libjpeg-turbo8 libwebp7 \
       # libmaplibre is link-time tied to libX11 (see builder note); even
       # though Vulkan never touches it at runtime, dlopen fails without

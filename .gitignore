@@ -21,6 +21,10 @@ dist/
 .vscode/
 *.swp
 
+# Claude Code session state
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+
 # Build outputs not committed to the repo
 /tmp/
 

@@ -12,6 +12,10 @@
   },
   "devDependencies": {
     "typescript": "^6.0.3",
-    "wrangler": "^4.92.0"
+    "wrangler": "^4.93.0"
+  },
+  "dependencies": {
+    "pmtiles": "^4.4.1",
+    "protomaps-themes-base": "^4.5.0"
   }
 }

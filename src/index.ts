@@ -1,10 +1,13 @@
 /**
  * papers-tile worker
  *
- * Routes XYZ tile requests to a Workers Container running maplibre-native.
- * Path: /tile/{z}/{x}/{y}.png?style=<url>
+ * Routes:
+ *   /tile/{z}/{x}/{y}.png       — render a tile via the renderer container
+ *   /style.json                 — generated MapLibre style
+ *   /v/{z}/{x}/{y}.mvt          — mirrored Protomaps vector tiles
+ *   /watercolor/{z}/{x}/{y}.jpg — watercolor raster tiles (R2)
  */
-import { Container } from "@cloudflare/containers";
+import { Container, getContainer } from "@cloudflare/containers";
 import { handleVectorTile } from "./pmtiles.js";
 import { handleStyle } from "./style.js";
 import { handleWatercolorTile } from "./watercolor.js";
@@ -12,17 +15,10 @@ import { handleWatercolorTile } from "./watercolor.js";
 export class TileRenderer extends Container<Env> {
   defaultPort = 8080;
   // Cold starts are the expensive event for this container (image pull +
-  // Xvfb + maplibre OpenGL init). Keep it warm longer between requests
+  // maplibre OpenGL/Vulkan init). Keep it warm longer between requests
   // — at 30 min idle, a single tile during business hours pays for the
   // wake-up amortized over the next half hour of traffic.
   sleepAfter = "30m";
-
-  override async fetch(request: Request): Promise<Response> {
-    // Default fetch already proxies to defaultPort. We override only to
-    // forward DEFAULT_STYLE_URL via header when the client didn't supply
-    // ?style=, so the container can fall back without an env-var redeploy.
-    return this.containerFetch(request);
-  }
 }
 
 const TILE_RE = /^\/tile\/(\d+)\/(\d+)\/(\d+)\.png$/;
@@ -37,17 +33,10 @@ export default {
       return new Response("ok");
     }
 
-    // Generated MapLibre style — see src/style.ts. `?theme=` selects
-    // among Protomaps' published themes (light/dark/white/black/
-    // grayscale); default is light.
     if (url.pathname === "/style.json") {
       return handleStyle(url, request);
     }
 
-    // Vector tile passthrough from the mirrored Protomaps PMTiles
-    // archive. Lives on the same worker so the rendering container can
-    // fetch tiles via the same `papers.reearth.land` origin (one TLS
-    // session, no cross-domain CORS).
     const v = url.pathname.match(VECTOR_RE);
     if (v) {
       return handleVectorTile(
@@ -56,8 +45,6 @@ export default {
       );
     }
 
-    // Raster passthrough from the watercolor PMTiles archive (also in
-    // R2). See src/watercolor.ts and watercolor/README.md.
     const w = url.pathname.match(WATERCOLOR_RE);
     if (w) {
       return handleWatercolorTile(
@@ -81,8 +68,7 @@ export default {
     // Route every request to the same singleton container instance for
     // now — a shared style cache and warm GL context across requests
     // matters more than per-tenant isolation in this PoC.
-    const id = env.TILE_CONTAINER.idFromName("singleton");
-    const container = env.TILE_CONTAINER.get(id);
+    const container = getContainer(env.TILE_CONTAINER);
 
     const inner = new URL(`http://container/tile/${z}/${x}/${y}`);
     inner.searchParams.set("style", style);

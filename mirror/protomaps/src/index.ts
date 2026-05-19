@@ -8,8 +8,12 @@
 //     `GET /latest` reads the pointer file.
 
 import { PmtilesMirrorWorkflow } from "./workflow.js";
+import { handleVectorTile } from "./pmtiles.js";
+import { handleStyle } from "./style.js";
 
 export { PmtilesMirrorWorkflow };
+
+const VECTOR_RE = /^\/v\/(\d+)\/(\d+)\/(\d+)\.mvt$/;
 
 export default {
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -19,6 +23,24 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const parts = url.pathname.split("/").filter(Boolean);
+
+    // Style + vector tile passthrough served from this worker's
+    // workers.dev hostname. Workers Containers can't fetch their own
+    // worker's custom domain (self-loop is dropped), so the renderer
+    // container has to source `/style.json` and `/v/...` from a
+    // *different* worker — which is us. The style generator picks up
+    // the request origin and embeds it in the tile URLs, so both
+    // resources end up on the same hostname.
+    if (url.pathname === "/style.json") {
+      return handleStyle(url, req);
+    }
+    const v = url.pathname.match(VECTOR_RE);
+    if (v) {
+      return handleVectorTile(
+        { z: Number(v[1]), x: Number(v[2]), y: Number(v[3]) },
+        env,
+      );
+    }
 
     // GET /latest — pointer file for the most recent successful mirror.
     // Unauthenticated by design: read-only and the bucket itself isn't
