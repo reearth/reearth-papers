@@ -44,32 +44,10 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || 'dry-run-noop' }}
 
   container:
-    name: Container (cargo check + docker build)
+    name: Container (docker build)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: container
     steps:
       - uses: actions/checkout@v4
-
-      # Pin Rust to the toolchain the container's Dockerfile installs
-      # (rustup default in the Dockerfile is 1.92.0). Keeping the host
-      # cargo check on the same channel avoids "compiles in CI, fails in
-      # container" surprises.
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.92.0"
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: container -> target
-          shared-key: container
-
-      # `cargo check` is a fast (~2 min) signal that the Rust code still
-      # builds against the locked deps. The full `cargo build --release`
-      # is reserved for the actual container build below.
-      - name: cargo check
-        run: cargo check --release
 
       # Docker buildx is used so the Dockerfile's BuildKit syntax
       # (`# syntax=docker/dockerfile:1.7`) is respected. We don't push

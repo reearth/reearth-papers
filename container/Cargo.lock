@@ -1437,7 +1437,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "paper-tile"
+name = "papers-tile"
 version = "0.1.0"
 dependencies = [
  "anyhow",

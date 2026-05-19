@@ -42,41 +42,41 @@ async fn main() -> anyhow::Result<()> {
         style_cache: Arc::new(RwLock::new(Default::default())),
     };
 
-    // Pre-warm maplibre's OpenGL context *before* binding 8080. Cloudflare
-    // Workers Containers marks the container "ready" as soon as
-    // defaultPort is listening and immediately forwards the first user
-    // request — so if prewarm runs in the background, the user request
-    // races prewarm at the GL pool and pays the wait anyway (~17 s
-    // measured). Blocking until prewarm completes makes CF wait for
-    // listen, but the user-visible first render then takes <1 s.
-    if let Some(url) = state.default_style_url.clone() {
-        let t0 = std::time::Instant::now();
-        match prewarm(&state, &url).await {
-            Ok(()) => tracing::info!(
-                "prewarm complete in {:.2}s (style={url})",
-                t0.elapsed().as_secs_f32()
-            ),
-            // Non-fatal: a bad STYLE_URL shouldn't keep the container
-            // from accepting requests with a working ?style= override.
-            Err(e) => tracing::warn!("prewarm failed (continuing anyway): {e:?}"),
-        }
-    } else {
-        tracing::info!("STYLE_URL not set, skipping prewarm");
-    }
-
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/tile/{z}/{x}/{y}", get(render_tile))
-        .with_state(state);
+        .with_state(state.clone());
 
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(8080);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("listening on {addr}");
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    // Prewarm maplibre's GL context in the background so Cloudflare
+    // Workers Containers' startup port-readiness check (~8 s default)
+    // sees the listener immediately. The first /tile request still
+    // serializes on `SingleThreadedRenderPool::global_pool()`, so it
+    // effectively waits for prewarm — but the container is alive and
+    // responsive to /health from the start.
+    if let Some(url) = state.default_style_url.clone() {
+        let state = state.clone();
+        tokio::spawn(async move {
+            let t0 = std::time::Instant::now();
+            match prewarm(&state, &url).await {
+                Ok(()) => tracing::info!(
+                    "prewarm complete in {:.2}s (style={url})",
+                    t0.elapsed().as_secs_f32()
+                ),
+                Err(e) => tracing::warn!("prewarm failed (continuing anyway): {e:?}"),
+            }
+        });
+    } else {
+        tracing::info!("STYLE_URL not set, skipping prewarm");
+    }
+
     axum::serve(listener, app).await?;
     Ok(())
 }
