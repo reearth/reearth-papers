@@ -234,7 +234,49 @@ Re-running the mirror manually (`POST /runs`) before the previous
 month's archive has aged out is fine; the workflow deletes only
 *older* archives after the new one completes.
 
-### 6. Container logs in the CF dashboard can drop your messages
+### 6. Headless rendering: Vulkan (lavapipe), not Xvfb + OpenGL
+
+A maplibre-native renderer on Linux can be wired up two ways:
+
+- **OpenGL through Xvfb + GLFW + llvmpipe.** Needs an X server inside
+  the container, a virtual framebuffer, and a Mesa GL software path.
+  The image bloats to ~350 MB and the entrypoint has to start Xvfb
+  before the binary.
+- **Vulkan + lavapipe (Mesa's CPU Vulkan ICD).** Surfaceless rendering
+  is native to Vulkan; no windowing system needed. Image stays around
+  ~150 MB and there's no entrypoint script.
+
+We use Vulkan. The relevant moving pieces:
+
+- `Cargo.toml`: `maplibre_native = { version = "=0.4.6", features = ["pool", "vulkan"] }`
+- `Dockerfile` runtime stage: installs `libvulkan1 mesa-vulkan-drivers`
+  and pins the Vulkan loader to lavapipe via
+  `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`. All other
+  GPU ICDs (intel/radeon/nouveau/asahi/virtio/gfxstream — ~84 MB
+  combined) and their `.so` files are deleted to keep the image lean.
+
+Two non-obvious traps in this setup:
+
+1. **The Dockerfile still installs X11 / GLFW / EGL dev libs in the
+   *builder* stage** (`libx11-dev libglfw3-dev libgl1-mesa-dev
+   libegl1-mesa-dev`). That's because maplibre-native's Linux CMake
+   unconditionally builds *both* the Vulkan and OpenGL/GLFW platform
+   layers regardless of which Rust feature is selected. CMake needs
+   the link-time symbols to resolve; nothing actually executes them
+   at runtime. Don't remove them from the builder stage thinking
+   they're dead weight.
+2. **`libx11-6` has to stay in the *runtime* stage too**, even though
+   Vulkan never touches it at runtime — `libmaplibre.so` is link-time
+   tied to libX11, so `dlopen` fails without it present. It's about
+   1 MB; just leave it.
+
+If you ever want to swap back to the OpenGL path (e.g. to debug a
+Vulkan-specific issue), you'd need to reintroduce Xvfb + an entrypoint
+script and switch the maplibre_native feature flag from `vulkan` to
+the default. Worth knowing exists; do not actually undertake unless
+you have a strong reason.
+
+### 7. Container logs in the CF dashboard can drop your messages
 
 We saw periods where stdout/stderr from inside the container did not
 appear in the dashboard logs view, even though the container was
