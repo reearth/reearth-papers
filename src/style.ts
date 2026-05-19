@@ -31,6 +31,11 @@ function isTheme(s: string): s is Theme {
 export function handleStyle(url: URL, request: Request): Response {
   const themeParam = url.searchParams.get("theme") ?? "light";
   const theme: Theme = isTheme(themeParam) ? themeParam : "light";
+  // ?minimal=1 omits glyphs + sprite and keeps only non-label/icon
+  // layers. Used for isolating network issues to the asset CDN —
+  // without it the container fetches ~50 MB of glyphs + sprite assets
+  // from protomaps.github.io before rendering.
+  const minimal = url.searchParams.get("minimal") === "1";
 
   // Build the vector tile URL on the same origin the style is served
   // from, so the style works on both `papers.reearth.land` and any
@@ -38,9 +43,14 @@ export function handleStyle(url: URL, request: Request): Response {
   const origin = new URL(request.url).origin;
   const tileUrl = `${origin}/v/{z}/{x}/{y}.mvt`;
 
-  const style = {
+  const allLayers = layers(SOURCE_NAME, namedTheme(theme), { lang: "en" });
+  const keptLayers = minimal
+    ? allLayers.filter((l) => l.type !== "symbol")
+    : allLayers;
+
+  const style: Record<string, unknown> = {
     version: 8,
-    name: `Protomaps Basemap: ${theme}`,
+    name: `Protomaps Basemap: ${theme}${minimal ? " (minimal)" : ""}`,
     sources: {
       [SOURCE_NAME]: {
         type: "vector",
@@ -52,10 +62,12 @@ export function handleStyle(url: URL, request: Request): Response {
           '<a href="https://protomaps.com">Protomaps</a> &copy; <a href="https://openstreetmap.org">OpenStreetMap</a>',
       },
     },
-    glyphs: `${ASSETS_BASE}/fonts/{fontstack}/{range}.pbf`,
-    sprite: `${ASSETS_BASE}/sprites/v4/${theme}`,
-    layers: layers(SOURCE_NAME, namedTheme(theme), { lang: "en" }),
+    layers: keptLayers,
   };
+  if (!minimal) {
+    style.glyphs = `${ASSETS_BASE}/fonts/{fontstack}/{range}.pbf`;
+    style.sprite = `${ASSETS_BASE}/sprites/v4/${theme}`;
+  }
 
   return new Response(JSON.stringify(style), {
     headers: {
