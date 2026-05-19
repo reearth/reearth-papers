@@ -52,6 +52,16 @@ class_name = "TileContainer"
 tag = "v1"
 new_sqlite_classes = ["TileContainer"]
 
+# Shared with the mirror worker — `papers-pmtiles-mirror` writes
+# `mirror/protomaps/{date}.pmtiles` and `mirror/protomaps/latest.json`
+# into this bucket, and the tile worker range-reads them here.
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "reearth-papers"
+
 [vars]
 # Default style to render when the client doesn't pass ?style=
-DEFAULT_STYLE_URL = "https://demotiles.maplibre.org/style.json"
+DEFAULT_STYLE_URL = "https://papers.reearth.land/style.json"
+# R2 prefix the mirror writes under. Must match
+# `mirror/wrangler.toml`'s MIRROR_PREFIX.
+MIRROR_PREFIX = "mirror/protomaps"

@@ -43,6 +43,31 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || 'dry-run-noop' }}
 
+  mirror:
+    name: Mirror worker (typecheck + wrangler dry-run)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mirror
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mirror/package-lock.json
+
+      - run: npm ci
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Wrangler dry-run
+        run: npm run deploy:dry-run
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || 'dry-run-noop' }}
+
   container:
     name: Container (docker build)
     runs-on: ubuntu-latest

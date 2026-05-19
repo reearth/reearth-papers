@@ -10,9 +10,11 @@
     "types": "wrangler types"
   },
   "dependencies": {
-    "@cloudflare/containers": "^0.3.4"
+    "@cloudflare/containers": "^0.3.4",
+    "pmtiles": "^4.4.1"
   },
   "devDependencies": {
+    "protomaps-themes-base": "^4.5.0",
     "typescript": "^6.0.3",
     "wrangler": "^4.58.0"
   }

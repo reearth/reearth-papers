@@ -4,7 +4,9 @@
  * Routes XYZ tile requests to a Workers Container running maplibre-native.
  * Path: /tile/{z}/{x}/{y}.png?style=<url>
  */
-import { Container, getContainer } from "@cloudflare/containers";
+import { Container } from "@cloudflare/containers";
+import { handleVectorTile } from "./pmtiles.js";
+import { handleStyle } from "./style.js";
 
 export class TileContainer extends Container<Env> {
   defaultPort = 8080;
@@ -23,6 +25,7 @@ export class TileContainer extends Container<Env> {
 }
 
 const TILE_RE = /^\/tile\/(\d+)\/(\d+)\/(\d+)\.png$/;
+const VECTOR_RE = /^\/v\/(\d+)\/(\d+)\/(\d+)\.mvt$/;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -30,6 +33,25 @@ export default {
 
     if (url.pathname === "/health") {
       return new Response("ok");
+    }
+
+    // Generated MapLibre style — see src/style.ts. `?theme=` selects
+    // among Protomaps' published themes (light/dark/white/black/
+    // grayscale); default is light.
+    if (url.pathname === "/style.json") {
+      return handleStyle(url, request);
+    }
+
+    // Vector tile passthrough from the mirrored Protomaps PMTiles
+    // archive. Lives on the same worker so the rendering container can
+    // fetch tiles via the same `papers.reearth.land` origin (one TLS
+    // session, no cross-domain CORS).
+    const v = url.pathname.match(VECTOR_RE);
+    if (v) {
+      return handleVectorTile(
+        { z: Number(v[1]), x: Number(v[2]), y: Number(v[3]) },
+        env,
+      );
     }
 
     const m = url.pathname.match(TILE_RE);
