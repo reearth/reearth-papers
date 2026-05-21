@@ -33,11 +33,37 @@ jobs:
 
       - run: npm ci
 
+      # Install buildx and alias `docker build` → `docker buildx build`,
+      # so the build wrangler triggers below goes through buildx and
+      # shares its in-memory layer cache with the warmup step.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          install: true
+
+      # Pre-warm buildx with the same context the `container` CI job
+      # exports to (scope=container). This pulls the slow apt + cargo
+      # layers from the GHA cache and seeds buildx's in-memory cache so
+      # wrangler's subsequent `docker build` only rebuilds layers that
+      # actually changed since the last CI run.
+      - name: Warm container build cache
+        uses: docker/build-push-action@v6
+        with:
+          context: container
+          file: container/Dockerfile
+          push: false
+          load: true
+          tags: reearth-papers-tilerenderer:cache-warmup
+          cache-from: type=gha,scope=container
+          cache-to: type=gha,scope=container,mode=max
+
       # `wrangler deploy` builds the container image from
       # `container/Dockerfile` on the GitHub runner (linux/amd64 native —
       # no QEMU), pushes it to Cloudflare's registry, and bumps the
-      # Worker. `scripts/deploy.sh` then polls until the new image is
-      # live so a failed rollout doesn't show as a green deploy.
+      # Worker. With buildx as the default builder and the warmup above,
+      # this build is mostly a cache lookup. `scripts/deploy.sh` then
+      # polls until the new image is live so a failed rollout doesn't
+      # show as a green deploy.
       - name: Deploy
         run: npm run deploy
         env:
