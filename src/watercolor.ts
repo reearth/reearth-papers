@@ -68,10 +68,12 @@ export async function handleWatercolorTile(
 
   const tile = await archive.getZxy(match.z, match.x, match.y);
   if (!tile) {
-    // 204 No Content rather than 404: clients (MapLibre) treat a 404
-    // as a hard error worth retrying, while 204 is treated as "this
-    // tile is empty" and rendered as a transparent gap.
-    return new Response(null, { status: 204 });
+    // 404 (not 204): MapLibre's raster source marks 404 tiles as
+    // "errored" and then findLoadedParent fills the hole with the
+    // nearest loaded ancestor (upscaled), which is what we want for
+    // Stamen's patchy high-zoom coverage. A 204 would be treated as
+    // a successful empty tile and leave a transparent gap instead.
+    return new Response("tile not in archive", { status: 404 });
   }
 
   return new Response(tile.data, {
