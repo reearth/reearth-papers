@@ -33,13 +33,14 @@ jobs:
 
       - run: npm ci
 
-      # Install buildx and alias `docker build` → `docker buildx build`,
-      # so the build wrangler triggers below goes through buildx and
-      # shares its in-memory layer cache with the warmup step.
+      # Create a buildx builder we can route wrangler's `docker build`
+      # through. Modern Docker (24+) already uses buildx as the default
+      # build backend, so selecting our builder via the BUILDX_BUILDER
+      # env below is enough — no `install: true` alias needed (which is
+      # deprecated upstream).
       - name: Set up Docker Buildx
+        id: buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          install: true
 
       # Pre-warm buildx with the same context the `container` CI job
       # exports to (scope=container). This pulls the slow apt + cargo
@@ -68,6 +69,9 @@ jobs:
         run: npm run deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Route wrangler's `docker build` through the buildx builder
+          # created above so it reuses the warmup step's layer cache.
+          BUILDX_BUILDER: ${{ steps.buildx.outputs.name }}
           # `CLOUDFLARE_ACCOUNT_ID` is required only when wrangler.toml
           # doesn't pin `account_id`. Setting it via secrets keeps the
           # config file environment-agnostic.
