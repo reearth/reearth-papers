@@ -18,6 +18,17 @@
     .meta select { margin-top: 6px; max-width: 240px; }
     .meta label { display: block; margin-top: 4px; }
     .meta .pending { color: #888; font-style: italic; }
+    .meta .copy {
+      display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
+    }
+    .meta .copy button {
+      font: inherit; font-size: 12px;
+      padding: 3px 8px; border: 1px solid #bbb;
+      background: #fff; border-radius: 4px; cursor: pointer;
+    }
+    .meta .copy button:hover { background: #f3f3f3; }
+    .meta .copy button:disabled { color: #aaa; cursor: default; }
+    .meta .copy button.copied { background: #d6f5d6; border-color: #84c084; }
   </style>
 </head>
 <body>
@@ -31,6 +42,10 @@
     <label><input type="checkbox" id="vector" />
       Render client-side (vector)
     </label>
+    <div class="copy">
+      <button id="copy-tilejson" disabled type="button">Copy TileJSON URL</button>
+      <button id="copy-xyz" disabled type="button">Copy XYZ URL</button>
+    </div>
   </div>
   <div id="map"></div>
   <script src="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"></script>
@@ -136,6 +151,61 @@
       sel.addEventListener('change', showSelected);
       vectorToggle.addEventListener('change', showSelected);
       showSelected();
+
+      // Copy buttons. TileJSON URL comes straight from the catalog
+      // entry; the XYZ URL is read out of the live TileJSON document
+      // (so format-flavoured tilesets like esa_worldcover yield their
+      // default extension automatically).
+      const copyTilejson = document.getElementById('copy-tilejson');
+      const copyXyz = document.getElementById('copy-xyz');
+
+      const flashCopied = (btn) => {
+        btn.classList.add('copied');
+        const orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => {
+          btn.classList.remove('copied');
+          btn.textContent = orig;
+        }, 1200);
+      };
+
+      const currentTilejsonUrl = () => {
+        const o = sel.selectedOptions[0];
+        return o ? new URL(o.dataset.tilejson, location.href).toString() : null;
+      };
+
+      copyTilejson.addEventListener('click', async () => {
+        const url = currentTilejsonUrl();
+        if (!url) return;
+        await navigator.clipboard.writeText(url);
+        flashCopied(copyTilejson);
+      });
+
+      copyXyz.addEventListener('click', async () => {
+        const tilejsonUrl = currentTilejsonUrl();
+        if (!tilejsonUrl) return;
+        copyXyz.disabled = true;
+        try {
+          const tj = await fetch(tilejsonUrl).then((r) => r.json());
+          const xyz = tj.tiles && tj.tiles[0];
+          if (!xyz) throw new Error('no tiles[] in TileJSON');
+          await navigator.clipboard.writeText(xyz);
+          flashCopied(copyXyz);
+        } catch (e) {
+          copyXyz.textContent = 'Failed';
+          setTimeout(() => { copyXyz.textContent = 'Copy XYZ URL'; }, 1500);
+        } finally {
+          copyXyz.disabled = false;
+        }
+      });
+
+      const refreshCopyButtons = () => {
+        const ready = !!sel.selectedOptions[0];
+        copyTilejson.disabled = !ready;
+        copyXyz.disabled = !ready;
+      };
+      sel.addEventListener('change', refreshCopyButtons);
+      refreshCopyButtons();
     }
 
     init();

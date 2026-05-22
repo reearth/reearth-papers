@@ -10,7 +10,7 @@
  *   /watercolor/{z}/{x}/{y}.jpg          — watercolor raster tiles (R2)
  *   /watercolor/tilejson.json            — TileJSON for the watercolor tiles
  *   /esa_worldcover_2021/{z}/{x}/{y}.{png,webp} — ESA WorldCover 2021 tiles
- *   /esa_worldcover_2021/tilejson.{png,webp}.json — TileJSON variants
+ *   /esa_worldcover_2021/tilejson.json   — TileJSON (?format=png|webp, default webp)
  *   /catalog.json                        — index of all tilesets
  *   /                                    — preview page (public/index.html)
  *
@@ -53,7 +53,6 @@ const STYLE_STYLE_RE = /^\/styles\/([a-z]+)\/style\.json$/;
 const VECTOR_RE = /^\/v\/(\d+)\/(\d+)\/(\d+)\.mvt$/;
 const WATERCOLOR_RE = /^\/watercolor\/(\d+)\/(\d+)\/(\d+)\.jpg$/;
 const ESA_TILE_RE = /^\/esa_worldcover_2021\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
-const ESA_TILEJSON_RE = /^\/esa_worldcover_2021\/tilejson\.(png|webp)\.json$/;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -92,9 +91,8 @@ export default {
     }
 
     // ESA WorldCover 2021 — on-the-fly tile composition from per-3° COGs.
-    const ej = url.pathname.match(ESA_TILEJSON_RE);
-    if (ej) {
-      return handleEsaWorldcoverTilejson(request, ej[1] as "png" | "webp");
+    if (url.pathname === "/esa_worldcover_2021/tilejson.json") {
+      return handleEsaWorldcoverTilejson(request);
     }
     const et = url.pathname.match(ESA_TILE_RE);
     if (et) {

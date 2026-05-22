@@ -31,3 +31,6 @@ dist/
 
 # Go builder binary (watercolor subproject)
 /mirror/watercolor/builder/builder
+
+# Build-overview scratch space (esa_worldcover_2021 mirror).
+/mirror/esa_worldcover_2021/.work/

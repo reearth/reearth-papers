@@ -49,11 +49,9 @@ export function handleWatercolorTilejson(request: Request): Response {
   });
 }
 
-export function handleEsaWorldcoverTilejson(
-  request: Request,
-  fmt: "png" | "webp",
-): Response {
-  const origin = new URL(request.url).origin;
+export function handleEsaWorldcoverTilejson(request: Request): Response {
+  const url = new URL(request.url);
+  const fmt = url.searchParams.get("format") === "png" ? "png" : "webp";
   return json({
     tilejson: "3.0.0",
     name: "ESA WorldCover 2021",
@@ -62,7 +60,7 @@ export function handleEsaWorldcoverTilejson(
       "rendered on-the-fly from per-3° COGs mirrored to R2.",
     attribution: ESA_WORLDCOVER_ATTRIBUTION,
     scheme: "xyz",
-    tiles: [`${origin}/esa_worldcover_2021/{z}/{x}/{y}.${fmt}`],
+    tiles: [`${url.origin}/esa_worldcover_2021/{z}/{x}/{y}.${fmt}`],
     // z<8 currently 404s; will be wired to a pre-baked overview.tif
     // mosaic in a follow-up. Clients overzoom from z=13 to the
     // configured display maxzoom.
