@@ -61,13 +61,13 @@ export function handleEsaWorldcoverTilejson(request: Request): Response {
     attribution: ESA_WORLDCOVER_ATTRIBUTION,
     scheme: "xyz",
     tiles: [`${url.origin}/esa_worldcover_2021/{z}/{x}/{y}.${fmt}`],
-    // z<8 currently 404s; will be wired to a pre-baked overview.tif
-    // mosaic in a follow-up. Clients overzoom from z=13 to the
-    // configured display maxzoom.
-    minzoom: 8,
+    // z<8 reads from a pre-baked global overview.tif (~1.78 km/px);
+    // z≥8 reads from the per-3° native COGs. Clients overzoom from
+    // z=13 to the configured display maxzoom.
+    minzoom: 0,
     maxzoom: 13,
     bounds: [-180, -60, 180, 84],
-    center: [0, 20, 8],
+    center: [0, 20, 2],
   });
 }
 
