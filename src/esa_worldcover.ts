@@ -357,6 +357,15 @@ async function paintGroup(
   }
 }
 
+function isFullyEmpty(rgba: Uint8Array): boolean {
+  // Scan the alpha channel only (every 4th byte). Bail on the first
+  // non-zero — typical land tiles short-circuit within the first row.
+  for (let i = 3; i < rgba.length; i += 4) {
+    if (rgba[i] !== 0) return false;
+  }
+  return true;
+}
+
 // -- encoders --------------------------------------------------------------
 
 // Workers' CompressionStream("deflate") emits zlib-wrapped data, which
@@ -473,7 +482,10 @@ async function encodeWebpRGBA(
 // Bump the version segment to invalidate cached renders after a
 // palette / sampling / encoder change. The 2021 dataset itself is
 // immutable, so no date component is needed.
-const TILE_CACHE_VERSION = 1;
+//
+// v2: empty-tile renders now 404 instead of returning a transparent
+//     image; bumping orphans the previously-cached transparents.
+const TILE_CACHE_VERSION = 2;
 
 function cacheKey(coords: TileCoords, fmt: EsaFormat): string {
   return `cache/esa_worldcover/v${TILE_CACHE_VERSION}/${fmt}/${coords.z}/${coords.x}/${coords.y}.${fmt}`;
@@ -519,6 +531,17 @@ export async function handleEsaWorldcoverTile(
   }
 
   const rgba = await renderTileRGBA(env, coords);
+
+  // 404 fully-empty tiles — matches the watercolor handler and lets
+  // MapLibre's raster source mark the tile as errored so it fills the
+  // hole with the nearest loaded ancestor instead of treating an empty
+  // tile as a real (transparent) layer pixel. We accept partially
+  // empty tiles (coastlines, dataset bounds) — only every-pixel-alpha-0
+  // counts as "no data".
+  if (isFullyEmpty(rgba)) {
+    return new Response("no data", { status: 404 });
+  }
+
   const encoded =
     fmt === "png"
       ? await encodePngRGBA(rgba, TILE_SIZE, TILE_SIZE)
