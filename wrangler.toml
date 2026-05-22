@@ -2,10 +2,6 @@ name = "reearth-papers"
 main = "src/index.ts"
 compatibility_date = "2026-01-09"
 
-# Pin the deploying account so CI doesn't accidentally publish to whatever
-# account the API token happens to be primarily scoped to.
-account_id = "6bec0134af3a47eff814c2581f42993f"
-
 [observability]
 enabled = true
 
