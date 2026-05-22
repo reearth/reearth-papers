@@ -12,7 +12,8 @@
  *   /esa_worldcover_2021/{z}/{x}/{y}.{png,webp} — ESA WorldCover 2021 tiles
  *   /esa_worldcover_2021/tilejson.json   — TileJSON (?format=png|webp, default webp)
  *   /catalog.json                        — index of all tilesets
- *   /                                    — preview page (public/index.html)
+ *   /viewer                              — preview page (public/viewer/index.html)
+ *   /                                    — temporary 302 → /viewer (LP TBD)
  *
  * `{theme}` is one of light / dark / white / black / grayscale.
  */
@@ -60,6 +61,13 @@ export default {
 
     if (url.pathname === "/health") {
       return new Response("ok");
+    }
+
+    // Temporary: root redirects to the preview viewer until a real
+    // landing page lands. Use 302 (not 301) so we can swap it for the
+    // LP without browsers caching the redirect forever.
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      return Response.redirect(`${url.origin}/viewer`, 302);
     }
 
     if (url.pathname === "/catalog.json") {
