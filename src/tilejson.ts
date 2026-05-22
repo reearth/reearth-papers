@@ -1,5 +1,6 @@
 // TileJSON 3.0.0 — https://github.com/mapbox/tilejson-spec/tree/master/3.0.0
 
+import { ESA_WORLDCOVER_ATTRIBUTION } from "./esa_worldcover.js";
 import type { Theme } from "./style.js";
 import { WATERCOLOR_ATTRIBUTION } from "./watercolor.js";
 
@@ -45,6 +46,30 @@ export function handleWatercolorTilejson(request: Request): Response {
     maxzoom: 18,
     bounds: BOUNDS,
     center: CENTER,
+  });
+}
+
+export function handleEsaWorldcoverTilejson(
+  request: Request,
+  fmt: "png" | "webp",
+): Response {
+  const origin = new URL(request.url).origin;
+  return json({
+    tilejson: "3.0.0",
+    name: "ESA WorldCover 2021",
+    description:
+      "ESA WorldCover 2021 v200 — 10 m global land-cover classification, " +
+      "rendered on-the-fly from per-3° COGs mirrored to R2.",
+    attribution: ESA_WORLDCOVER_ATTRIBUTION,
+    scheme: "xyz",
+    tiles: [`${origin}/esa_worldcover_2021/{z}/{x}/{y}.${fmt}`],
+    // z<8 currently 404s; will be wired to a pre-baked overview.tif
+    // mosaic in a follow-up. Clients overzoom from z=13 to the
+    // configured display maxzoom.
+    minzoom: 8,
+    maxzoom: 13,
+    bounds: [-180, -60, 180, 84],
+    center: [0, 20, 8],
   });
 }
 

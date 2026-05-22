@@ -55,6 +55,18 @@ export function handleCatalog(request: Request): Response {
       type: "raster",
       tilejson: `${origin}/watercolor/tilejson.json`,
     },
+    {
+      id: "esa-worldcover-2021-png",
+      name: "ESA WorldCover 2021 (PNG)",
+      type: "raster",
+      tilejson: `${origin}/esa_worldcover_2021/tilejson.png.json`,
+    },
+    {
+      id: "esa-worldcover-2021-webp",
+      name: "ESA WorldCover 2021 (WebP)",
+      type: "raster",
+      tilejson: `${origin}/esa_worldcover_2021/tilejson.webp.json`,
+    },
   ];
 
   return new Response(

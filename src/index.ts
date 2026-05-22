@@ -9,6 +9,8 @@
  *   /v/tilejson.json                     — TileJSON for the vector tiles
  *   /watercolor/{z}/{x}/{y}.jpg          — watercolor raster tiles (R2)
  *   /watercolor/tilejson.json            — TileJSON for the watercolor tiles
+ *   /esa_worldcover_2021/{z}/{x}/{y}.{png,webp} — ESA WorldCover 2021 tiles
+ *   /esa_worldcover_2021/tilejson.{png,webp}.json — TileJSON variants
  *   /catalog.json                        — index of all tilesets
  *   /                                    — preview page (public/index.html)
  *
@@ -25,9 +27,11 @@ import { Container, getContainer } from "@cloudflare/containers";
 const SHARD_COUNT = 4;
 import { lookupCachedTile, storeRenderedTile, tileCacheKey } from "./cache.js";
 import { handleCatalog } from "./catalog.js";
+import { handleEsaWorldcoverTile } from "./esa_worldcover.js";
 import { handleVectorTile } from "./pmtiles.js";
 import { handleStyle, isTheme, type Theme } from "./style.js";
 import {
+  handleEsaWorldcoverTilejson,
   handleRasterTilejson,
   handleVectorTilejson,
   handleWatercolorTilejson,
@@ -48,6 +52,8 @@ const STYLE_TILEJSON_RE = /^\/styles\/([a-z]+)\/tilejson\.json$/;
 const STYLE_STYLE_RE = /^\/styles\/([a-z]+)\/style\.json$/;
 const VECTOR_RE = /^\/v\/(\d+)\/(\d+)\/(\d+)\.mvt$/;
 const WATERCOLOR_RE = /^\/watercolor\/(\d+)\/(\d+)\/(\d+)\.jpg$/;
+const ESA_TILE_RE = /^\/esa_worldcover_2021\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
+const ESA_TILEJSON_RE = /^\/esa_worldcover_2021\/tilejson\.(png|webp)\.json$/;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -82,6 +88,22 @@ export default {
       return handleWatercolorTile(
         { z: Number(w[1]), x: Number(w[2]), y: Number(w[3]) },
         env,
+      );
+    }
+
+    // ESA WorldCover 2021 — on-the-fly tile composition from per-3° COGs.
+    const ej = url.pathname.match(ESA_TILEJSON_RE);
+    if (ej) {
+      return handleEsaWorldcoverTilejson(request, ej[1] as "png" | "webp");
+    }
+    const et = url.pathname.match(ESA_TILE_RE);
+    if (et) {
+      return handleEsaWorldcoverTile(
+        request,
+        env,
+        ctx,
+        { z: Number(et[1]), x: Number(et[2]), y: Number(et[3]) },
+        et[4] as "png" | "webp",
       );
     }
 

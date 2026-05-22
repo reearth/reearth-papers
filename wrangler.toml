@@ -9,6 +9,16 @@ account_id = "6bec0134af3a47eff814c2581f42993f"
 [observability]
 enabled = true
 
+# WebP encoder for the ESA WorldCover tile pipeline (@jsquash/webp).
+# Importing the `.wasm` resolves to a `WebAssembly.Module` instead of
+# triggering a runtime fetch, which is the only path that works inside
+# Workers (no filesystem, no `WebAssembly.instantiateStreaming` on a
+# bundler-relative URL). See `src/esa_worldcover.ts`.
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+fallthrough = true
+
 # Keep the workers.dev subdomain alive alongside the custom domain.
 # We need it because maplibre-native's libcurl (OpenSSL) was failing
 # TLS to `papers.reearth.land:443` from inside the container with
@@ -60,6 +70,10 @@ new_sqlite_classes = ["TileRenderer"]
 [[r2_buckets]]
 binding = "R2"
 bucket_name = "reearth-papers"
+# Use the real (remote) bucket even when running `wrangler dev`. The
+# tile pipeline reads ~hundreds of MB of mirrored data so local R2
+# emulation isn't practical to seed.
+remote = true
 
 [vars]
 # Default style to render when the client doesn't pass ?style=
