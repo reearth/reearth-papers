@@ -41,3 +41,12 @@ PART_SIZE = "52428800"
 # How many previous mirrored archives to keep around. The Workflow
 # deletes anything older than this after a successful upload.
 RETAIN_VERSIONS = "2"
+
+# Secrets (set via `wrangler secret put`, NOT in [vars]):
+#   MIRROR_TOKEN    — Bearer token guarding `POST /runs` + `GET /runs/{id}`
+#                     (operator-facing).
+#   INTERNAL_TOKEN  — Shared secret guarding `/style.json` and
+#                     `/protomaps/{z}/{x}/{y}.mvt`. Must match the
+#                     same-named secret on the main `reearth-papers`
+#                     worker, which appends it as `?token=` to the
+#                     style URL passed to the renderer container.

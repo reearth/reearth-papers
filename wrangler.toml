@@ -83,3 +83,10 @@ DEFAULT_STYLE_URL = "https://reearth-papers-mirror.reearth.workers.dev/style.jso
 # R2 prefix the Protomaps mirror writes under. Must match
 # `mirror/protomaps/wrangler.toml`'s MIRROR_PREFIX.
 MIRROR_PREFIX = "mirror/protomaps"
+
+# `INTERNAL_TOKEN` is a Wrangler secret (not in [vars]). It must match
+# the same-named secret on `reearth-papers-mirror`; the main worker
+# appends it as `?token=` to the style URL handed to the renderer
+# container so the mirror's `/style.json` and `/protomaps/...` endpoints
+# can reject anonymous requests. Set with:
+#   wrangler secret put INTERNAL_TOKEN

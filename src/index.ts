@@ -164,12 +164,16 @@ async function renderRasterTile(
   // The renderer container fetches its style from the mirror worker
   // (see CONTRIBUTING.md §1 — Workers Containers + maplibre-native).
   // The theme is selected via a query string on that URL.
-  const styleUrl = `${env.DEFAULT_STYLE_URL}?theme=${theme}`;
+  //
+  // Cache key uses the un-tokenised URL so rotating the shared secret
+  // doesn't invalidate every cached tile. The token is appended only
+  // for the actual fetch the container performs.
+  const styleUrlForCache = `${env.DEFAULT_STYLE_URL}?theme=${theme}`;
 
   // Two-layer cache (Cache API → R2). Key embeds a style hash + the
   // current PMTiles mirror date, so monthly mirror updates and style
   // edits invalidate exactly the tiles they should.
-  const key = await tileCacheKey(env, coords, styleUrl);
+  const key = await tileCacheKey(env, coords, styleUrlForCache);
   const cached = await lookupCachedTile(request, env, key);
   if (cached) return cached;
 
@@ -180,6 +184,8 @@ async function renderRasterTile(
   const shard = tileShard(coords);
   const container = getContainer(env.TILE_CONTAINER, `shard-${shard}`);
   const inner = new URL(`http://container/tile/${coords.z}/${coords.x}/${coords.y}`);
+  const styleUrl =
+    `${styleUrlForCache}&token=${encodeURIComponent(env.INTERNAL_TOKEN)}`;
   inner.searchParams.set("style", styleUrl);
   const upstream = await container.fetch(inner.toString(), {
     method: "GET",

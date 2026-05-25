@@ -28,7 +28,7 @@ function isTheme(s: string): s is Theme {
   return VALID_THEMES.has(s as Theme);
 }
 
-export function handleStyle(url: URL, request: Request): Response {
+export function handleStyle(url: URL, env: Env): Response {
   const themeParam = url.searchParams.get("theme") ?? "light";
   const theme: Theme = isTheme(themeParam) ? themeParam : "light";
   // ?minimal=1 omits glyphs + sprite and keeps only non-label/icon
@@ -42,7 +42,14 @@ export function handleStyle(url: URL, request: Request): Response {
   // `papers.reearth.land:443` (SSL_ERROR_SYSCALL) while reqwest/rustls
   // on the same URL worked, so routing the tile fetches through the
   // mirror's workers.dev cert chain sidesteps the issue.
-  const tileUrl = "https://reearth-papers-mirror.reearth.workers.dev/v/{z}/{x}/{y}.mvt";
+  //
+  // The `?token=` query is the same secret the caller used to fetch
+  // this style — the loopback proxy in the renderer container
+  // preserves query strings, so embedding it here is enough to keep
+  // tile fetches authenticated end-to-end.
+  const token = encodeURIComponent(env.INTERNAL_TOKEN);
+  const tileUrl =
+    `https://reearth-papers-mirror.reearth.workers.dev/protomaps/{z}/{x}/{y}.mvt?token=${token}`;
 
   const allLayers = layers(SOURCE_NAME, namedTheme(theme), { lang: "en" });
   const keptLayers = minimal

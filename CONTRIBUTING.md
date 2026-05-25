@@ -27,9 +27,9 @@ flowchart TD
 
   subgraph mirror["reearth-papers-mirror (Worker)"]
     direction TB
-    m_style["/style.json?theme=..."]
-    m_v["/v/&#123;z&#125;/&#123;x&#125;/&#123;y&#125;.mvt"]
-    m_latest["/latest"]
+    m_style["/style.json?theme=...&token=...<br/>(INTERNAL_TOKEN gated)"]
+    m_v["/protomaps/&#123;z&#125;/&#123;x&#125;/&#123;y&#125;.mvt?token=...<br/>(INTERNAL_TOKEN gated)"]
+    m_runs["POST /runs · GET /runs/&#123;id&#125;<br/>(MIRROR_TOKEN gated)"]
   end
 
   subgraph r2["R2 bucket: reearth-papers"]
@@ -55,13 +55,15 @@ Two workers, one shared R2 bucket:
 | Worker                      | Where                                         | Job                                                                                                                       |
 |----------------------------|-----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
 | `reearth-papers`           | `papers.reearth.land` (custom domain)         | Public entry. Hosts the renderer container, the rendered-tile cache, and the static preview page.                          |
-| `reearth-papers-mirror`    | `reearth-papers-mirror.reearth.workers.dev`   | Monthly Workflow that snapshots Protomaps' daily PMTiles into R2. Also serves the `/style.json` + `/v` that the renderer container fetches from. |
+| `reearth-papers-mirror`    | `reearth-papers-mirror.reearth.workers.dev`   | Monthly Workflow that snapshots Protomaps' daily PMTiles into R2. Also serves the `/style.json` + `/protomaps/...` that the renderer container fetches from (gated by `INTERNAL_TOKEN`). |
 
-The mirror duplicates `/style.json` (and `/v`) on purpose. The renderer
-container has to source those from somewhere; routing it through the
-mirror's `workers.dev` hostname (rather than the main worker's custom
-domain) gave us a cleaner debugging surface while we were chasing the
-maplibre-native HTTP bug (see gotcha §1).
+The mirror duplicates `/style.json` (and `/protomaps`) on purpose. The
+renderer container has to source those from somewhere; routing it
+through the mirror's `workers.dev` hostname (rather than the main
+worker's custom domain) gave us a cleaner debugging surface while we
+were chasing the maplibre-native HTTP bug (see gotcha §1). Both
+endpoints are gated by `INTERNAL_TOKEN` (a shared secret) so the
+workers.dev hostname can't be abused as a free Protomaps tile CDN.
 
 ### Tile cache
 
@@ -86,11 +88,13 @@ Old cache entries are not actively cleaned — they're simply
 unreachable. If R2 storage becomes a concern, add a lifecycle rule on
 the `cache/tile/` prefix.
 
-The mirror duplicates `/style.json` (and `/v`) on purpose. The renderer
-container has to source those from somewhere; routing it through the
-mirror's `workers.dev` hostname (rather than the main worker's custom
-domain) gave us a cleaner debugging surface while we were chasing the
-maplibre-native HTTP bug (see gotcha §1).
+The mirror duplicates `/style.json` (and `/protomaps`) on purpose. The
+renderer container has to source those from somewhere; routing it
+through the mirror's `workers.dev` hostname (rather than the main
+worker's custom domain) gave us a cleaner debugging surface while we
+were chasing the maplibre-native HTTP bug (see gotcha §1). Both
+endpoints are gated by `INTERNAL_TOKEN` (a shared secret) so the
+workers.dev hostname can't be abused as a free Protomaps tile CDN.
 
 ## Repository layout
 
