@@ -16,8 +16,37 @@ permissions:
   deployments: write
 
 jobs:
+  # Deploy the mirror worker first. The main worker's renderer
+  # container fetches `/style.json` and `/protomaps/...` from the
+  # mirror, so any path/auth changes there need to land before the
+  # main deploy or tile rendering breaks mid-rollout.
+  mirror:
+    name: Deploy mirror worker
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: mirror/protomaps
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mirror/protomaps/package-lock.json
+
+      - run: npm ci
+
+      - name: Deploy mirror
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
   deploy:
     name: Deploy worker + container
+    needs: mirror
     runs-on: ubuntu-latest
     # GitHub Environment scopes the CLOUDFLARE_API_TOKEN to deploys and
     # (if configured) gates them behind required reviewers.
