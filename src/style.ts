@@ -1,5 +1,5 @@
 // Dynamically built MapLibre style backed by the Protomaps PMTiles
-// vector tiles served from this worker's `/v/{z}/{x}/{y}.mvt`. Clients
+// vector tiles served from this worker's `/protomaps/{z}/{x}/{y}.mvt`. Clients
 // can either render the style directly (full client-side vector path)
 // or use the rendered raster output via `/styles/{theme}/tile/...`.
 //
@@ -12,9 +12,7 @@ import { layers, namedTheme } from "protomaps-themes-base";
 
 const ASSETS_BASE = "https://protomaps.github.io/basemaps-assets";
 // Source name referenced by the generated layers — must match the
-// first argument passed to `layers(...)` below. We call it `v` so it
-// reads as a stable handle for the `/v/{z}/{x}/{y}.mvt` endpoint the
-// style points at.
+// first argument passed to `layers(...)` below.
 const SOURCE_NAME = "v";
 
 const ATTRIBUTION =
@@ -43,7 +41,7 @@ export function buildStyle(theme: Theme, origin: string): Record<string, unknown
     sources: {
       [SOURCE_NAME]: {
         type: "vector",
-        tiles: [`${origin}/v/{z}/{x}/{y}.mvt`],
+        tiles: [`${origin}/protomaps/{z}/{x}/{y}.mvt`],
         // Protomaps planet builds carry data through z15; downstream
         // overzoom handles anything tighter.
         maxzoom: 15,

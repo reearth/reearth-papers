@@ -47,7 +47,7 @@ export function handleCatalog(request: Request): Response {
       id: "protomaps-vector",
       name: "Protomaps Vector",
       type: "vector",
-      tilejson: `${origin}/v/tilejson.json`,
+      tilejson: `${origin}/protomaps/tilejson.json`,
     },
     {
       id: "watercolor",

@@ -5,8 +5,8 @@
  *   /styles/{theme}/tile/{z}/{x}/{y}.png — rendered raster tile
  *   /styles/{theme}/tilejson.json        — TileJSON for the above
  *   /styles/{theme}/style.json           — MapLibre style with that theme
- *   /v/{z}/{x}/{y}.mvt                   — mirrored Protomaps vector tiles
- *   /v/tilejson.json                     — TileJSON for the vector tiles
+ *   /protomaps/{z}/{x}/{y}.mvt           — mirrored Protomaps vector tiles
+ *   /protomaps/tilejson.json             — TileJSON for the vector tiles
  *   /watercolor/{z}/{x}/{y}.jpg          — watercolor raster tiles (R2)
  *   /watercolor/tilejson.json            — TileJSON for the watercolor tiles
  *   /esa_worldcover_2021/{z}/{x}/{y}.{png,webp} — ESA WorldCover 2021 tiles
@@ -51,7 +51,7 @@ export class TileRenderer extends Container<Env> {
 const STYLE_TILE_RE = /^\/styles\/([a-z]+)\/tile\/(\d+)\/(\d+)\/(\d+)\.png$/;
 const STYLE_TILEJSON_RE = /^\/styles\/([a-z]+)\/tilejson\.json$/;
 const STYLE_STYLE_RE = /^\/styles\/([a-z]+)\/style\.json$/;
-const VECTOR_RE = /^\/v\/(\d+)\/(\d+)\/(\d+)\.mvt$/;
+const VECTOR_RE = /^\/protomaps\/(\d+)\/(\d+)\/(\d+)\.mvt$/;
 const WATERCOLOR_RE = /^\/watercolor\/(\d+)\/(\d+)\/(\d+)\.jpg$/;
 const ESA_TILE_RE = /^\/esa_worldcover_2021\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
 
@@ -75,7 +75,7 @@ export default {
     }
 
     // Vector tile endpoints — theme-independent.
-    if (url.pathname === "/v/tilejson.json") {
+    if (url.pathname === "/protomaps/tilejson.json") {
       return handleVectorTilejson(request);
     }
     const v = url.pathname.match(VECTOR_RE);

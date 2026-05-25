@@ -12,7 +12,7 @@ flowchart TD
 
   subgraph main["reearth-papers (Worker)"]
     direction TB
-    main_routes["routes: /styles/&#123;theme&#125;/..., /v/..., assets"]
+    main_routes["routes: /styles/&#123;theme&#125;/..., /protomaps/..., assets"]
     cache["cache layer: Cache API → R2"]
     do["DurableObject: TileRenderer"]
     main_routes --> cache --> do

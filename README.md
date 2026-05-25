@@ -12,10 +12,10 @@ raster tiles across a curated set of styles.
   TileJSON 3.0.0 for the raster tiles (includes attribution).
 - `https://papers.reearth.land/styles/{theme}/style.json` — MapLibre
   style document with the theme baked in.
-- `https://papers.reearth.land/v/{z}/{x}/{y}.mvt` — Protomaps vector
-  tiles, served directly from our mirror.
-- `https://papers.reearth.land/v/tilejson.json` — TileJSON for the
-  vector tiles.
+- `https://papers.reearth.land/protomaps/{z}/{x}/{y}.mvt` — Protomaps
+  vector tiles, served directly from our mirror.
+- `https://papers.reearth.land/protomaps/tilejson.json` — TileJSON for
+  the vector tiles.
 - `https://papers.reearth.land/watercolor/{z}/{x}/{y}.jpg` — Stamen
   Watercolor raster tiles (mirrored, frozen historical set).
 - `https://papers.reearth.land/watercolor/tilejson.json` — TileJSON

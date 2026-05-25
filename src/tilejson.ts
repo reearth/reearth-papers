@@ -79,7 +79,7 @@ export function handleVectorTilejson(request: Request): Response {
     description: "Protomaps daily basemap, mirrored to R2.",
     attribution: ATTRIBUTION,
     scheme: "xyz",
-    tiles: [`${origin}/v/{z}/{x}/{y}.mvt`],
+    tiles: [`${origin}/protomaps/{z}/{x}/{y}.mvt`],
     minzoom: 0,
     maxzoom: 15,
     bounds: BOUNDS,
