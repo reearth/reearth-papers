@@ -57,88 +57,121 @@ const ESA_TILE_RE = /^\/esa_worldcover_2021\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
-
-    if (url.pathname === "/health") {
-      return new Response("ok");
-    }
-
-    // Temporary: root redirects to the preview viewer until a real
-    // landing page lands. Use 302 (not 301) so we can swap it for the
-    // LP without browsers caching the redirect forever.
-    if (url.pathname === "/" || url.pathname === "/index.html") {
-      return Response.redirect(`${url.origin}/viewer`, 302);
-    }
-
-    if (url.pathname === "/catalog.json") {
-      return handleCatalog(request);
-    }
-
-    // Vector tile endpoints — theme-independent.
-    if (url.pathname === "/protomaps/tilejson.json") {
-      return handleVectorTilejson(request);
-    }
-    const v = url.pathname.match(VECTOR_RE);
-    if (v) {
-      return handleVectorTile(
-        { z: Number(v[1]), x: Number(v[2]), y: Number(v[3]) },
-        env,
-      );
-    }
-
-    // Watercolor raster passthrough + its TileJSON.
-    if (url.pathname === "/watercolor/tilejson.json") {
-      return handleWatercolorTilejson(request);
-    }
-    const w = url.pathname.match(WATERCOLOR_RE);
-    if (w) {
-      return handleWatercolorTile(
-        { z: Number(w[1]), x: Number(w[2]), y: Number(w[3]) },
-        env,
-      );
-    }
-
-    // ESA WorldCover 2021 — on-the-fly tile composition from per-3° COGs.
-    if (url.pathname === "/esa_worldcover_2021/tilejson.json") {
-      return handleEsaWorldcoverTilejson(request);
-    }
-    const et = url.pathname.match(ESA_TILE_RE);
-    if (et) {
-      return handleEsaWorldcoverTile(
-        request,
-        env,
-        ctx,
-        { z: Number(et[1]), x: Number(et[2]), y: Number(et[3]) },
-        et[4] as "png" | "webp",
-      );
-    }
-
-    // Themed routes. We validate the theme once at parse time and pass
-    // the narrowed type into the handlers.
-    const styleJson = url.pathname.match(STYLE_STYLE_RE);
-    if (styleJson) {
-      const theme = requireTheme(styleJson[1]);
-      return theme instanceof Response ? theme : handleStyle(theme, request);
-    }
-    const tilejson = url.pathname.match(STYLE_TILEJSON_RE);
-    if (tilejson) {
-      const theme = requireTheme(tilejson[1]);
-      return theme instanceof Response ? theme : handleRasterTilejson(request, theme);
-    }
-    const tile = url.pathname.match(STYLE_TILE_RE);
-    if (tile) {
-      const theme = requireTheme(tile[1]);
-      if (theme instanceof Response) return theme;
-      return renderRasterTile(request, env, ctx, theme, {
-        z: Number(tile[2]),
-        x: Number(tile[3]),
-        y: Number(tile[4]),
+    // Method gate: this is a read-only tile service. Anything other
+    // than GET or HEAD is bounced with 405 (and an `Allow` header so
+    // RFC-friendly clients don't have to guess).
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return new Response("method not allowed", {
+        status: 405,
+        headers: { allow: "GET, HEAD" },
       });
     }
 
-    return new Response("not found", { status: 404 });
+    // Normalise HEAD → GET so downstream handlers (the Cache API in
+    // particular — `cache.put` rejects non-GET requests) don't have to
+    // special-case it. The body is stripped before the response goes
+    // back to the client.
+    const isHead = request.method === "HEAD";
+    const response = await dispatch(
+      isHead ? new Request(request, { method: "GET" }) : request,
+      env,
+      ctx,
+    );
+    if (!isHead) return response;
+    return new Response(null, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
   },
 } satisfies ExportedHandler<Env>;
+
+async function dispatch(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+
+  if (url.pathname === "/health") {
+    return new Response("ok");
+  }
+
+  // Temporary: root redirects to the preview viewer until a real
+  // landing page lands. Use 302 (not 301) so we can swap it for the
+  // LP without browsers caching the redirect forever.
+  if (url.pathname === "/" || url.pathname === "/index.html") {
+    return Response.redirect(`${url.origin}/viewer`, 302);
+  }
+
+  if (url.pathname === "/catalog.json") {
+    return handleCatalog(request);
+  }
+
+  // Vector tile endpoints — theme-independent.
+  if (url.pathname === "/protomaps/tilejson.json") {
+    return handleVectorTilejson(request);
+  }
+  const v = url.pathname.match(VECTOR_RE);
+  if (v) {
+    return handleVectorTile(
+      { z: Number(v[1]), x: Number(v[2]), y: Number(v[3]) },
+      env,
+    );
+  }
+
+  // Watercolor raster passthrough + its TileJSON.
+  if (url.pathname === "/watercolor/tilejson.json") {
+    return handleWatercolorTilejson(request);
+  }
+  const w = url.pathname.match(WATERCOLOR_RE);
+  if (w) {
+    return handleWatercolorTile(
+      { z: Number(w[1]), x: Number(w[2]), y: Number(w[3]) },
+      env,
+    );
+  }
+
+  // ESA WorldCover 2021 — on-the-fly tile composition from per-3° COGs.
+  if (url.pathname === "/esa_worldcover_2021/tilejson.json") {
+    return handleEsaWorldcoverTilejson(request);
+  }
+  const et = url.pathname.match(ESA_TILE_RE);
+  if (et) {
+    return handleEsaWorldcoverTile(
+      request,
+      env,
+      ctx,
+      { z: Number(et[1]), x: Number(et[2]), y: Number(et[3]) },
+      et[4] as "png" | "webp",
+    );
+  }
+
+  // Themed routes. We validate the theme once at parse time and pass
+  // the narrowed type into the handlers.
+  const styleJson = url.pathname.match(STYLE_STYLE_RE);
+  if (styleJson) {
+    const theme = requireTheme(styleJson[1]);
+    return theme instanceof Response ? theme : handleStyle(theme, request);
+  }
+  const tilejson = url.pathname.match(STYLE_TILEJSON_RE);
+  if (tilejson) {
+    const theme = requireTheme(tilejson[1]);
+    return theme instanceof Response ? theme : handleRasterTilejson(request, theme);
+  }
+  const tile = url.pathname.match(STYLE_TILE_RE);
+  if (tile) {
+    const theme = requireTheme(tile[1]);
+    if (theme instanceof Response) return theme;
+    return renderRasterTile(request, env, ctx, theme, {
+      z: Number(tile[2]),
+      x: Number(tile[3]),
+      y: Number(tile[4]),
+    });
+  }
+
+  return new Response("not found", { status: 404 });
+}
 
 function tileShard(coords: { z: number; x: number; y: number }): number {
   // Cheap, deterministic 32-bit mix of the three coords. The exact

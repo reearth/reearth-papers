@@ -39,19 +39,25 @@ export default {
     // so a third party who discovers the workers.dev hostname can't
     // freeload tiles / style at our expense.
     if (url.pathname === "/style.json") {
+      if (req.method !== "GET" && req.method !== "HEAD") return methodNotAllowed("GET, HEAD");
       if (!internalAuthorized(url, env)) return new Response("unauthorized", { status: 401 });
-      return handleStyle(url, env);
+      return stripBodyIfHead(req, handleStyle(url, env));
     }
     const v = url.pathname.match(VECTOR_RE);
     if (v) {
+      if (req.method !== "GET" && req.method !== "HEAD") return methodNotAllowed("GET, HEAD");
       if (!internalAuthorized(url, env)) return new Response("unauthorized", { status: 401 });
-      return handleVectorTile(
-        { z: Number(v[1]), x: Number(v[2]), y: Number(v[3]) },
-        env,
+      return stripBodyIfHead(
+        req,
+        await handleVectorTile(
+          { z: Number(v[1]), x: Number(v[2]), y: Number(v[3]) },
+          env,
+        ),
       );
     }
 
-    if (req.method === "POST" && parts[0] === "runs" && parts.length === 1) {
+    if (parts[0] === "runs" && parts.length === 1) {
+      if (req.method !== "POST") return methodNotAllowed("POST");
       if (!opsAuthorized(req, env)) return json({ error: "unauthorized" }, 401);
       const body = await readJson(req).catch(() => ({}));
       const params = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
@@ -59,7 +65,8 @@ export default {
       return json({ id: instance.id, status: await instance.status() }, 202);
     }
 
-    if (req.method === "GET" && parts[0] === "runs" && parts.length === 2) {
+    if (parts[0] === "runs" && parts.length === 2) {
+      if (req.method !== "GET") return methodNotAllowed("GET");
       if (!opsAuthorized(req, env)) return json({ error: "unauthorized" }, 401);
       const id = parts[1] ?? "";
       const instance = await env.PMTILES_MIRROR.get(id);
@@ -107,5 +114,21 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json" },
+  });
+}
+
+function methodNotAllowed(allow: string): Response {
+  return new Response("method not allowed", {
+    status: 405,
+    headers: { allow },
+  });
+}
+
+function stripBodyIfHead(req: Request, response: Response): Response {
+  if (req.method !== "HEAD") return response;
+  return new Response(null, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
   });
 }
