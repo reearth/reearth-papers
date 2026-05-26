@@ -1,5 +1,6 @@
 // TileJSON 3.0.0 — https://github.com/mapbox/tilejson-spec/tree/master/3.0.0
 
+import { BLACKMARBLE_ATTRIBUTION } from "./blackmarble.js";
 import { ESA_WORLDCOVER_ATTRIBUTION } from "./esa_worldcover.js";
 import type { Theme } from "./style.js";
 import { WATERCOLOR_ATTRIBUTION } from "./watercolor.js";
@@ -68,6 +69,27 @@ export function handleEsaWorldcoverTilejson(request: Request): Response {
     maxzoom: 13,
     bounds: [-180, -60, 180, 84],
     center: [0, 20, 2],
+  });
+}
+
+export function handleBlackmarbleTilejson(request: Request): Response {
+  const url = new URL(request.url);
+  const fmt = url.searchParams.get("format") === "png" ? "png" : "webp";
+  return json({
+    tilejson: "3.0.0",
+    name: "Black Marble 2016",
+    description:
+      "NASA Earth Observatory's \"Earth at Night 2016\" (Suomi NPP VIIRS), " +
+      "rendered on-the-fly from a global 500 m / pixel COG mirrored to R2.",
+    attribution: BLACKMARBLE_ATTRIBUTION,
+    scheme: "xyz",
+    tiles: [`${url.origin}/blackmarble/{z}/{x}/{y}.${fmt}`],
+    // Source resolution (~500 m/px) tops out around Web Mercator z=8.
+    // Clients overzoom past that to the configured display maxzoom.
+    minzoom: 0,
+    maxzoom: 8,
+    bounds: BOUNDS,
+    center: CENTER,
   });
 }
 

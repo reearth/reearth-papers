@@ -11,6 +11,8 @@
  *   /watercolor/tilejson.json            — TileJSON for the watercolor tiles
  *   /esa_worldcover_2021/{z}/{x}/{y}.{png,webp} — ESA WorldCover 2021 tiles
  *   /esa_worldcover_2021/tilejson.json   — TileJSON (?format=png|webp, default webp)
+ *   /blackmarble/{z}/{x}/{y}.{png,webp}  — NASA Black Marble 2016 tiles
+ *   /blackmarble/tilejson.json           — TileJSON (?format=png|webp, default webp)
  *   /catalog.json                        — index of all tilesets
  *   /viewer                              — preview page (public/viewer/index.html)
  *   /                                    — temporary 302 → /viewer (LP TBD)
@@ -26,12 +28,14 @@ import { Container, getContainer } from "@cloudflare/containers";
 // different shards and render concurrently. Keep this ≤ max_instances
 // in wrangler.toml so CF can actually spin up that many.
 const SHARD_COUNT = 4;
+import { handleBlackmarbleTile } from "./blackmarble.js";
 import { lookupCachedTile, storeRenderedTile, tileCacheKey } from "./cache.js";
 import { handleCatalog } from "./catalog.js";
 import { handleEsaWorldcoverTile } from "./esa_worldcover.js";
 import { handleVectorTile } from "./pmtiles.js";
 import { handleStyle, isTheme, type Theme } from "./style.js";
 import {
+  handleBlackmarbleTilejson,
   handleEsaWorldcoverTilejson,
   handleRasterTilejson,
   handleVectorTilejson,
@@ -54,6 +58,7 @@ const STYLE_STYLE_RE = /^\/styles\/([a-z]+)\/style\.json$/;
 const VECTOR_RE = /^\/protomaps\/(\d+)\/(\d+)\/(\d+)\.mvt$/;
 const WATERCOLOR_RE = /^\/watercolor\/(\d+)\/(\d+)\/(\d+)\.jpg$/;
 const ESA_TILE_RE = /^\/esa_worldcover_2021\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
+const BLACKMARBLE_TILE_RE = /^\/blackmarble\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -144,6 +149,21 @@ async function dispatch(
       ctx,
       { z: Number(et[1]), x: Number(et[2]), y: Number(et[3]) },
       et[4] as "png" | "webp",
+    );
+  }
+
+  // Black Marble 2016 — on-the-fly tile rendering from a single global COG.
+  if (url.pathname === "/blackmarble/tilejson.json") {
+    return handleBlackmarbleTilejson(request);
+  }
+  const bm = url.pathname.match(BLACKMARBLE_TILE_RE);
+  if (bm) {
+    return handleBlackmarbleTile(
+      request,
+      env,
+      ctx,
+      { z: Number(bm[1]), x: Number(bm[2]), y: Number(bm[3]) },
+      bm[4] as "png" | "webp",
     );
   }
 

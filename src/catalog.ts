@@ -61,6 +61,12 @@ export function handleCatalog(request: Request): Response {
       type: "raster",
       tilejson: `${origin}/esa_worldcover_2021/tilejson.json`,
     },
+    {
+      id: "blackmarble-2016",
+      name: "NASA Black Marble 2016",
+      type: "raster",
+      tilejson: `${origin}/blackmarble/tilejson.json`,
+    },
   ];
 
   return new Response(

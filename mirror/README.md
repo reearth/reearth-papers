@@ -9,11 +9,13 @@ root Worker (`../src/`) then serves those archives to clients.
 | Protomaps           | monthly  | Cloudflare Workflow        | `mirror/protomaps/`            |
 | Watercolor          | one-shot | EC2 (us-east-1)            | `mirror/watercolor/`           |
 | ESA WorldCover 2021 | one-shot | local (bash + rclone + gdal)| `mirror/esa_worldcover_2021/` |
+| Black Marble 2016   | one-shot | local (bash + curl + gdal) | `mirror/blackmarble/`          |
 
 The split layout exists because the upstreams are fundamentally
 different — Protomaps publishes fresh PMTiles archives every day so
 we mirror them on a cron, Stamen Watercolor is a frozen historical
-raster set copied once from `long-term.cache.maps.stamen.com`, and
+raster set copied once from `long-term.cache.maps.stamen.com`,
 ESA WorldCover is a one-shot mirror of an AWS Open Data bucket that's
-small enough to drive from a laptop. See each subdirectory's README
-for the specifics.
+small enough to drive from a laptop, and Black Marble 2016 is a fixed
+set of 8 GeoTIFFs from NASA Earth Observatory mosaicked into a single
+COG. See each subdirectory's README for the specifics.

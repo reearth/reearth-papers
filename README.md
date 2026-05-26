@@ -20,6 +20,11 @@ raster tiles across a curated set of styles.
   Watercolor raster tiles (mirrored, frozen historical set).
 - `https://papers.reearth.land/watercolor/tilejson.json` — TileJSON
   for the watercolor tiles.
+- `https://papers.reearth.land/blackmarble/{z}/{x}/{y}.{png,webp}` —
+  NASA Black Marble 2016 nighttime-lights raster tiles, rendered
+  on-the-fly from a single global COG mirrored to R2.
+- `https://papers.reearth.land/blackmarble/tilejson.json` — TileJSON
+  for the Black Marble tiles (`?format=png|webp`, default `webp`).
 - `https://papers.reearth.land/catalog.json` — machine-readable index
   of every tileset exposed by the service (raster themes, vector,
   watercolor), with the TileJSON / style.json URL for each.
