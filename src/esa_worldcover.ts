@@ -604,6 +604,16 @@ function cacheKey(coords: TileCoords, fmt: EsaFormat): string {
   return `cache/esa_worldcover/v${TILE_CACHE_VERSION}/${fmt}/${coords.z}/${coords.x}/${coords.y}.${fmt}`;
 }
 
+// Cache-API key for the CF edge cache. The raw client request URL is
+// invariant across TILE_CACHE_VERSION bumps, so without stamping the
+// version onto the cache URL the edge would keep serving an old tile
+// even after we orphan its R2 sibling. Stamping rotates both layers.
+function edgeCacheRequest(request: Request): Request {
+  const url = new URL(request.url);
+  url.searchParams.set("__v", String(TILE_CACHE_VERSION));
+  return new Request(url.toString(), request);
+}
+
 function contentTypeFor(fmt: EsaFormat): string {
   return fmt === "png" ? "image/png" : "image/webp";
 }
@@ -621,7 +631,8 @@ export async function handleEsaWorldcoverTile(
 
   // Two-layer cache (edge → R2). The data is frozen so we cache long.
   const cache = caches.default;
-  const edge = await cache.match(request);
+  const cacheReq = edgeCacheRequest(request);
+  const edge = await cache.match(cacheReq);
   if (edge) return edge;
 
   const key = cacheKey(coords, fmt);
@@ -635,7 +646,7 @@ export async function handleEsaWorldcoverTile(
         "x-attribution": ESA_WORLDCOVER_ATTRIBUTION,
       },
     });
-    ctx.waitUntil(cache.put(request, response.clone()));
+    ctx.waitUntil(cache.put(cacheReq, response.clone()));
     return response;
   }
 
@@ -674,7 +685,7 @@ export async function handleEsaWorldcoverTile(
         env.R2.put(key, encoded, {
           httpMetadata: { contentType: contentTypeFor(fmt) },
         }),
-        cache.put(request, response.clone()),
+        cache.put(cacheReq, response.clone()),
       ]);
     })(),
   );

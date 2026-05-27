@@ -386,15 +386,21 @@ async function encodeWebpRGBA(
 
 // Bump to invalidate cached renders after a sampling / encoder change.
 // The 2016 mosaic itself is immutable, so no date component is needed.
-//
-// v2: v1 rendered raw YCbCr from the JPEG-in-TIFF COG as RGB, so
-//     tiles came out with a green/teal cast. A handful of v1 tiles
-//     were written to R2 from a `wrangler dev --remote` session
-//     (which writes the production bucket); bumping orphans them.
-const TILE_CACHE_VERSION = 2;
+const TILE_CACHE_VERSION = 1;
 
 function cacheKey(coords: TileCoords, fmt: BlackmarbleFormat): string {
   return `cache/blackmarble/v${TILE_CACHE_VERSION}/${fmt}/${coords.z}/${coords.x}/${coords.y}.${fmt}`;
+}
+
+// Cache-API key for the CF edge cache. We can't use the raw client
+// request, because that URL doesn't change when TILE_CACHE_VERSION
+// bumps — the edge would keep serving an old tile forever even after
+// we orphan its R2 sibling. Stamping the version onto the cache URL
+// rotates the edge alongside R2.
+function edgeCacheRequest(request: Request): Request {
+  const url = new URL(request.url);
+  url.searchParams.set("__v", String(TILE_CACHE_VERSION));
+  return new Request(url.toString(), request);
 }
 
 function contentTypeFor(fmt: BlackmarbleFormat): string {
@@ -413,7 +419,8 @@ export async function handleBlackmarbleTile(
   }
 
   const cache = caches.default;
-  const edge = await cache.match(request);
+  const cacheReq = edgeCacheRequest(request);
+  const edge = await cache.match(cacheReq);
   if (edge) return edge;
 
   const key = cacheKey(coords, fmt);
@@ -427,7 +434,7 @@ export async function handleBlackmarbleTile(
         "x-attribution": BLACKMARBLE_ATTRIBUTION,
       },
     });
-    ctx.waitUntil(cache.put(request, response.clone()));
+    ctx.waitUntil(cache.put(cacheReq, response.clone()));
     return response;
   }
 
@@ -453,7 +460,7 @@ export async function handleBlackmarbleTile(
         env.R2.put(key, encoded, {
           httpMetadata: { contentType: contentTypeFor(fmt) },
         }),
-        cache.put(request, response.clone()),
+        cache.put(cacheReq, response.clone()),
       ]);
     })(),
   );
