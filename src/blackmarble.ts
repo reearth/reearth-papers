@@ -386,7 +386,12 @@ async function encodeWebpRGBA(
 
 // Bump to invalidate cached renders after a sampling / encoder change.
 // The 2016 mosaic itself is immutable, so no date component is needed.
-const TILE_CACHE_VERSION = 1;
+//
+// v2: v1 rendered raw YCbCr from the JPEG-in-TIFF COG as RGB, so
+//     tiles came out with a green/teal cast. A handful of v1 tiles
+//     were written to R2 from a `wrangler dev --remote` session
+//     (which writes the production bucket); bumping orphans them.
+const TILE_CACHE_VERSION = 2;
 
 function cacheKey(coords: TileCoords, fmt: BlackmarbleFormat): string {
   return `cache/blackmarble/v${TILE_CACHE_VERSION}/${fmt}/${coords.z}/${coords.x}/${coords.y}.${fmt}`;
