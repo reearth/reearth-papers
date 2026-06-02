@@ -21,14 +21,24 @@ interface VectorTileset {
   tilejson: string;
 }
 
-interface PassthroughRaster {
+// A self-hosted raster without a per-theme MapLibre style (watercolor,
+// ESA WorldCover, Black Marble): we serve/render the tiles, but there's
+// no style.json to toggle into vector mode.
+interface HostedRaster {
   id: string;
   name: string;
   type: "raster";
   tilejson: string;
 }
 
-type Tileset = RasterTileset | VectorTileset | PassthroughRaster;
+// A raster whose tiles are served straight from an upstream provider
+// (not by us). Same shape as HostedRaster plus a `passthrough` flag so
+// clients (e.g. the viewer) can distinguish it from what we host.
+interface PassthroughRaster extends HostedRaster {
+  passthrough: true;
+}
+
+type Tileset = RasterTileset | VectorTileset | HostedRaster | PassthroughRaster;
 
 export function handleCatalog(request: Request): Response {
   const origin = new URL(request.url).origin;
@@ -76,6 +86,7 @@ export function handleCatalog(request: Request): Response {
         name: t.name,
         type: "raster",
         tilejson: `${origin}/${t.id}/tilejson.json`,
+        passthrough: true,
       }),
     ),
   ];

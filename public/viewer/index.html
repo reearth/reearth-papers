@@ -83,7 +83,10 @@
       for (const t of tilesets) {
         const opt = document.createElement('option');
         opt.value = t.id;
-        opt.textContent = t.name + '  (' + t.type + ')';
+        // Passthrough tilesets are served straight from an upstream
+        // provider — flag them so it's clear they aren't hosted by us.
+        const kind = t.passthrough ? t.type + ' · passthrough' : t.type;
+        opt.textContent = t.name + '  (' + kind + ')';
         opt.dataset.tilejson = t.tilejson;
         if (t.style) opt.dataset.style = t.style;
         opt.dataset.type = t.type;
