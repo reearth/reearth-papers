@@ -25,6 +25,12 @@ raster tiles across a curated set of styles.
   on-the-fly from a single global COG mirrored to R2.
 - `https://papers.reearth.land/blackmarble/tilejson.json` — TileJSON
   for the Black Marble tiles (`?format=png|webp`, default `webp`).
+- `https://papers.reearth.land/bluemarble/tilejson.json` — TileJSON for
+  NASA GIBS "Blue Marble: Next Generation" (a passthrough tileset: the
+  tiles are served directly from NASA's GIBS WMTS, not by us).
+- `https://papers.reearth.land/s2cloudless_2016/tilejson.json` —
+  TileJSON for EOX Sentinel-2 cloudless 2016 (CC BY 4.0; a passthrough
+  tileset served directly from EOX's WMTS).
 - `https://papers.reearth.land/catalog.json` — machine-readable index
   of every tileset exposed by the service (raster themes, vector,
   watercolor), with the TileJSON / style.json URL for each.

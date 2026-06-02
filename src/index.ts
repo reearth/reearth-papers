@@ -13,6 +13,8 @@
  *   /esa_worldcover_2021/tilejson.json   — TileJSON (?format=png|webp, default webp)
  *   /blackmarble/{z}/{x}/{y}.{png,webp}  — NASA Black Marble 2016 tiles
  *   /blackmarble/tilejson.json           — TileJSON (?format=png|webp, default webp)
+ *   /bluemarble/tilejson.json            — TileJSON (passthrough → NASA GIBS Blue Marble)
+ *   /s2cloudless_2016/tilejson.json      — TileJSON (passthrough → EOX Sentinel-2 cloudless 2016)
  *   /catalog.json                        — index of all tilesets
  *   /viewer                              — preview page (public/viewer/index.html)
  *   /                                    — temporary 302 → /viewer (LP TBD)
@@ -34,9 +36,11 @@ import { handleCatalog } from "./catalog.js";
 import { handleEsaWorldcoverTile } from "./esa_worldcover.js";
 import { handleVectorTile } from "./pmtiles.js";
 import { handleStyle, isTheme, type Theme } from "./style.js";
+import { PASSTHROUGH_BY_ID } from "./passthrough.js";
 import {
   handleBlackmarbleTilejson,
   handleEsaWorldcoverTilejson,
+  handlePassthroughTilejson,
   handleRasterTilejson,
   handleVectorTilejson,
   handleWatercolorTilejson,
@@ -59,6 +63,7 @@ const VECTOR_RE = /^\/protomaps\/(\d+)\/(\d+)\/(\d+)\.mvt$/;
 const WATERCOLOR_RE = /^\/watercolor\/(\d+)\/(\d+)\/(\d+)\.jpg$/;
 const ESA_TILE_RE = /^\/esa_worldcover_2021\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
 const BLACKMARBLE_TILE_RE = /^\/blackmarble\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
+const PASSTHROUGH_TILEJSON_RE = /^\/([a-z0-9_]+)\/tilejson\.json$/;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -165,6 +170,16 @@ async function dispatch(
       { z: Number(bm[1]), x: Number(bm[2]), y: Number(bm[3]) },
       bm[4] as "png" | "webp",
     );
+  }
+
+  // Passthrough tilesets — TileJSON only, `tiles` point at the upstream.
+  // Data-driven from src/passthrough.ts: /<id>/tilejson.json for any
+  // registered id. (Other tilesets' /…/tilejson.json routes are matched
+  // above, so they never reach this lookup.)
+  const pt = url.pathname.match(PASSTHROUGH_TILEJSON_RE);
+  if (pt) {
+    const def = PASSTHROUGH_BY_ID.get(pt[1]);
+    if (def) return handlePassthroughTilejson(def);
   }
 
   // Themed routes. We validate the theme once at parse time and pass

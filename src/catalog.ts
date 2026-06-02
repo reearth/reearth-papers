@@ -2,6 +2,7 @@
 // service exposes, with links to each one's TileJSON / style.json so
 // downstream tools can crawl the surface without hard-coding URLs.
 
+import { PASSTHROUGH_TILESETS } from "./passthrough.js";
 import { THEMES } from "./style.js";
 
 interface RasterTileset {
@@ -67,6 +68,16 @@ export function handleCatalog(request: Request): Response {
       type: "raster",
       tilejson: `${origin}/blackmarble/tilejson.json`,
     },
+    // Passthrough tilesets (TileJSON points at the upstream provider).
+    // Derived from the registry in src/passthrough.ts.
+    ...PASSTHROUGH_TILESETS.map(
+      (t): PassthroughRaster => ({
+        id: t.id,
+        name: t.name,
+        type: "raster",
+        tilejson: `${origin}/${t.id}/tilejson.json`,
+      }),
+    ),
   ];
 
   return new Response(

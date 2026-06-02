@@ -2,6 +2,7 @@
 
 import { BLACKMARBLE_ATTRIBUTION } from "./blackmarble.js";
 import { ESA_WORLDCOVER_ATTRIBUTION } from "./esa_worldcover.js";
+import type { PassthroughTileset } from "./passthrough.js";
 import type { Theme } from "./style.js";
 import { WATERCOLOR_ATTRIBUTION } from "./watercolor.js";
 
@@ -88,6 +89,25 @@ export function handleBlackmarbleTilejson(request: Request): Response {
     // Clients overzoom past that to the configured display maxzoom.
     minzoom: 0,
     maxzoom: 8,
+    bounds: BOUNDS,
+    center: CENTER,
+  });
+}
+
+// Passthrough tilesets — `tiles` point straight at the upstream
+// provider instead of a `${origin}/...` route. The set is data-driven:
+// see src/passthrough.ts (one entry per source). We serve no bytes and
+// store nothing in R2; attribution, baked in here, is all we own.
+export function handlePassthroughTilejson(def: PassthroughTileset): Response {
+  return json({
+    tilejson: "3.0.0",
+    name: def.name,
+    description: def.description,
+    attribution: def.attribution,
+    scheme: "xyz",
+    tiles: def.tiles,
+    minzoom: def.minzoom,
+    maxzoom: def.maxzoom,
     bounds: BOUNDS,
     center: CENTER,
   });
