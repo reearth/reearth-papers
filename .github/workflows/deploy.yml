@@ -70,6 +70,25 @@ jobs:
 
       - run: npm ci
 
+      # Resolve the Cloudflare account ID for the registry image
+      # reference. We can't rely on $CLOUDFLARE_ACCOUNT_ID being set
+      # (wrangler itself derives the account from the API token, so the
+      # secret may be empty) — an empty value would build a malformed
+      # `registry.cloudflare.com//<image>` ref. Fall back to `wrangler
+      # whoami`, which prints the 32-hex account ID.
+      - name: Resolve Cloudflare account ID
+        id: cf
+        run: |
+          ACCT="${CLOUDFLARE_ACCOUNT_ID:-}"
+          if [ -z "$ACCT" ]; then
+            ACCT=$(npx wrangler whoami 2>/dev/null | grep -oiE '[0-9a-f]{32}' | head -1)
+          fi
+          if [ -z "$ACCT" ]; then
+            echo "Could not resolve Cloudflare account ID" >&2
+            exit 1
+          fi
+          echo "account_id=$ACCT" >> "$GITHUB_OUTPUT"
+
       # The image is content-addressed by the git tree hash of
       # `container/` — the tag changes if and only if the container
       # sources do. So a worker-only push reuses the image that's
@@ -142,7 +161,7 @@ jobs:
       # and `--dry-run` still build the container locally.
       - name: Point wrangler at the pre-built image
         run: |
-          REF="registry.cloudflare.com/${CLOUDFLARE_ACCOUNT_ID}/${IMAGE_NAME}:${{ steps.tag.outputs.tag }}"
+          REF="registry.cloudflare.com/${{ steps.cf.outputs.account_id }}/${IMAGE_NAME}:${{ steps.tag.outputs.tag }}"
           sed -i.bak "s|^image = \"./container/Dockerfile\"|image = \"${REF}\"|" wrangler.toml
           rm -f wrangler.toml.bak
           echo "Using image: $(grep '^image =' wrangler.toml)"
