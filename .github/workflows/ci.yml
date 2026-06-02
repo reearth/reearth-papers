@@ -16,6 +16,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Detect whether the container sources changed, so the (slow) docker
+  # sanity build only runs when it can actually catch something.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      container: ${{ steps.filter.outputs.container }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            container:
+              - 'container/**'
+
   worker:
     name: Worker (typecheck + wrangler dry-run)
     runs-on: ubuntu-latest
@@ -75,6 +91,11 @@ jobs:
 
   container:
     name: Container (docker build)
+    needs: changes
+    # Only build when the container sources changed — the deploy
+    # workflow rebuilds + publishes the image on main, so this job is
+    # purely a pre-merge sanity check on the Dockerfile.
+    if: needs.changes.outputs.container == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

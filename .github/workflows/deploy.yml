@@ -51,8 +51,16 @@ jobs:
     # GitHub Environment scopes the CLOUDFLARE_API_TOKEN to deploys and
     # (if configured) gates them behind required reviewers.
     environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      IMAGE_NAME: reearth-papers-tilerenderer
     steps:
+      # Full history so we can diff `container/` against the previous
+      # push to decide whether the image needs rebuilding.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -62,46 +70,85 @@ jobs:
 
       - run: npm ci
 
-      # Create a buildx builder we can route wrangler's `docker build`
-      # through. Modern Docker (24+) already uses buildx as the default
-      # build backend, so selecting our builder via the BUILDX_BUILDER
-      # env below is enough — no `install: true` alias needed (which is
-      # deprecated upstream).
+      # The image is content-addressed by the git tree hash of
+      # `container/` — the tag changes if and only if the container
+      # sources do. So a worker-only push reuses the image that's
+      # already in the registry and never rebuilds it (this is what
+      # turns a routine deploy from ~minutes-of-docker into seconds).
+      - name: Compute image tag (container tree hash)
+        id: tag
+        run: echo "tag=$(git rev-parse "HEAD:container")" >> "$GITHUB_OUTPUT"
+
+      # Build iff the container actually changed in this push (or we
+      # can't tell — workflow_dispatch / first push / shallow before),
+      # with a registry existence check as a safety net so a missing
+      # image always triggers a build rather than a broken deploy.
+      - name: Decide whether to (re)build the image
+        id: decide
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          BEFORE="${{ github.event.before }}"
+          build=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            build=true
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            build=true
+          elif ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            build=true
+          elif ! git diff --quiet "$BEFORE" "${{ github.sha }}" -- container/; then
+            build=true
+          fi
+          if [ "$build" = "false" ]; then
+            if ! npx wrangler containers images list 2>/dev/null | grep -q "$TAG"; then
+              echo "Image ${IMAGE_NAME}:${TAG} not found in registry — will build."
+              build=true
+            fi
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "Build image: $build (tag $TAG)"
+
+      # buildx so the Dockerfile's BuildKit syntax is respected and the
+      # slow apt + cargo (maplibre-native) layers are reused from the
+      # GHA cache across runs. With the base image digest-pinned
+      # (container/Dockerfile), this cache is stable across unrelated
+      # Ubuntu security pushes.
       - name: Set up Docker Buildx
-        id: buildx
+        if: steps.decide.outputs.build == 'true'
         uses: docker/setup-buildx-action@v3
 
-      # Pre-warm buildx with the same context the `container` CI job
-      # exports to (scope=container). This pulls the slow apt + cargo
-      # layers from the GHA cache and seeds buildx's in-memory cache so
-      # wrangler's subsequent `docker build` only rebuilds layers that
-      # actually changed since the last CI run.
-      - name: Warm container build cache
+      - name: Build image
+        if: steps.decide.outputs.build == 'true'
         uses: docker/build-push-action@v6
         with:
           context: container
           file: container/Dockerfile
-          push: false
           load: true
-          tags: reearth-papers-tilerenderer:cache-warmup
+          tags: ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
           cache-from: type=gha,scope=container
           cache-to: type=gha,scope=container,mode=max
 
-      # `wrangler deploy` builds the container image from
-      # `container/Dockerfile` on the GitHub runner (linux/amd64 native —
-      # no QEMU), pushes it to Cloudflare's registry, and bumps the
-      # Worker. With buildx as the default builder and the warmup above,
-      # this build is mostly a cache lookup. `scripts/deploy.sh` then
-      # polls until the new image is live so a failed rollout doesn't
-      # show as a green deploy.
+      # Push the local image into Cloudflare's managed registry. wrangler
+      # handles registry auth; the resulting URI is
+      # registry.cloudflare.com/<account>/<image>:<tag>.
+      - name: Push image to Cloudflare registry
+        if: steps.decide.outputs.build == 'true'
+        run: npx wrangler containers push "${IMAGE_NAME}:${{ steps.tag.outputs.tag }}"
+
+      # Point wrangler at the pre-built image instead of the local
+      # Dockerfile, so `wrangler deploy` references the registry image
+      # and skips the container build entirely. We rewrite the committed
+      # `image = "./container/Dockerfile"` line at deploy time only —
+      # the repo keeps the Dockerfile reference so local `wrangler dev`
+      # and `--dry-run` still build the container locally.
+      - name: Point wrangler at the pre-built image
+        run: |
+          REF="registry.cloudflare.com/${CLOUDFLARE_ACCOUNT_ID}/${IMAGE_NAME}:${{ steps.tag.outputs.tag }}"
+          sed -i.bak "s|^image = \"./container/Dockerfile\"|image = \"${REF}\"|" wrangler.toml
+          rm -f wrangler.toml.bak
+          echo "Using image: $(grep '^image =' wrangler.toml)"
+
+      # `scripts/deploy.sh` runs `wrangler deploy` (no docker build now)
+      # and polls until the container rollout is live so a failed
+      # rollout doesn't show as a green deploy.
       - name: Deploy
         run: npm run deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          # Route wrangler's `docker build` through the buildx builder
-          # created above so it reuses the warmup step's layer cache.
-          BUILDX_BUILDER: ${{ steps.buildx.outputs.name }}
-          # `CLOUDFLARE_ACCOUNT_ID` is required only when wrangler.toml
-          # doesn't pin `account_id`. Setting it via secrets keeps the
-          # config file environment-agnostic.
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

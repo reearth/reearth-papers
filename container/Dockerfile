@@ -2,8 +2,16 @@
 # =============================================================================
 # Build stage — Rust compile with maplibre-native (Vulkan backend) deps
 # Ubuntu 24.04 ships glibc 2.39, which the maplibre-native prebuilts need.
+#
+# Pinned by digest, NOT just the `24.04` tag. Ubuntu re-publishes the
+# `24.04` tag on every security update; with a floating tag that silently
+# changes the base layer's digest, which cascades and invalidates every
+# downstream layer — including the ~13-min maplibre-native compile — even
+# when nothing in this repo changed. Pinning the digest keeps the build
+# cache stable across unrelated Ubuntu pushes; bump it deliberately
+# (Renovate keeps it current via PRs). Keep both FROM lines on one digest.
 # =============================================================================
-FROM ubuntu:24.04 AS builder
+FROM ubuntu:24.04@sha256:db6914f1ac0c566f57857641e2214e3f3e453cb340cc2c890ed6c2b7b81b8a00 AS builder
 
 WORKDIR /app
 
@@ -48,8 +56,9 @@ RUN touch src/main.rs && cargo build --release
 # No Xvfb, no X11, no OpenGL stack — Vulkan supports surfaceless rendering
 # natively, and lavapipe is Mesa's CPU Vulkan ICD. Shrinks the image from
 # ~350 MB (OpenGL+Xvfb path) to ~150 MB.
+# Digest-pinned for the same reason as the builder stage above.
 # =============================================================================
-FROM ubuntu:24.04
+FROM ubuntu:24.04@sha256:db6914f1ac0c566f57857641e2214e3f3e453cb340cc2c890ed6c2b7b81b8a00
 
 WORKDIR /app
 

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "enabledManagers": ["dockerfile", "github-actions"],
+  "dockerfile": {
+    "pinDigests": true
+  },
+  "packageRules": [
+    {
+      "description": "Keep the pinned ubuntu base digest current. The Dockerfile pins ubuntu:24.04 by digest so unrelated Ubuntu re-pushes can't bust the build cache; Renovate bumps the digest deliberately via PR.",
+      "matchManagers": ["dockerfile"],
+      "matchPackageNames": ["ubuntu"],
+      "groupName": "ubuntu base image"
+    }
+  ]
+}
