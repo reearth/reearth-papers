@@ -19,8 +19,9 @@ command -v gdal_translate >/dev/null || { echo "GDAL (gdal_translate) required" 
 WORK="${WORK:-${HERE}/../.work}"
 mkdir -p "$WORK"
 
-for name in "${DATASETS[@]}"; do
-  out_key=$(cog_key "$name")
+for ds in "${DATASETS[@]}"; do
+  name=$(dataset_name "$ds")
+  out_key=$(cog_key "$ds")
   if [ -z "${FORCE:-}" ] && wrangler_exists "$out_key"; then
     log "${out_key} already exists in R2 (set FORCE=1 to rebuild); skipping"
     continue

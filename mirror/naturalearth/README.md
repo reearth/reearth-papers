@@ -1,12 +1,12 @@
 # naturalearth
 
 One-shot, reproducible mirror of [Natural Earth](https://www.naturalearthdata.com/)
-1:10m raster datasets into the shared `reearth-papers` R2 bucket. Each
+raster datasets into the shared `reearth-papers` R2 bucket. Each
 dataset becomes a single Cloud Optimized GeoTIFF served by the root
 Worker as XYZ raster tiles (see `../../src/naturalearth.ts`).
 
 This pipeline runs **locally** — the upstream is a handful of public
-CDN zips (~300 MB each) and the build step (`gdal_translate -of COG`)
+CDN zips (50–400 MB each) and the build step (`gdal_translate -of COG`)
 is trivially available on a developer laptop. Cloudflare-side execution
 would save nothing.
 
@@ -14,10 +14,13 @@ would save nothing.
 
 | Upstream name       | R2 COG key              | What it is |
 |---------------------|-------------------------|------------|
-| `NE2_HR_LC_SR_W_DR` | `ne2_hr_lc_sr_w_dr.tif` | Natural Earth II — idealized world environment with softly blended colors, shaded relief, water, and drainages |
+| `NE1_HR_LC_SR_W_DR` | `ne1_hr_lc_sr_w_dr.tif` | Natural Earth I — satellite-derived land cover in a light natural palette, with shaded relief, water, drainages |
+| `NE2_HR_LC_SR_W_DR` | `ne2_hr_lc_sr_w_dr.tif` | Natural Earth II — idealized world environment with softly blended colors, shaded relief, water, drainages |
+| `HYP_HR_SR_OB_DR`   | `hyp_hr_sr_ob_dr.tif`   | Cross-blended hypsometric tints with shaded relief, ocean bottom, drainages |
+| `GRAY_HR_SR_OB_DR`  | `gray_hr_sr_ob_dr.tif`  | Gray Earth — monochromatic terrain (single-band grayscale) with relief, hypsography, ocean bottom, drainages |
+| `OB_50M`            | `ob_50m.tif`            | Ocean Bottom — CleanTOPO2-derived depth colors + relief (1:50m) |
 
-To mirror another 1:10m raster (e.g. `HYP_HR_SR_W_DR` cross-blended
-hypsometric tints, `GRAY_HR_SR_OB_DR` Gray Earth), append it to
+To mirror another raster, append its scale-qualified path to
 `DATASETS` in `scripts/_lib.sh`, re-run, and add a registry entry in
 `src/naturalearth.ts`.
 
@@ -25,19 +28,21 @@ hypsometric tints, `GRAY_HR_SR_OB_DR` Gray Earth), append it to
 
 - Host: `naciscdn.org` (NACIS-managed CDN, anonymous read) — the
   download buttons on naturalearthdata.com redirect there
-- Files: `https://naciscdn.org/naturalearth/10m/raster/<NAME>.zip`,
-  each containing `<NAME>.tif` + `.tfw`/`.prj` sidecars
-- Geometry (HR variants): 21600×10800 px, EPSG:4326, 1/60° per pixel
-  (~1.85 km at the equator), full global extent `[-180, -90, 180, 90]`
+- Files: `https://naciscdn.org/naturalearth/<scale>/raster/<NAME>.zip`,
+  each containing `<NAME>.tif` + `.tfw` (and usually `.prj`) sidecars
+- Geometry: EPSG:4326, full global extent `[-180, -90, 180, 90]`.
+  1:10m HR variants are 21600×10800 px at 1/60° per pixel (~1.85 km at
+  the equator); 1:50m is 10800×5400 px at 1/30° per pixel. Most are
+  3-band RGB; Gray Earth is single-band grayscale.
 - License: **public domain**. No attribution required; we credit
   "Made with Natural Earth" anyway.
 
 ## Output (in R2 under `mirror/naturalearth/`)
 
-| Key                     | Source       | Purpose                                |
-|-------------------------|--------------|----------------------------------------|
-| `ne2_hr_lc_sr_w_dr.tif` | this builder | global COG, EPSG:4326, JPEG-in-TIFF, internal overviews |
-| `manifest.json`         | this builder | provenance + COG geometry              |
+| Key                      | Source       | Purpose                                |
+|--------------------------|--------------|----------------------------------------|
+| `<dataset>.tif` (×5)     | this builder | global COG, EPSG:4326, JPEG-in-TIFF, internal overviews |
+| `manifest.json`          | this builder | provenance + COG geometry              |
 
 The COGs are the **only** archived form — XYZ tiles are rendered
 on-the-fly by the Worker, mirroring the Black Marble pattern.
@@ -46,9 +51,9 @@ on-the-fly by the Worker, mirroring the Black Marble pattern.
 
 | Item                                    | Est.        |
 |-----------------------------------------|-------------|
-| NACIS CDN GET (~311 MB per dataset)     | $0          |
+| NACIS CDN GET (~1.2 GB total)           | $0          |
 | R2 ingress                              | free        |
-| R2 Class A writes (2 PUTs)              | trivial     |
+| R2 Class A writes (6 PUTs)              | trivial     |
 | R2 storage @ $0.015 / GB / mo × ~0.2 GB | **~$0.01 / mo** |
 
 Re-runs are no-ops (the build short-circuits when the COG exists in

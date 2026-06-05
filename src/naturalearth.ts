@@ -36,9 +36,45 @@ export interface NaturalEarthRaster {
   r2Key: string;
   name: string;
   description: string;
+  /** Base IFD geometry — fixed by the mirror builder. Hard-coding lets
+   *  us pick the IFD synchronously without an extra metadata read. */
+  width: number;
+  pixelsPerDeg: number;
+  /** Max render zoom: the largest z whose target pixel density
+   *  (256 · 2^z / 360 px/deg) the base IFD still meets. Clients
+   *  overzoom from this cap. */
+  maxZoom: number;
+  /** Internal overview halvings below the base IFD (COG AUTO pyramid
+   *  down to ≤ one 512px block). */
+  overviewCount: number;
+  /** Raster bands: 3 = RGB (JPEG-in-TIFF stores YCbCr), 1 = grayscale. */
+  bands: 1 | 3;
 }
 
+// All sources share the plate-carrée full-globe frame.
+const ORIGIN_LON = -180;
+const ORIGIN_LAT = 90;
+
+// The 1:10m high-resolution grid: 21600×10800 at 1/60° per pixel
+// (~1.85 km at the equator) → max render z6 (45.5 px/deg target),
+// overviews 10800 … 337.
+const HR_10M = { width: 21600, pixelsPerDeg: 60, maxZoom: 6, overviewCount: 6 } as const;
+// The 1:50m grid: 10800×5400 at 1/30° per pixel → max render z5,
+// overviews 5400 … 337.
+const GRID_50M = { width: 10800, pixelsPerDeg: 30, maxZoom: 5, overviewCount: 5 } as const;
+
 export const NATURAL_EARTH_RASTERS: readonly NaturalEarthRaster[] = [
+  {
+    id: "ne1",
+    r2Key: "mirror/naturalearth/ne1_hr_lc_sr_w_dr.tif",
+    name: "Natural Earth I",
+    description:
+      "Natural Earth I (shaded relief, water, drainages) — " +
+      "satellite-derived land cover in a light, natural palette, " +
+      "rendered on-the-fly from a global ~1.85 km / pixel COG mirrored to R2.",
+    ...HR_10M,
+    bands: 3,
+  },
   {
     id: "ne2",
     r2Key: "mirror/naturalearth/ne2_hr_lc_sr_w_dr.tif",
@@ -47,36 +83,56 @@ export const NATURAL_EARTH_RASTERS: readonly NaturalEarthRaster[] = [
       "Natural Earth II (shaded relief, water, drainages) — the world " +
       "environment in an idealized, softly blended palette, rendered " +
       "on-the-fly from a global ~1.85 km / pixel COG mirrored to R2.",
+    ...HR_10M,
+    bands: 3,
+  },
+  {
+    id: "hypso",
+    r2Key: "mirror/naturalearth/hyp_hr_sr_ob_dr.tif",
+    name: "Cross-blended Hypsometric Tints",
+    description:
+      "Cross-blended hypsometric tints (shaded relief, ocean bottom, " +
+      "drainages) — elevation colors regionally blended by climate: " +
+      "humid lowlands green, arid lowlands brown. Rendered on-the-fly " +
+      "from a global ~1.85 km / pixel COG mirrored to R2.",
+    ...HR_10M,
+    bands: 3,
+  },
+  {
+    id: "grayearth",
+    r2Key: "mirror/naturalearth/gray_hr_sr_ob_dr.tif",
+    name: "Gray Earth",
+    description:
+      "Gray Earth (shaded relief, hypsography, ocean bottom, drainages) " +
+      "— monochromatic terrain emphasizing mountains and lowland " +
+      "micro-terrain. Rendered on-the-fly from a global ~1.85 km / pixel " +
+      "COG mirrored to R2.",
+    ...HR_10M,
+    bands: 1,
+  },
+  {
+    id: "oceanbottom",
+    r2Key: "mirror/naturalearth/ob_50m.tif",
+    name: "Ocean Bottom",
+    description:
+      "Ocean Bottom — blended depth colors and relief shading of the " +
+      "ocean floor derived from CleanTOPO2 (1:50m). Rendered on-the-fly " +
+      "from a global ~3.7 km / pixel COG mirrored to R2.",
+    ...GRID_50M,
+    bands: 3,
   },
 ];
 
 export const NATURAL_EARTH_BY_ID: ReadonlyMap<string, NaturalEarthRaster> =
   new Map(NATURAL_EARTH_RASTERS.map((d) => [d.id, d]));
 
-// Shared grid geometry — fixed by the mirror builder, identical for
-// every 1:10m HR raster. 21600×10800 at 1/60° per pixel, origin
-// top-left at (-180°E, 90°N). Hard-coding lets us pick the IFD
-// synchronously without an extra metadata read.
-const BASE_WIDTH = 21600;
-const BASE_PIXELS_PER_DEG = 60; // = 1 / 0.016666…
-const ORIGIN_LON = -180;
-const ORIGIN_LAT = 90;
-
-// Source is ~1.85 km/px → Web Mercator z=6 (45.5 px/deg target)
-// matches at the equator. Anything above oversamples; clients overzoom
-// from this cap.
-export const NATURAL_EARTH_MAX_ZOOM = 6;
-
-// COG overview pyramid: 10800, 5400, 2700, 1350, 675, 337 px wide —
-// 6 halvings below the base IFD.
-const OVERVIEW_COUNT = 6;
-
 // Match output Web Mercator pixel density to the closest COG IFD.
-// Target px/deg at zoom z = 256 · 2^z / 360; the base IFD is 60 px/deg
-// and each overview halves it. MAX_ZOOM - z lines the two halving
-// ladders up exactly: z=6 → base (45.5 → 60), z=5 → 30, … z=0 → 0.94.
-function pickOverviewLevel(z: number): number {
-  return Math.min(Math.max(NATURAL_EARTH_MAX_ZOOM - z, 0), OVERVIEW_COUNT);
+// Target px/deg at zoom z = 256 · 2^z / 360; the base IFD is
+// `pixelsPerDeg` and each overview halves it. maxZoom - z lines the
+// two halving ladders up exactly: for the 10m grid, z=6 → base
+// (45.5 → 60), z=5 → 30, … z=0 → 0.94.
+function pickOverviewLevel(def: NaturalEarthRaster, z: number): number {
+  return Math.min(Math.max(def.maxZoom - z, 0), def.overviewCount);
 }
 
 export const NATURAL_EARTH_ATTRIBUTION =
@@ -113,8 +169,8 @@ async function renderTileRGBA(
       lonLat[i * 2 + 1] = lat;
       // Source covers the full sphere; Web Mercator's polar cutoff
       // (±85.0511°) is already inside that, so every pixel reads.
-      const cx = (lon - ORIGIN_LON) * BASE_PIXELS_PER_DEG;
-      const cy = (ORIGIN_LAT - lat) * BASE_PIXELS_PER_DEG;
+      const cx = (lon - ORIGIN_LON) * def.pixelsPerDeg;
+      const cy = (ORIGIN_LAT - lat) * def.pixelsPerDeg;
       if (cx < minCx) minCx = cx;
       if (cy < minCy) minCy = cy;
       if (cx > maxCx) maxCx = cx;
@@ -123,7 +179,7 @@ async function renderTileRGBA(
   }
 
   const tiff = await fromCustomClient(new R2GeoTiffClient(env.R2, def.r2Key));
-  const level = pickOverviewLevel(coords.z);
+  const level = pickOverviewLevel(def, coords.z);
   // geotiff's getImage indexes IFDs in file order. COG writes base
   // first, then overviews largest→smallest, so `level` == IFD index.
   let image = await tiff.getImage(level);
@@ -133,7 +189,7 @@ async function renderTileRGBA(
 
   const ovW = image.getWidth();
   const ovH = image.getHeight();
-  const scale = ovW / BASE_WIDTH; // matches LANCZOS pyramid halvings
+  const scale = ovW / def.width; // matches LANCZOS pyramid halvings
 
   const wMinX = Math.max(0, Math.floor(minCx * scale));
   const wMinY = Math.max(0, Math.floor(minCy * scale));
@@ -142,24 +198,35 @@ async function renderTileRGBA(
   if (wMaxX <= wMinX || wMaxY <= wMinY) return out;
   const wWidth = wMaxX - wMinX;
 
-  // 3 bands interleaved over the window. The COG stores JPEG-compressed
-  // YCbCr (Photometric=6) but tags ColorInterp as R/G/B; geotiff.js
-  // returns the raw decoded YCbCr bytes either way, so we convert
-  // here via the standard JFIF formula (same as blackmarble.ts).
+  // Bands interleaved over the window. 3-band COGs store
+  // JPEG-compressed YCbCr (Photometric=6) but tag ColorInterp as
+  // R/G/B; geotiff.js returns the raw decoded YCbCr bytes either way,
+  // so we convert via the standard JFIF formula (same as
+  // blackmarble.ts). 1-band (grayscale) JPEG stays MINISBLACK — the
+  // decoded byte is the luminance directly.
   const data = (await image.readRasters({
     window: [wMinX, wMinY, wMaxX, wMaxY],
-    samples: [0, 1, 2],
+    samples: def.bands === 3 ? [0, 1, 2] : [0],
     interleave: true,
   })) as Uint8Array;
 
   for (let i = 0; i < TILE_SIZE * TILE_SIZE; i++) {
     const lon = lonLat[i * 2];
     const lat = lonLat[i * 2 + 1];
-    const cx = (lon - ORIGIN_LON) * BASE_PIXELS_PER_DEG * scale;
-    const cy = (ORIGIN_LAT - lat) * BASE_PIXELS_PER_DEG * scale;
+    const cx = (lon - ORIGIN_LON) * def.pixelsPerDeg * scale;
+    const cy = (ORIGIN_LAT - lat) * def.pixelsPerDeg * scale;
     const srcX = Math.floor(cx) - wMinX;
     const srcY = Math.floor(cy) - wMinY;
     if (srcX < 0 || srcY < 0 || srcX >= wWidth || srcY >= wMaxY - wMinY) continue;
+    const o = i * 4;
+    if (def.bands === 1) {
+      const v = data[srcY * wWidth + srcX];
+      out[o] = v;
+      out[o + 1] = v;
+      out[o + 2] = v;
+      out[o + 3] = 255;
+      continue;
+    }
     const s = (srcY * wWidth + srcX) * 3;
     const y = data[s];
     const cb = data[s + 1] - 128;
@@ -167,7 +234,6 @@ async function renderTileRGBA(
     const r = y + 1.402 * cr;
     const g = y - 0.344136 * cb - 0.714136 * cr;
     const b = y + 1.772 * cb;
-    const o = i * 4;
     out[o] = r < 0 ? 0 : r > 255 ? 255 : r;
     out[o + 1] = g < 0 ? 0 : g > 255 ? 255 : g;
     out[o + 2] = b < 0 ? 0 : b > 255 ? 255 : b;
@@ -215,7 +281,7 @@ export async function handleNaturalEarthTile(
   coords: TileCoords,
   fmt: NaturalEarthFormat,
 ): Promise<Response> {
-  if (coords.z > NATURAL_EARTH_MAX_ZOOM) {
+  if (coords.z > def.maxZoom) {
     return new Response("zoom above available range", { status: 404 });
   }
 

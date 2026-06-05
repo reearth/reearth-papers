@@ -4,7 +4,6 @@ import { BLACKMARBLE_ATTRIBUTION } from "./blackmarble.js";
 import { ESA_WORLDCOVER_ATTRIBUTION } from "./esa_worldcover.js";
 import {
   NATURAL_EARTH_ATTRIBUTION,
-  NATURAL_EARTH_MAX_ZOOM,
   type NaturalEarthRaster,
 } from "./naturalearth.js";
 import type { PassthroughTileset } from "./passthrough.js";
@@ -112,10 +111,10 @@ export function handleNaturalEarthTilejson(
     attribution: NATURAL_EARTH_ATTRIBUTION,
     scheme: "xyz",
     tiles: [`${url.origin}/${def.id}/{z}/{x}/{y}.${fmt}`],
-    // Source resolution (~1.85 km/px) tops out around Web Mercator z=6.
+    // Source resolution tops out at the dataset's max render zoom.
     // Clients overzoom past that to the configured display maxzoom.
     minzoom: 0,
-    maxzoom: NATURAL_EARTH_MAX_ZOOM,
+    maxzoom: def.maxZoom,
     bounds: BOUNDS,
     center: CENTER,
   });

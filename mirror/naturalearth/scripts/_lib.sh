@@ -7,19 +7,28 @@ R2_PREFIX="${R2_PREFIX:-mirror/naturalearth}"
 # Upstream: Natural Earth's raster downloads, served from the NACIS CDN
 # (the "Download" buttons on naturalearthdata.com 302 there). Anonymous
 # read, stable URLs. Public domain.
-SRC_BASE="https://naciscdn.org/naturalearth/10m/raster"
+SRC_ROOT="https://naciscdn.org/naturalearth"
 
-# Datasets to mirror, by upstream archive basename. Each NAME maps to
-# ${SRC_BASE}/${NAME}.zip containing ${NAME}.tif (+ .tfw/.prj). Adding
-# another 1:10m raster (e.g. HYP_HR_SR_W_DR, GRAY_HR_SR_OB_DR) is one
-# more entry here plus a registry entry in ../../src/naturalearth.ts.
+# Datasets to mirror, as scale-qualified upstream paths. Each entry
+# maps to ${SRC_ROOT}/${PATH}.zip containing $(basename PATH).tif
+# (+ .tfw/.prj). Adding another raster is one more entry here plus a
+# registry entry in ../../src/naturalearth.ts.
 DATASETS=(
-  NE2_HR_LC_SR_W_DR # Natural Earth II with shaded relief, water, drainages
+  10m/raster/NE1_HR_LC_SR_W_DR # Natural Earth I with shaded relief, water, drainages
+  10m/raster/NE2_HR_LC_SR_W_DR # Natural Earth II with shaded relief, water, drainages
+  10m/raster/HYP_HR_SR_OB_DR   # Cross-blended hypso with relief, ocean bottom, drainages
+  10m/raster/GRAY_HR_SR_OB_DR  # Gray Earth with relief, hypsography, ocean bottom, drainages
+  50m/raster/OB_50M            # Ocean Bottom (CleanTOPO2-derived depth colors + relief)
 )
+
+# Upstream archive basename for a DATASETS entry.
+dataset_name() {
+  basename "$1"
+}
 
 # R2 object key for a dataset's COG: lowercased upstream basename.
 cog_key() {
-  printf '%s.tif' "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  printf '%s.tif' "$(dataset_name "$1" | tr '[:upper:]' '[:lower:]')"
 }
 
 log() { printf '==> %s\n' "$*" >&2; }

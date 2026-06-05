@@ -13,8 +13,9 @@
  *   /esa_worldcover_2021/tilejson.json   — TileJSON (?format=png|webp, default webp)
  *   /blackmarble/{z}/{x}/{y}.{png,webp}  — NASA Black Marble 2016 tiles
  *   /blackmarble/tilejson.json           — TileJSON (?format=png|webp, default webp)
- *   /ne2/{z}/{x}/{y}.{png,webp}          — Natural Earth II tiles (registry-driven;
- *   /ne2/tilejson.json                     see src/naturalearth.ts for the id list)
+ *   /{ne1,ne2,hypso,grayearth,oceanbottom}/{z}/{x}/{y}.{png,webp}
+ *                                        — Natural Earth raster tiles (registry-
+ *   /{…}/tilejson.json                     driven; see src/naturalearth.ts)
  *   /bluemarble/tilejson.json            — TileJSON (passthrough → NASA GIBS Blue Marble)
  *   /s2cloudless_2016/tilejson.json      — TileJSON (passthrough → EOX Sentinel-2 cloudless 2016)
  *   /catalog.json                        — index of all tilesets

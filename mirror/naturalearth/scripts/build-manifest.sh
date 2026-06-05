@@ -19,15 +19,15 @@ TMP=$(mktemp -t naturalearth_manifest.XXXXXX)
 trap 'rm -f "$TMP"' EXIT
 
 cogs="[]"
-for name in "${DATASETS[@]}"; do
-  out_key=$(cog_key "$name")
+for ds in "${DATASETS[@]}"; do
+  out_key=$(cog_key "$ds")
   cog="${WORK}/${out_key}"
   [ -f "$cog" ] || { echo "missing ${cog} — run build-cog.sh first" >&2; exit 1; }
   info=$(gdalinfo -json "$cog")
   cogs=$(jq -n \
     --argjson cogs "$cogs" \
     --arg key "$out_key" \
-    --arg src "${SRC_BASE}/${name}.zip" \
+    --arg src "${SRC_ROOT}/${ds}.zip" \
     --argjson info "$info" '
     $cogs + [{
       key: $key,
@@ -44,12 +44,12 @@ done
 
 jq -n \
   --arg ts "$GENERATED_AT" \
-  --arg base "$SRC_BASE" \
+  --arg base "$SRC_ROOT" \
   --argjson cogs "$cogs" '
 {
   generated_at: $ts,
-  product: "Natural Earth 1:10m raster (NACIS CDN)",
-  source_page: "https://www.naturalearthdata.com/downloads/10m-raster-data/",
+  product: "Natural Earth raster (NACIS CDN)",
+  source_page: "https://www.naturalearthdata.com/downloads/",
   source_base: $base,
   cogs: $cogs,
   license: "public domain (Natural Earth)",

@@ -25,11 +25,13 @@ raster tiles across a curated set of styles.
   on-the-fly from a single global COG mirrored to R2.
 - `https://papers.reearth.land/blackmarble/tilejson.json` — TileJSON
   for the Black Marble tiles (`?format=png|webp`, default `webp`).
-- `https://papers.reearth.land/ne2/{z}/{x}/{y}.{png,webp}` — Natural
-  Earth II (shaded relief, water, drainages) raster tiles, rendered
-  on-the-fly from a global COG mirrored to R2 (public domain).
-- `https://papers.reearth.land/ne2/tilejson.json` — TileJSON for the
-  Natural Earth II tiles (`?format=png|webp`, default `webp`).
+- `https://papers.reearth.land/{ne1,ne2,hypso,grayearth,oceanbottom}/{z}/{x}/{y}.{png,webp}`
+  — Natural Earth raster tiles (Natural Earth I / II, cross-blended
+  hypsometric tints, Gray Earth, Ocean Bottom), rendered on-the-fly
+  from global COGs mirrored to R2 (public domain).
+- `https://papers.reearth.land/{ne1,ne2,hypso,grayearth,oceanbottom}/tilejson.json`
+  — TileJSON for the Natural Earth tiles (`?format=png|webp`, default
+  `webp`).
 - `https://papers.reearth.land/bluemarble/tilejson.json` — TileJSON for
   NASA GIBS "Blue Marble: Next Generation" (a passthrough tileset: the
   tiles are served directly from NASA's GIBS WMTS, not by us).

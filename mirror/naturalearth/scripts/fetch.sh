@@ -16,7 +16,8 @@ command -v unzip >/dev/null || { echo "unzip required" >&2; exit 1; }
 WORK="${WORK:-${HERE}/../.work}"
 mkdir -p "$WORK"
 
-for name in "${DATASETS[@]}"; do
+for ds in "${DATASETS[@]}"; do
+  name=$(dataset_name "$ds")
   zip="${WORK}/${name}.zip"
   tif="${WORK}/${name}.tif"
   if [ -f "$tif" ]; then
@@ -28,12 +29,15 @@ for name in "${DATASETS[@]}"; do
   # `--retry`/`--retry-delay` this survives transient hiccups. `-f`
   # makes HTTP errors exit non-zero.
   curl -fL --retry 5 --retry-delay 5 --continue-at - -o "$zip" \
-    "${SRC_BASE}/${name}.zip"
+    "${SRC_ROOT}/${ds}.zip"
   # Archives place the .tif either at the root or under a same-named
-  # directory depending on vintage; `-j` flattens both layouts.
+  # directory depending on vintage; `-j` flattens both layouts. Not all
+  # archives carry every sidecar (OB_50M ships only .tif/.tfw) — unzip
+  # exits 11 when a pattern matches nothing, which is fine as long as
+  # the .tif landed (checked below).
   log "unzip ${name}.zip"
   unzip -o -j "$zip" '*.tif' '*.tfw' '*.prj' '*.README*' '*VERSION*' \
-    -d "$WORK" >/dev/null
+    -d "$WORK" >/dev/null || [ $? -eq 11 ]
   [ -f "$tif" ] || { echo "expected ${tif} after unzip" >&2; exit 1; }
 done
 
