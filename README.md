@@ -1,71 +1,88 @@
 # Re:Earth Papers
 
-A tile service that renders OpenStreetMap (via Protomaps) into beautiful
-raster tiles across a curated set of styles.
+A tile service for beautiful, openly-licensed maps of the world:
+OpenStreetMap rendered into a curated set of raster styles, plus a
+growing shelf of global basemaps and thematic layers (Natural Earth,
+NASA, ESA, Stamen) mirrored into R2 and served — or rendered on the
+fly from COGs — at the edge.
+
+Browse everything at **<https://papers.reearth.land/viewer>**.
 
 ## Endpoints
 
-- `https://papers.reearth.land/` — interactive preview page.
-- `https://papers.reearth.land/styles/{theme}/tile/{z}/{x}/{y}.png` —
-  rendered raster tile.
-- `https://papers.reearth.land/styles/{theme}/tilejson.json` —
-  TileJSON 3.0.0 for the raster tiles (includes attribution).
-- `https://papers.reearth.land/styles/{theme}/style.json` — MapLibre
-  style document with the theme baked in.
-- `https://papers.reearth.land/protomaps/{z}/{x}/{y}.mvt` — Protomaps
-  vector tiles, served directly from our mirror.
-- `https://papers.reearth.land/protomaps/tilejson.json` — TileJSON for
-  the vector tiles.
-- `https://papers.reearth.land/watercolor/{z}/{x}/{y}.jpg` — Stamen
-  Watercolor raster tiles (mirrored, frozen historical set).
-- `https://papers.reearth.land/watercolor/tilejson.json` — TileJSON
-  for the watercolor tiles.
-- `https://papers.reearth.land/blackmarble/{z}/{x}/{y}.{png,webp}` —
-  NASA Black Marble 2016 nighttime-lights raster tiles, rendered
-  on-the-fly from a single global COG mirrored to R2.
-- `https://papers.reearth.land/blackmarble/tilejson.json` — TileJSON
-  for the Black Marble tiles (`?format=png|webp`, default `webp`).
-- `https://papers.reearth.land/{ne1,ne2,hypso,grayearth,oceanbottom}/{z}/{x}/{y}.{png,webp}`
-  — Natural Earth raster tiles (Natural Earth I / II, cross-blended
-  hypsometric tints, Gray Earth, Ocean Bottom), rendered on-the-fly
-  from global COGs mirrored to R2 (public domain).
-- `https://papers.reearth.land/{ne1,ne2,hypso,grayearth,oceanbottom}/tilejson.json`
-  — TileJSON for the Natural Earth tiles (`?format=png|webp`, default
-  `webp`).
-- `https://papers.reearth.land/bluemarble/tilejson.json` — TileJSON for
-  NASA GIBS "Blue Marble: Next Generation" (a passthrough tileset: the
-  tiles are served directly from NASA's GIBS WMTS, not by us).
-- `https://papers.reearth.land/s2cloudless_2016/tilejson.json` —
-  TileJSON for EOX Sentinel-2 cloudless 2016 (CC BY 4.0; a passthrough
-  tileset served directly from EOX's WMTS).
-- `https://papers.reearth.land/{id}.{tif,pmtiles}` — the underlying
-  single-file archive for datasets backed by exactly one COG or
-  PMTiles (`blackmarble.tif`, `ne1.tif` … `oceanbottom.tif`,
-  `watercolor.pmtiles`, `protomaps.pmtiles`). HTTP Range is supported,
-  so GIS clients can read them directly — e.g.
-  `gdalinfo /vsicurl/https://papers.reearth.land/ne2.tif` or the
-  `pmtiles://` protocol in MapLibre.
-- `https://papers.reearth.land/catalog.json` — machine-readable index
-  of every tileset exposed by the service (raster themes, vector,
-  watercolor), with the TileJSON / style.json URL for each (and the
-  `source` archive URL where one exists).
+Every tileset is reachable through the same URL shapes (`{id}` values
+are listed in the table below):
 
-`{theme}` is one of `light`, `dark`, `white`, `black`, `grayscale`.
+| URL | What it is |
+|---|---|
+| `/catalog.json` | Machine-readable index of every tileset: TileJSON URL, MapLibre style (themes), and the `source` archive URL where one exists. |
+| `/{id}/tilejson.json` | TileJSON 3.0.0 (`?format=png\|webp` on multi-format rasters; default `webp`). |
+| `/{id}/{z}/{x}/{y}.{ext}` | XYZ tiles in the tileset's format(s). |
+| `/{id}.{tif,pmtiles}` | The underlying single-file archive, with HTTP Range support — see [Direct archive access](#direct-archive-access). |
+| `/styles/{theme}/tile/{z}/{x}/{y}.png` | Rendered OSM raster tile. `{theme}` ∈ `light dark white black grayscale`. |
+| `/styles/{theme}/tilejson.json` | TileJSON for a rendered theme. |
+| `/styles/{theme}/style.json` | The theme's full MapLibre style, for client-side vector rendering. |
+| `/viewer` | Interactive preview of all of the above. |
+
+All responses are CORS-open (`access-control-allow-origin: *`).
+
+## Tilesets
+
+| `{id}` | Dataset | Format | Native max zoom | Archive | License |
+|---|---|---|---|---|---|
+| `styles/{theme}` | OpenStreetMap via Protomaps, 5 rendered themes | `png` | 15 | — | © OpenStreetMap contributors |
+| `protomaps` | Protomaps daily basemap, mirrored monthly | `mvt` | 15 | `protomaps.pmtiles` | © OpenStreetMap contributors |
+| `watercolor` | Stamen Watercolor (frozen historical set) | `jpg` | 18 | `watercolor.pmtiles` | CC BY 4.0 |
+| `esa_worldcover_2021` | ESA WorldCover 2021 v200 — 10 m land cover | `webp` `png` | 13 | — | CC BY 4.0 |
+| `blackmarble` | NASA Black Marble 2016 — Earth at night | `webp` `png` | 8 | `blackmarble.tif` | public domain |
+| `ne1` | Natural Earth I — natural-palette land cover + relief | `webp` `png` | 6 | `ne1.tif` | public domain |
+| `ne2` | Natural Earth II — idealized pre-modern world | `webp` `png` | 6 | `ne2.tif` | public domain |
+| `hypso` | Cross-blended hypsometric tints + relief + ocean bottom | `webp` `png` | 6 | `hypso.tif` | public domain |
+| `grayearth` | Gray Earth — monochrome terrain | `webp` `png` | 6 | `grayearth.tif` | public domain |
+| `oceanbottom` | Ocean Bottom — CleanTOPO2 depth colors (1:50m) | `webp` `png` | 5 | `oceanbottom.tif` | public domain |
+| `bluemarble` | NASA Blue Marble — passthrough to NASA GIBS WMTS | `jpeg` (upstream) | 8 | — | public domain |
+| `s2cloudless_2016` | EOX Sentinel-2 cloudless 2016 — passthrough to EOX WMTS | `jpg` (upstream) | 14 | — | CC BY 4.0 |
+
+Clients overzoom past each native max zoom automatically. Passthrough
+tilesets are TileJSON-only: the tiles are served by the upstream
+provider, not by us.
+
+The registry behind this table lives in
+[`src/tilesets.ts`](src/tilesets.ts) — adding a dataset is one entry
+there (plus a mirror pipeline under [`mirror/`](mirror/README.md) if
+we host the bytes).
+
+## Direct archive access
+
+Datasets backed by exactly one COG or PMTiles archive expose the file
+itself with HTTP Range support, so cloud-native GIS clients can skip
+the tile pipeline entirely:
+
+```sh
+# Open a COG straight from the service with GDAL / QGIS
+gdalinfo /vsicurl/https://papers.reearth.land/ne2.tif
+
+# Or consume a PMTiles archive in MapLibre via the pmtiles protocol
+pmtiles://https://papers.reearth.land/watercolor.pmtiles
+```
 
 ## Attribution
 
-Any product using these tiles must display:
-
-> Re:Earth Papers · Protomaps · © OpenStreetMap contributors
-
-The TileJSON / style.json documents above carry this in their
-`attribution` field already; most map clients render it automatically.
+Each tileset carries its required attribution in the TileJSON / style
+`attribution` field — most map clients render it automatically. If
+yours doesn't, display the attribution for the tilesets you use (e.g.
+for the rendered themes: *Re:Earth Papers · Protomaps ·
+© OpenStreetMap contributors*).
 
 ## Status
 
-PoC. The end-to-end path is live; expect ~10 s on the first cold
-request and 3–7 s thereafter. Subsequent renders of cached tiles are
-served from CF's edge cache (Cache API) or R2 in well under a second.
+PoC, but the end-to-end path is live. The rendered OSM themes go
+through a maplibre-native container: expect ~10 s on the first cold
+tile and 3–7 s while warm. Everything else is served or rendered
+in-Worker and is fast from the first request. Cached tiles come from
+Cloudflare's edge cache (or R2 for the persisted tilesets) in well
+under a second.
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development and
-deployment.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for architecture, local
+development, and deployment, and [`mirror/README.md`](mirror/README.md)
+for how the datasets get into R2.
