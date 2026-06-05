@@ -1,24 +1,16 @@
 // TileJSON 3.0.0 — https://github.com/mapbox/tilejson-spec/tree/master/3.0.0
 
-import { BLACKMARBLE_ATTRIBUTION } from "./blackmarble.js";
-import { ESA_WORLDCOVER_ATTRIBUTION } from "./esa_worldcover.js";
-import {
-  NATURAL_EARTH_ATTRIBUTION,
-  type NaturalEarthRaster,
-} from "./naturalearth.js";
-import type { PassthroughTileset } from "./passthrough.js";
 import type { Theme } from "./style.js";
-import { WATERCOLOR_ATTRIBUTION } from "./watercolor.js";
-
-const ATTRIBUTION = [
-  '<a href="https://papers.reearth.land">Re:Earth Papers</a>',
-  '<a href="https://protomaps.com">Protomaps</a>',
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-].join(" · ");
+import {
+  PROTOMAPS_ATTRIBUTION,
+  type TileFormat,
+  type TilesetDef,
+} from "./tilesets.js";
 
 const BOUNDS = [-180, -85.0511, 180, 85.0511];
 const CENTER = [0, 20, 2];
 
+// Themed OSM rasters — outside the tileset registry (see tilesets.ts).
 export function handleRasterTilejson(request: Request, theme: Theme): Response {
   const origin = new URL(request.url).origin;
   return json({
@@ -27,7 +19,7 @@ export function handleRasterTilejson(request: Request, theme: Theme): Response {
     description:
       "Beautiful raster tiles rendered from OpenStreetMap (Protomaps) " +
       "across a curated set of styles.",
-    attribution: ATTRIBUTION,
+    attribution: PROTOMAPS_ATTRIBUTION,
     scheme: "xyz",
     tiles: [`${origin}/styles/${theme}/tile/{z}/{x}/{y}.png`],
     minzoom: 0,
@@ -37,121 +29,35 @@ export function handleRasterTilejson(request: Request, theme: Theme): Response {
   });
 }
 
-export function handleWatercolorTilejson(request: Request): Response {
-  const origin = new URL(request.url).origin;
-  return json({
-    tilejson: "3.0.0",
-    name: "Re:Earth Papers — watercolor",
-    description:
-      "Stamen's Watercolor map tiles, snapshotted from the upstream " +
-      "long-term cache. Frozen historical raster set.",
-    attribution: WATERCOLOR_ATTRIBUTION,
-    scheme: "xyz",
-    tiles: [`${origin}/watercolor/{z}/{x}/{y}.jpg`],
-    minzoom: 0,
-    maxzoom: 18,
-    bounds: BOUNDS,
-    center: CENTER,
-  });
-}
-
-export function handleEsaWorldcoverTilejson(request: Request): Response {
+// Every registered tileset (see tilesets.ts). Self-hosted entries
+// advertise our own tile route in the requested format (?format=,
+// default = the entry's first format); passthrough entries advertise
+// the upstream's URLs directly.
+export function handleTilesetTilejson(request: Request, def: TilesetDef): Response {
   const url = new URL(request.url);
-  const fmt = url.searchParams.get("format") === "png" ? "png" : "webp";
-  return json({
-    tilejson: "3.0.0",
-    name: "ESA WorldCover 2021",
-    description:
-      "ESA WorldCover 2021 v200 — 10 m global land-cover classification, " +
-      "rendered on-the-fly from per-3° COGs mirrored to R2.",
-    attribution: ESA_WORLDCOVER_ATTRIBUTION,
-    scheme: "xyz",
-    tiles: [`${url.origin}/esa_worldcover_2021/{z}/{x}/{y}.${fmt}`],
-    // z<8 reads from a pre-baked global overview.tif (~1.78 km/px);
-    // z≥8 reads from the per-3° native COGs. Clients overzoom from
-    // z=13 to the configured display maxzoom.
-    minzoom: 0,
-    maxzoom: 13,
-    bounds: [-180, -60, 180, 84],
-    center: [0, 20, 2],
-  });
-}
-
-export function handleBlackmarbleTilejson(request: Request): Response {
-  const url = new URL(request.url);
-  const fmt = url.searchParams.get("format") === "png" ? "png" : "webp";
-  return json({
-    tilejson: "3.0.0",
-    name: "Black Marble 2016",
-    description:
-      "NASA Earth Observatory's \"Earth at Night 2016\" (Suomi NPP VIIRS), " +
-      "rendered on-the-fly from a global 500 m / pixel COG mirrored to R2.",
-    attribution: BLACKMARBLE_ATTRIBUTION,
-    scheme: "xyz",
-    tiles: [`${url.origin}/blackmarble/{z}/{x}/{y}.${fmt}`],
-    // Source resolution (~500 m/px) tops out around Web Mercator z=8.
-    // Clients overzoom past that to the configured display maxzoom.
-    minzoom: 0,
-    maxzoom: 8,
-    bounds: BOUNDS,
-    center: CENTER,
-  });
-}
-
-export function handleNaturalEarthTilejson(
-  request: Request,
-  def: NaturalEarthRaster,
-): Response {
-  const url = new URL(request.url);
-  const fmt = url.searchParams.get("format") === "png" ? "png" : "webp";
-  return json({
-    tilejson: "3.0.0",
-    name: def.name,
-    description: def.description,
-    attribution: NATURAL_EARTH_ATTRIBUTION,
-    scheme: "xyz",
-    tiles: [`${url.origin}/${def.id}/{z}/{x}/{y}.${fmt}`],
-    // Source resolution tops out at the dataset's max render zoom.
-    // Clients overzoom past that to the configured display maxzoom.
-    minzoom: 0,
-    maxzoom: def.maxZoom,
-    bounds: BOUNDS,
-    center: CENTER,
-  });
-}
-
-// Passthrough tilesets — `tiles` point straight at the upstream
-// provider instead of a `${origin}/...` route. The set is data-driven:
-// see src/passthrough.ts (one entry per source). We serve no bytes and
-// store nothing in R2; attribution, baked in here, is all we own.
-export function handlePassthroughTilejson(def: PassthroughTileset): Response {
+  let tiles: readonly string[];
+  if (def.upstreamTiles) {
+    tiles = def.upstreamTiles;
+  } else {
+    const formats = def.formats ?? [];
+    let fmt: TileFormat | undefined = formats[0];
+    const q = url.searchParams.get("format");
+    if (q && (formats as readonly string[]).includes(q)) fmt = q as TileFormat;
+    tiles = [`${url.origin}/${def.id}/{z}/{x}/{y}.${fmt}`];
+  }
   return json({
     tilejson: "3.0.0",
     name: def.name,
     description: def.description,
     attribution: def.attribution,
     scheme: "xyz",
-    tiles: def.tiles,
+    tiles,
+    // maxzoom is the source's native cap; clients overzoom past it to
+    // their configured display maxzoom.
     minzoom: def.minzoom,
     maxzoom: def.maxzoom,
-    bounds: BOUNDS,
-    center: CENTER,
-  });
-}
-
-export function handleVectorTilejson(request: Request): Response {
-  const origin = new URL(request.url).origin;
-  return json({
-    tilejson: "3.0.0",
-    name: "Re:Earth Papers — vector",
-    description: "Protomaps daily basemap, mirrored to R2.",
-    attribution: ATTRIBUTION,
-    scheme: "xyz",
-    tiles: [`${origin}/protomaps/{z}/{x}/{y}.mvt`],
-    minzoom: 0,
-    maxzoom: 15,
-    bounds: BOUNDS,
-    center: CENTER,
+    bounds: def.bounds ?? BOUNDS,
+    center: def.center ?? CENTER,
   });
 }
 

@@ -13,9 +13,9 @@
 // buffer, and encode as WebP (lossy) or PNG.
 //
 // The dataset set is registry-driven: adding another mirrored Natural
-// Earth raster is one `NATURAL_EARTH_RASTERS` entry (all 1:10m HR
-// variants share the same grid geometry) plus one `DATASETS` entry in
-// `mirror/naturalearth/scripts/_lib.sh`.
+// Earth raster is one `NATURAL_EARTH_RASTERS` entry here (picked up by
+// the central tileset registry in src/tilesets.ts) plus one `DATASETS`
+// entry in `mirror/naturalearth/scripts/_lib.sh`.
 
 import { fromCustomClient } from "geotiff";
 import { pixelToLonLat, R2GeoTiffClient, TILE_SIZE } from "./cog.js";
@@ -122,9 +122,6 @@ export const NATURAL_EARTH_RASTERS: readonly NaturalEarthRaster[] = [
     bands: 3,
   },
 ];
-
-export const NATURAL_EARTH_BY_ID: ReadonlyMap<string, NaturalEarthRaster> =
-  new Map(NATURAL_EARTH_RASTERS.map((d) => [d.id, d]));
 
 // Match output Web Mercator pixel density to the closest COG IFD.
 // Target px/deg at zoom z = 256 · 2^z / 360; the base IFD is

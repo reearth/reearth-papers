@@ -5,24 +5,16 @@
  *   /styles/{theme}/tile/{z}/{x}/{y}.png — rendered raster tile
  *   /styles/{theme}/tilejson.json        — TileJSON for the above
  *   /styles/{theme}/style.json           — MapLibre style with that theme
- *   /protomaps/{z}/{x}/{y}.mvt           — mirrored Protomaps vector tiles
- *   /protomaps/tilejson.json             — TileJSON for the vector tiles
- *   /watercolor/{z}/{x}/{y}.jpg          — watercolor raster tiles (R2)
- *   /watercolor/tilejson.json            — TileJSON for the watercolor tiles
- *   /esa_worldcover_2021/{z}/{x}/{y}.{png,webp} — ESA WorldCover 2021 tiles
- *   /esa_worldcover_2021/tilejson.json   — TileJSON (?format=png|webp, default webp)
- *   /blackmarble/{z}/{x}/{y}.{png,webp}  — NASA Black Marble 2016 tiles
- *   /blackmarble/tilejson.json           — TileJSON (?format=png|webp, default webp)
- *   /{ne1,ne2,hypso,grayearth,oceanbottom}/{z}/{x}/{y}.{png,webp}
- *                                        — Natural Earth raster tiles (registry-
- *   /{…}/tilejson.json                     driven; see src/naturalearth.ts)
- *   /bluemarble/tilejson.json            — TileJSON (passthrough → NASA GIBS Blue Marble)
- *   /s2cloudless_2016/tilejson.json      — TileJSON (passthrough → EOX Sentinel-2 cloudless 2016)
+ *   /{id}/{z}/{x}/{y}.{ext}              — tiles for every registered tileset
+ *   /{id}/tilejson.json                  — TileJSON (?format= where multi-format)
  *   /catalog.json                        — index of all tilesets
  *   /viewer                              — preview page (public/viewer/index.html)
  *   /                                    — temporary 302 → /viewer (LP TBD)
  *
  * `{theme}` is one of light / dark / white / black / grayscale.
+ * `{id}` and `{ext}` are data-driven from the central tileset registry
+ * (src/tilesets.ts) — adding a dataset is one entry there; the tile
+ * route, TileJSON route, and catalog entry all derive from it.
  */
 import { Container, getContainer } from "@cloudflare/containers";
 
@@ -33,24 +25,11 @@ import { Container, getContainer } from "@cloudflare/containers";
 // different shards and render concurrently. Keep this ≤ max_instances
 // in wrangler.toml so CF can actually spin up that many.
 const SHARD_COUNT = 4;
-import { handleBlackmarbleTile } from "./blackmarble.js";
 import { lookupCachedTile, storeRenderedTile, tileCacheKey } from "./cache.js";
 import { handleCatalog } from "./catalog.js";
-import { handleEsaWorldcoverTile } from "./esa_worldcover.js";
-import { handleNaturalEarthTile, NATURAL_EARTH_BY_ID } from "./naturalearth.js";
-import { handleVectorTile } from "./pmtiles.js";
 import { handleStyle, isTheme, type Theme } from "./style.js";
-import { PASSTHROUGH_BY_ID } from "./passthrough.js";
-import {
-  handleBlackmarbleTilejson,
-  handleEsaWorldcoverTilejson,
-  handleNaturalEarthTilejson,
-  handlePassthroughTilejson,
-  handleRasterTilejson,
-  handleVectorTilejson,
-  handleWatercolorTilejson,
-} from "./tilejson.js";
-import { handleWatercolorTile } from "./watercolor.js";
+import { handleRasterTilejson, handleTilesetTilejson } from "./tilejson.js";
+import { TILESETS_BY_ID, type TileFormat } from "./tilesets.js";
 
 export class TileRenderer extends Container<Env> {
   defaultPort = 8080;
@@ -64,17 +43,10 @@ export class TileRenderer extends Container<Env> {
 const STYLE_TILE_RE = /^\/styles\/([a-z]+)\/tile\/(\d+)\/(\d+)\/(\d+)\.png$/;
 const STYLE_TILEJSON_RE = /^\/styles\/([a-z]+)\/tilejson\.json$/;
 const STYLE_STYLE_RE = /^\/styles\/([a-z]+)\/style\.json$/;
-const VECTOR_RE = /^\/protomaps\/(\d+)\/(\d+)\/(\d+)\.mvt$/;
-const WATERCOLOR_RE = /^\/watercolor\/(\d+)\/(\d+)\/(\d+)\.jpg$/;
-const ESA_TILE_RE = /^\/esa_worldcover_2021\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
-const BLACKMARBLE_TILE_RE = /^\/blackmarble\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
-// Generic raster-tile shape, resolved against the Natural Earth
-// registry (src/naturalearth.ts). The named tilesets above are matched
-// first, so they never reach this lookup.
-const NATURALEARTH_TILE_RE = /^\/([a-z0-9_]+)\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
-// Generic tilejson shape, resolved against the Natural Earth registry
-// first, then the passthrough registry (src/passthrough.ts).
-const GENERIC_TILEJSON_RE = /^\/([a-z0-9_]+)\/tilejson\.json$/;
+// Tile + TileJSON shapes for every registered tileset, resolved
+// against the central registry (src/tilesets.ts).
+const TILESET_TILE_RE = /^\/([a-z0-9_]+)\/(\d+)\/(\d+)\/(\d+)\.([a-z]+)$/;
+const TILESET_TILEJSON_RE = /^\/([a-z0-9_]+)\/tilejson\.json$/;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -129,88 +101,27 @@ async function dispatch(
     return handleCatalog(request);
   }
 
-  // Vector tile endpoints — theme-independent.
-  if (url.pathname === "/protomaps/tilejson.json") {
-    return handleVectorTilejson(request);
+  // Registered tilesets (src/tilesets.ts) — TileJSON, then tiles.
+  // Passthrough entries have no handleTile and fall through to 404 on
+  // the tile route; their tiles live at the upstream provider.
+  const tj = url.pathname.match(TILESET_TILEJSON_RE);
+  if (tj) {
+    const def = TILESETS_BY_ID.get(tj[1]);
+    if (def) return handleTilesetTilejson(request, def);
   }
-  const v = url.pathname.match(VECTOR_RE);
-  if (v) {
-    return handleVectorTile(
-      { z: Number(v[1]), x: Number(v[2]), y: Number(v[3]) },
-      env,
-    );
-  }
-
-  // Watercolor raster passthrough + its TileJSON.
-  if (url.pathname === "/watercolor/tilejson.json") {
-    return handleWatercolorTilejson(request);
-  }
-  const w = url.pathname.match(WATERCOLOR_RE);
-  if (w) {
-    return handleWatercolorTile(
-      { z: Number(w[1]), x: Number(w[2]), y: Number(w[3]) },
-      env,
-    );
-  }
-
-  // ESA WorldCover 2021 — on-the-fly tile composition from per-3° COGs.
-  if (url.pathname === "/esa_worldcover_2021/tilejson.json") {
-    return handleEsaWorldcoverTilejson(request);
-  }
-  const et = url.pathname.match(ESA_TILE_RE);
-  if (et) {
-    return handleEsaWorldcoverTile(
-      request,
-      env,
-      ctx,
-      { z: Number(et[1]), x: Number(et[2]), y: Number(et[3]) },
-      et[4] as "png" | "webp",
-    );
-  }
-
-  // Black Marble 2016 — on-the-fly tile rendering from a single global COG.
-  if (url.pathname === "/blackmarble/tilejson.json") {
-    return handleBlackmarbleTilejson(request);
-  }
-  const bm = url.pathname.match(BLACKMARBLE_TILE_RE);
-  if (bm) {
-    return handleBlackmarbleTile(
-      request,
-      env,
-      ctx,
-      { z: Number(bm[1]), x: Number(bm[2]), y: Number(bm[3]) },
-      bm[4] as "png" | "webp",
-    );
-  }
-
-  // Natural Earth rasters — on-the-fly tile rendering from per-dataset
-  // global COGs. Data-driven from src/naturalearth.ts.
-  const ne = url.pathname.match(NATURALEARTH_TILE_RE);
-  if (ne) {
-    const def = NATURAL_EARTH_BY_ID.get(ne[1]);
-    if (def) {
-      return handleNaturalEarthTile(
+  const t = url.pathname.match(TILESET_TILE_RE);
+  if (t) {
+    const def = TILESETS_BY_ID.get(t[1]);
+    const fmt = t[5] as TileFormat;
+    if (def?.handleTile && def.formats?.includes(fmt)) {
+      return def.handleTile(
         request,
         env,
         ctx,
-        def,
-        { z: Number(ne[2]), x: Number(ne[3]), y: Number(ne[4]) },
-        ne[5] as "png" | "webp",
+        { z: Number(t[2]), x: Number(t[3]), y: Number(t[4]) },
+        fmt,
       );
     }
-  }
-
-  // Generic /<id>/tilejson.json — Natural Earth rasters first, then
-  // passthrough tilesets (TileJSON only, `tiles` point at the
-  // upstream; data-driven from src/passthrough.ts). Other tilesets'
-  // /…/tilejson.json routes are matched above, so they never reach
-  // this lookup.
-  const tj = url.pathname.match(GENERIC_TILEJSON_RE);
-  if (tj) {
-    const neDef = NATURAL_EARTH_BY_ID.get(tj[1]);
-    if (neDef) return handleNaturalEarthTilejson(request, neDef);
-    const def = PASSTHROUGH_BY_ID.get(tj[1]);
-    if (def) return handlePassthroughTilejson(def);
   }
 
   // Themed routes. We validate the theme once at parse time and pass
