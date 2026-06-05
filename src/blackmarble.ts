@@ -22,6 +22,7 @@
 import { fromCustomClient } from "geotiff";
 import { pixelToLonLat, R2GeoTiffClient, TILE_SIZE } from "./cog.js";
 import { encodePngRGBA, encodeWebpRGBA } from "./raster_encode.js";
+import { serveRenderedTile } from "./render_cache.js";
 
 export type BlackmarbleFormat = "png" | "webp";
 
@@ -174,81 +175,32 @@ function cacheKey(coords: TileCoords, fmt: BlackmarbleFormat): string {
   return `cache/blackmarble/v${TILE_CACHE_VERSION}/${fmt}/${coords.z}/${coords.x}/${coords.y}.${fmt}`;
 }
 
-// Cache-API key for the CF edge cache. We can't use the raw client
-// request, because that URL doesn't change when TILE_CACHE_VERSION
-// bumps — the edge would keep serving an old tile forever even after
-// we orphan its R2 sibling. Stamping the version onto the cache URL
-// rotates the edge alongside R2.
-function edgeCacheRequest(request: Request): Request {
-  const url = new URL(request.url);
-  url.searchParams.set("__v", String(TILE_CACHE_VERSION));
-  return new Request(url.toString(), request);
-}
-
-function contentTypeFor(fmt: BlackmarbleFormat): string {
-  return fmt === "png" ? "image/png" : "image/webp";
-}
-
 export async function handleBlackmarbleTile(
   request: Request,
   env: Env,
   ctx: ExecutionContext,
   coords: TileCoords,
   fmt: BlackmarbleFormat,
+  persist: boolean,
 ): Promise<Response> {
   if (coords.z > MAX_RENDER_Z) {
     return new Response("zoom above available range", { status: 404 });
   }
 
-  const cache = caches.default;
-  const cacheReq = edgeCacheRequest(request);
-  const edge = await cache.match(cacheReq);
-  if (edge) return edge;
-
-  const key = cacheKey(coords, fmt);
-  const cached = await env.R2.get(key);
-  if (cached) {
-    const response = new Response(cached.body, {
-      headers: {
-        "content-type": contentTypeFor(fmt),
-        "cache-control": "public, max-age=31536000, immutable",
-        "x-cache": "r2-hit",
-        "x-attribution": BLACKMARBLE_ATTRIBUTION,
-      },
-    });
-    ctx.waitUntil(cache.put(cacheReq, response.clone()));
-    return response;
-  }
-
-  const rgba = await renderTileRGBA(env, coords);
-
-  // Lossy WebP q=85 — Black Marble is a photographic RGB nightscape,
-  // mostly black with bright point-like sources, where artefacts are
-  // imperceptible at q≥80. Drops bytes ~10× vs. PNG / lossless.
-  const encoded =
-    fmt === "png"
-      ? await encodePngRGBA(rgba, TILE_SIZE, TILE_SIZE)
-      : await encodeWebpRGBA(rgba, TILE_SIZE, TILE_SIZE, { quality: 85 });
-
-  const response = new Response(encoded, {
-    headers: {
-      "content-type": contentTypeFor(fmt),
-      "cache-control": "public, max-age=31536000, immutable",
-      "x-cache": "miss",
-      "x-attribution": BLACKMARBLE_ATTRIBUTION,
+  return serveRenderedTile(request, env, ctx, {
+    cacheKey: cacheKey(coords, fmt),
+    cacheVersion: TILE_CACHE_VERSION,
+    contentType: fmt === "png" ? "image/png" : "image/webp",
+    attribution: BLACKMARBLE_ATTRIBUTION,
+    persist,
+    render: async () => {
+      const rgba = await renderTileRGBA(env, coords);
+      // Lossy WebP q=85 — Black Marble is a photographic RGB nightscape,
+      // mostly black with bright point-like sources, where artefacts are
+      // imperceptible at q≥80. Drops bytes ~10× vs. PNG / lossless.
+      return fmt === "png"
+        ? encodePngRGBA(rgba, TILE_SIZE, TILE_SIZE)
+        : encodeWebpRGBA(rgba, TILE_SIZE, TILE_SIZE, { quality: 85 });
     },
   });
-
-  ctx.waitUntil(
-    (async () => {
-      await Promise.all([
-        env.R2.put(key, encoded, {
-          httpMetadata: { contentType: contentTypeFor(fmt) },
-        }),
-        cache.put(cacheReq, response.clone()),
-      ]);
-    })(),
-  );
-
-  return response;
 }

@@ -18,6 +18,7 @@
 import { fromCustomClient } from "geotiff";
 import { pixelToLonLat, R2GeoTiffClient, TILE_SIZE } from "./cog.js";
 import { encodePngRGBA, encodeWebpRGBA } from "./raster_encode.js";
+import { serveRenderedTile } from "./render_cache.js";
 
 export type EsaFormat = "png" | "webp";
 
@@ -367,93 +368,43 @@ function cacheKey(coords: TileCoords, fmt: EsaFormat): string {
   return `cache/esa_worldcover/v${TILE_CACHE_VERSION}/${fmt}/${coords.z}/${coords.x}/${coords.y}.${fmt}`;
 }
 
-// Cache-API key for the CF edge cache. The raw client request URL is
-// invariant across TILE_CACHE_VERSION bumps, so without stamping the
-// version onto the cache URL the edge would keep serving an old tile
-// even after we orphan its R2 sibling. Stamping rotates both layers.
-function edgeCacheRequest(request: Request): Request {
-  const url = new URL(request.url);
-  url.searchParams.set("__v", String(TILE_CACHE_VERSION));
-  return new Request(url.toString(), request);
-}
-
-function contentTypeFor(fmt: EsaFormat): string {
-  return fmt === "png" ? "image/png" : "image/webp";
-}
-
 export async function handleEsaWorldcoverTile(
   request: Request,
   env: Env,
   ctx: ExecutionContext,
   coords: TileCoords,
   fmt: EsaFormat,
+  persist: boolean,
 ): Promise<Response> {
   if (coords.z > MAX_RENDER_Z) {
     return new Response("zoom above available range", { status: 404 });
   }
 
-  // Two-layer cache (edge → R2). The data is frozen so we cache long.
-  const cache = caches.default;
-  const cacheReq = edgeCacheRequest(request);
-  const edge = await cache.match(cacheReq);
-  if (edge) return edge;
+  return serveRenderedTile(request, env, ctx, {
+    cacheKey: cacheKey(coords, fmt),
+    cacheVersion: TILE_CACHE_VERSION,
+    contentType: fmt === "png" ? "image/png" : "image/webp",
+    attribution: ESA_WORLDCOVER_ATTRIBUTION,
+    persist,
+    render: async () => {
+      const rgba =
+        coords.z < OVERVIEW_MAX_Z
+          ? await renderTileRGBAFromOverview(env, coords)
+          : await renderTileRGBA(env, coords);
 
-  const key = cacheKey(coords, fmt);
-  const cached = await env.R2.get(key);
-  if (cached) {
-    const response = new Response(cached.body, {
-      headers: {
-        "content-type": contentTypeFor(fmt),
-        "cache-control": "public, max-age=31536000, immutable",
-        "x-cache": "r2-hit",
-        "x-attribution": ESA_WORLDCOVER_ATTRIBUTION,
-      },
-    });
-    ctx.waitUntil(cache.put(cacheReq, response.clone()));
-    return response;
-  }
+      // null → 404 for fully-empty tiles — matches the watercolor
+      // handler and lets MapLibre's raster source mark the tile as
+      // errored so it fills the hole with the nearest loaded ancestor
+      // instead of treating an empty tile as a real (transparent)
+      // layer pixel. We accept partially empty tiles (coastlines,
+      // dataset bounds) — only every-pixel-alpha-0 counts as "no data".
+      if (isFullyEmpty(rgba)) return null;
 
-  const rgba =
-    coords.z < OVERVIEW_MAX_Z
-      ? await renderTileRGBAFromOverview(env, coords)
-      : await renderTileRGBA(env, coords);
-
-  // 404 fully-empty tiles — matches the watercolor handler and lets
-  // MapLibre's raster source mark the tile as errored so it fills the
-  // hole with the nearest loaded ancestor instead of treating an empty
-  // tile as a real (transparent) layer pixel. We accept partially
-  // empty tiles (coastlines, dataset bounds) — only every-pixel-alpha-0
-  // counts as "no data".
-  if (isFullyEmpty(rgba)) {
-    return new Response("no data", { status: 404 });
-  }
-
-  // Lossless WebP: classification rasters with sharp colour boundaries
-  // compress better and look right without artefacts.
-  const encoded =
-    fmt === "png"
-      ? await encodePngRGBA(rgba, TILE_SIZE, TILE_SIZE)
-      : await encodeWebpRGBA(rgba, TILE_SIZE, TILE_SIZE, { lossless: true });
-
-  const response = new Response(encoded, {
-    headers: {
-      "content-type": contentTypeFor(fmt),
-      "cache-control": "public, max-age=31536000, immutable",
-      "x-cache": "miss",
-      "x-attribution": ESA_WORLDCOVER_ATTRIBUTION,
+      // Lossless WebP: classification rasters with sharp colour
+      // boundaries compress better and look right without artefacts.
+      return fmt === "png"
+        ? encodePngRGBA(rgba, TILE_SIZE, TILE_SIZE)
+        : encodeWebpRGBA(rgba, TILE_SIZE, TILE_SIZE, { lossless: true });
     },
   });
-
-  ctx.waitUntil(
-    (async () => {
-      await Promise.all([
-        env.R2.put(key, encoded, {
-          httpMetadata: { contentType: contentTypeFor(fmt) },
-        }),
-        cache.put(cacheReq, response.clone()),
-      ]);
-    })(),
-  );
-
-  return response;
 }

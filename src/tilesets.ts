@@ -9,7 +9,11 @@
 // Two kinds of entries:
 //   - self-hosted: `handleTile` serves/renders bytes (R2-backed COGs,
 //     PMTiles archives). `formats` lists the served extensions; the
-//     first is the TileJSON default (override with ?format=).
+//     first is the TileJSON default (override with ?format=). For the
+//     COG-rendered tilesets, the `persist` literal passed to the
+//     handler decides whether rendered tiles are stored in R2 as a
+//     global cache layer (expensive renders) or served from the edge
+//     cache alone (cheap renders) — see src/render_cache.ts.
 //   - passthrough: `upstreamTiles` points the TileJSON straight at an
 //     upstream provider — we serve no bytes and store nothing in R2;
 //     attribution, baked into the TileJSON, is all we own. The
@@ -126,8 +130,11 @@ export const TILESETS: readonly TilesetDef[] = [
     minzoom: 0,
     maxzoom: 13,
     bounds: [-180, -60, 180, 84],
+    // persist: true — z≥8 fans out over per-3° COGs (multiple R2 reads
+    // + lossless encode per tile), expensive enough to keep the global
+    // R2 cache layer.
     handleTile: (request, env, ctx, coords, fmt) =>
-      handleEsaWorldcoverTile(request, env, ctx, coords, fmt as "png" | "webp"),
+      handleEsaWorldcoverTile(request, env, ctx, coords, fmt as "png" | "webp", true),
   },
   {
     id: "blackmarble",
@@ -142,8 +149,10 @@ export const TILESETS: readonly TilesetDef[] = [
     formats: ["webp", "png"],
     minzoom: 0,
     maxzoom: 8,
+    // persist: false — one window read from a single COG + encode is
+    // fast enough that the edge cache alone suffices.
     handleTile: (request, env, ctx, coords, fmt) =>
-      handleBlackmarbleTile(request, env, ctx, coords, fmt as "png" | "webp"),
+      handleBlackmarbleTile(request, env, ctx, coords, fmt as "png" | "webp", false),
   },
   // Natural Earth rasters — geometry + display metadata live in the
   // registry in naturalearth.ts; one TilesetDef per entry.
@@ -157,8 +166,9 @@ export const TILESETS: readonly TilesetDef[] = [
       formats: ["webp", "png"],
       minzoom: 0,
       maxzoom: d.maxZoom,
+      // persist: false — small single-COG window reads; edge cache only.
       handleTile: (request, env, ctx, coords, fmt) =>
-        handleNaturalEarthTile(request, env, ctx, d, coords, fmt as "png" | "webp"),
+        handleNaturalEarthTile(request, env, ctx, d, coords, fmt as "png" | "webp", false),
     }),
   ),
   // Passthrough tilesets.
