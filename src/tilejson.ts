@@ -2,6 +2,11 @@
 
 import { BLACKMARBLE_ATTRIBUTION } from "./blackmarble.js";
 import { ESA_WORLDCOVER_ATTRIBUTION } from "./esa_worldcover.js";
+import {
+  NATURAL_EARTH_ATTRIBUTION,
+  NATURAL_EARTH_MAX_ZOOM,
+  type NaturalEarthRaster,
+} from "./naturalearth.js";
 import type { PassthroughTileset } from "./passthrough.js";
 import type { Theme } from "./style.js";
 import { WATERCOLOR_ATTRIBUTION } from "./watercolor.js";
@@ -89,6 +94,28 @@ export function handleBlackmarbleTilejson(request: Request): Response {
     // Clients overzoom past that to the configured display maxzoom.
     minzoom: 0,
     maxzoom: 8,
+    bounds: BOUNDS,
+    center: CENTER,
+  });
+}
+
+export function handleNaturalEarthTilejson(
+  request: Request,
+  def: NaturalEarthRaster,
+): Response {
+  const url = new URL(request.url);
+  const fmt = url.searchParams.get("format") === "png" ? "png" : "webp";
+  return json({
+    tilejson: "3.0.0",
+    name: def.name,
+    description: def.description,
+    attribution: NATURAL_EARTH_ATTRIBUTION,
+    scheme: "xyz",
+    tiles: [`${url.origin}/${def.id}/{z}/{x}/{y}.${fmt}`],
+    // Source resolution (~1.85 km/px) tops out around Web Mercator z=6.
+    // Clients overzoom past that to the configured display maxzoom.
+    minzoom: 0,
+    maxzoom: NATURAL_EARTH_MAX_ZOOM,
     bounds: BOUNDS,
     center: CENTER,
   });

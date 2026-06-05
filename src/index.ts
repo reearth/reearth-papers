@@ -13,6 +13,8 @@
  *   /esa_worldcover_2021/tilejson.json   — TileJSON (?format=png|webp, default webp)
  *   /blackmarble/{z}/{x}/{y}.{png,webp}  — NASA Black Marble 2016 tiles
  *   /blackmarble/tilejson.json           — TileJSON (?format=png|webp, default webp)
+ *   /ne2/{z}/{x}/{y}.{png,webp}          — Natural Earth II tiles (registry-driven;
+ *   /ne2/tilejson.json                     see src/naturalearth.ts for the id list)
  *   /bluemarble/tilejson.json            — TileJSON (passthrough → NASA GIBS Blue Marble)
  *   /s2cloudless_2016/tilejson.json      — TileJSON (passthrough → EOX Sentinel-2 cloudless 2016)
  *   /catalog.json                        — index of all tilesets
@@ -34,12 +36,14 @@ import { handleBlackmarbleTile } from "./blackmarble.js";
 import { lookupCachedTile, storeRenderedTile, tileCacheKey } from "./cache.js";
 import { handleCatalog } from "./catalog.js";
 import { handleEsaWorldcoverTile } from "./esa_worldcover.js";
+import { handleNaturalEarthTile, NATURAL_EARTH_BY_ID } from "./naturalearth.js";
 import { handleVectorTile } from "./pmtiles.js";
 import { handleStyle, isTheme, type Theme } from "./style.js";
 import { PASSTHROUGH_BY_ID } from "./passthrough.js";
 import {
   handleBlackmarbleTilejson,
   handleEsaWorldcoverTilejson,
+  handleNaturalEarthTilejson,
   handlePassthroughTilejson,
   handleRasterTilejson,
   handleVectorTilejson,
@@ -63,7 +67,13 @@ const VECTOR_RE = /^\/protomaps\/(\d+)\/(\d+)\/(\d+)\.mvt$/;
 const WATERCOLOR_RE = /^\/watercolor\/(\d+)\/(\d+)\/(\d+)\.jpg$/;
 const ESA_TILE_RE = /^\/esa_worldcover_2021\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
 const BLACKMARBLE_TILE_RE = /^\/blackmarble\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
-const PASSTHROUGH_TILEJSON_RE = /^\/([a-z0-9_]+)\/tilejson\.json$/;
+// Generic raster-tile shape, resolved against the Natural Earth
+// registry (src/naturalearth.ts). The named tilesets above are matched
+// first, so they never reach this lookup.
+const NATURALEARTH_TILE_RE = /^\/([a-z0-9_]+)\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
+// Generic tilejson shape, resolved against the Natural Earth registry
+// first, then the passthrough registry (src/passthrough.ts).
+const GENERIC_TILEJSON_RE = /^\/([a-z0-9_]+)\/tilejson\.json$/;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -172,13 +182,33 @@ async function dispatch(
     );
   }
 
-  // Passthrough tilesets — TileJSON only, `tiles` point at the upstream.
-  // Data-driven from src/passthrough.ts: /<id>/tilejson.json for any
-  // registered id. (Other tilesets' /…/tilejson.json routes are matched
-  // above, so they never reach this lookup.)
-  const pt = url.pathname.match(PASSTHROUGH_TILEJSON_RE);
-  if (pt) {
-    const def = PASSTHROUGH_BY_ID.get(pt[1]);
+  // Natural Earth rasters — on-the-fly tile rendering from per-dataset
+  // global COGs. Data-driven from src/naturalearth.ts.
+  const ne = url.pathname.match(NATURALEARTH_TILE_RE);
+  if (ne) {
+    const def = NATURAL_EARTH_BY_ID.get(ne[1]);
+    if (def) {
+      return handleNaturalEarthTile(
+        request,
+        env,
+        ctx,
+        def,
+        { z: Number(ne[2]), x: Number(ne[3]), y: Number(ne[4]) },
+        ne[5] as "png" | "webp",
+      );
+    }
+  }
+
+  // Generic /<id>/tilejson.json — Natural Earth rasters first, then
+  // passthrough tilesets (TileJSON only, `tiles` point at the
+  // upstream; data-driven from src/passthrough.ts). Other tilesets'
+  // /…/tilejson.json routes are matched above, so they never reach
+  // this lookup.
+  const tj = url.pathname.match(GENERIC_TILEJSON_RE);
+  if (tj) {
+    const neDef = NATURAL_EARTH_BY_ID.get(tj[1]);
+    if (neDef) return handleNaturalEarthTilejson(request, neDef);
+    const def = PASSTHROUGH_BY_ID.get(tj[1]);
     if (def) return handlePassthroughTilejson(def);
   }
 

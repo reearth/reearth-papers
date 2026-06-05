@@ -34,3 +34,6 @@ dist/
 
 # Build-overview scratch space (esa_worldcover_2021 mirror).
 /mirror/esa_worldcover_2021/.work/
+
+# Fetch/COG scratch space (naturalearth mirror).
+/mirror/naturalearth/.work/

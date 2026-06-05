@@ -2,6 +2,7 @@
 // service exposes, with links to each one's TileJSON / style.json so
 // downstream tools can crawl the surface without hard-coding URLs.
 
+import { NATURAL_EARTH_RASTERS } from "./naturalearth.js";
 import { PASSTHROUGH_TILESETS } from "./passthrough.js";
 import { THEMES } from "./style.js";
 
@@ -78,6 +79,16 @@ export function handleCatalog(request: Request): Response {
       type: "raster",
       tilejson: `${origin}/blackmarble/tilejson.json`,
     },
+    // Natural Earth rasters — derived from the registry in
+    // src/naturalearth.ts.
+    ...NATURAL_EARTH_RASTERS.map(
+      (d): HostedRaster => ({
+        id: d.id,
+        name: d.name,
+        type: "raster",
+        tilejson: `${origin}/${d.id}/tilejson.json`,
+      }),
+    ),
     // Passthrough tilesets (TileJSON points at the upstream provider).
     // Derived from the registry in src/passthrough.ts.
     ...PASSTHROUGH_TILESETS.map(
