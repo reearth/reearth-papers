@@ -6,53 +6,236 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css" />
   <style>
-    html, body, #map { height: 100%; margin: 0; }
-    .meta {
-      position: absolute; top: 12px; left: 12px; z-index: 1;
-      font: 13px/1.4 system-ui, -apple-system, sans-serif;
-      background: rgba(255,255,255,0.92); padding: 10px 14px;
-      border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.15);
+    :root {
+      --paper: #f7f4ee;
+      --paper-edge: #e3ded3;
+      --ink: #1f1c17;
+      --ink-soft: #8a8273;
+      --accent: #b4490e;
+      --card: #fffdf9;
     }
-    .meta h1 { margin: 0 0 4px; font-size: 14px; }
-    .meta a { color: #444; text-decoration: none; border-bottom: 1px dotted #888; }
-    .meta select { margin-top: 6px; max-width: 240px; }
-    .meta label { display: block; margin-top: 4px; }
-    .meta .pending { color: #888; font-style: italic; }
-    .meta .copy {
-      display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: grid;
+      grid-template-columns: 248px 1fr;
+      font: 13px/1.45 system-ui, -apple-system, sans-serif;
+      color: var(--ink);
+      background: var(--paper);
     }
-    .meta .copy button {
-      font: inherit; font-size: 12px;
-      padding: 3px 8px; border: 1px solid #bbb;
-      background: #fff; border-radius: 4px; cursor: pointer;
+    #map { height: 100%; }
+
+    /* -- panel ------------------------------------------------------- */
+    #panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      /* As a grid item, min-width:auto would let the mobile strip's
+         content width blow the whole page out sideways. */
+      min-width: 0;
+      background:
+        repeating-linear-gradient(0deg, transparent 0 23px, rgba(31,28,23,.025) 23px 24px),
+        var(--paper);
+      border-right: 1px solid var(--paper-edge);
     }
-    .meta .copy button:hover { background: #f3f3f3; }
-    .meta .copy button:disabled { color: #aaa; cursor: default; }
-    .meta .copy button.copied { background: #d6f5d6; border-color: #84c084; }
+    #panel header {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--paper-edge);
+    }
+    #panel h1 {
+      margin: 0;
+      font: 600 16px/1.2 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+      letter-spacing: .01em;
+    }
+    #panel .sub {
+      margin: 2px 0 0;
+      font-size: 11px;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+
+    /* -- gallery ------------------------------------------------------ */
+    #gallery {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 12px;
+      display: grid;
+      /* max-content, not auto: Chrome collapses auto rows holding
+         <button> items to their min-content height (~one line). */
+      grid-auto-rows: max-content;
+      gap: 10px;
+      align-content: start;
+    }
+    .card {
+      display: block;
+      width: 100%;
+      padding: 0;
+      text-align: left;
+      font: inherit;
+      color: inherit;
+      background: var(--card);
+      border: 1px solid var(--paper-edge);
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color .15s, box-shadow .15s, transform .15s;
+    }
+    .card:hover {
+      border-color: #c9c2b2;
+      transform: translateY(-1px);
+      box-shadow: 0 3px 10px rgba(31,28,23,.08);
+    }
+    .card.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent), 0 3px 10px rgba(180,73,14,.14);
+    }
+    .card:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .thumb {
+      display: block;
+      height: 76px;
+      overflow: hidden;
+      position: relative;
+      /* Vector / not-yet-loaded placeholder: faint contour-line sketch. */
+      background:
+        repeating-linear-gradient(115deg, transparent 0 9px, rgba(31,28,23,.07) 9px 10px),
+        repeating-linear-gradient(25deg, transparent 0 14px, rgba(31,28,23,.05) 14px 15px),
+        #efeadf;
+    }
+    .thumb img {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: transform .25s;
+    }
+    .card:hover .thumb img { transform: scale(1.04); }
+    .thumb .mvt {
+      position: absolute; inset: 0;
+      display: grid; place-items: center;
+      font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .2em;
+      color: var(--ink-soft);
+    }
+    .card .label {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 7px 10px 8px;
+    }
+    .card .name {
+      font-weight: 550;
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card .kind {
+      flex: none;
+      font: 500 9.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+    .card.selected .kind { color: var(--accent); }
+
+    /* -- actions ------------------------------------------------------ */
+    #actions {
+      padding: 10px 12px;
+      border-top: 1px solid var(--paper-edge);
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    #actions button {
+      font: inherit;
+      font-size: 12px;
+      padding: 4px 10px;
+      border: 1px solid #c9c2b2;
+      background: var(--card);
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #actions button:hover { background: #f3efe6; }
+    #actions button:disabled { color: #b3ac9d; cursor: default; }
+    #actions button.copied {
+      background: #e4f3df;
+      border-color: #8fbf80;
+    }
+    #gallery .pending {
+      color: var(--ink-soft);
+      font-style: italic;
+      padding: 4px 2px;
+    }
+
+    /* -- mobile: gallery becomes a horizontal strip below the map ----- */
+    @media (max-width: 720px) {
+      body {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr auto;
+      }
+      #map { order: 0; }
+      #panel {
+        order: 1;
+        border-right: none;
+        border-top: 1px solid var(--paper-edge);
+      }
+      #panel header {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 8px 12px 6px;
+        border-bottom: none;
+      }
+      #panel h1 { font-size: 14px; }
+      #gallery {
+        display: flex;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 4px 12px 10px;
+        gap: 8px;
+        -webkit-overflow-scrolling: touch;
+      }
+      .card { flex: 0 0 132px; }
+      .thumb { height: 60px; }
+      .card .label { padding: 5px 8px 6px; }
+      .card .kind { display: none; }
+      #actions { padding: 8px 12px; border-top: none; }
+    }
   </style>
 </head>
 <body>
-  <div class="meta">
-    <h1>Re:Earth Papers — preview</h1>
-    <label>Tileset:
-      <select id="tileset" disabled>
-        <option class="pending">loading /catalog.json…</option>
-      </select>
-    </label>
-    <label><input type="checkbox" id="vector" />
-      Render client-side (vector)
-    </label>
-    <div class="copy">
+  <aside id="panel">
+    <header>
+      <h1>Re:Earth Papers</h1>
+      <p class="sub">tileset preview</p>
+    </header>
+    <nav id="gallery" aria-label="Tilesets">
+      <p class="pending">loading /catalog.json…</p>
+    </nav>
+    <div id="actions">
       <button id="copy-tilejson" disabled type="button">Copy TileJSON URL</button>
       <button id="copy-xyz" disabled type="button">Copy XYZ URL</button>
     </div>
-  </div>
+  </aside>
   <div id="map"></div>
   <script src="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"></script>
   <script>
-    // Build the preview's tileset menu from /catalog.json so adding a
-    // new theme or raster source on the server side shows up here
-    // without any HTML edit.
+    // Build the preview's tileset gallery from /catalog.json so adding
+    // a new theme or raster source on the server side shows up here
+    // without any HTML edit. Each card carries a live tile thumbnail
+    // (a fixed z2 tile over Japan / East Asia) fetched through the
+    // tileset's own TileJSON.
+    //
+    // Rendering mode is implicit: vector PMTiles tilesets (and only
+    // those) are rendered client-side from a MapLibre style; raster
+    // tilesets always show their served tiles.
+
+    const THUMB = { z: 2, x: 3, y: 1 };
 
     function rasterStyle(tilejsonUrl) {
       return {
@@ -67,74 +250,110 @@
     let map = null;
 
     async function init() {
-      const sel = document.getElementById('tileset');
-      const vectorToggle = document.getElementById('vector');
+      const gallery = document.getElementById('gallery');
+      const copyTilejson = document.getElementById('copy-tilejson');
+      const copyXyz = document.getElementById('copy-xyz');
 
       let catalog;
       try {
         catalog = await fetch('/catalog.json').then((r) => r.json());
       } catch (e) {
-        sel.innerHTML = '<option>failed to load catalog</option>';
+        gallery.innerHTML = '<p class="pending">failed to load catalog</p>';
         return;
       }
 
       const tilesets = catalog.tilesets || [];
-      sel.innerHTML = '';
+      let selected = null;
+
+      // -- cards ----------------------------------------------------
+      gallery.innerHTML = '';
+      const cards = new Map();
       for (const t of tilesets) {
-        const opt = document.createElement('option');
-        opt.value = t.id;
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'card';
+        card.dataset.id = t.id;
+
+        const thumb = document.createElement('span');
+        thumb.className = 'thumb';
+        if (t.type === 'vector') {
+          // MVT has no image form — keep the sketch background and mark it.
+          const mvt = document.createElement('span');
+          mvt.className = 'mvt';
+          mvt.textContent = 'MVT';
+          thumb.appendChild(mvt);
+        } else {
+          const img = document.createElement('img');
+          img.alt = '';
+          img.loading = 'lazy';
+          img.decoding = 'async';
+          // Filled in asynchronously from the TileJSON below; on error
+          // the placeholder background stays visible.
+          img.addEventListener('error', () => img.remove());
+          thumb.appendChild(img);
+        }
+        card.appendChild(thumb);
+
+        const label = document.createElement('span');
+        label.className = 'label';
+        const name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = t.name;
+        name.title = t.name;
         // Passthrough tilesets are served straight from an upstream
         // provider — flag them so it's clear they aren't hosted by us.
-        const kind = t.passthrough ? t.type + ' · passthrough' : t.type;
-        opt.textContent = t.name + '  (' + kind + ')';
-        opt.dataset.tilejson = t.tilejson;
-        if (t.style) opt.dataset.style = t.style;
-        opt.dataset.type = t.type;
-        sel.appendChild(opt);
+        const kind = document.createElement('span');
+        kind.className = 'kind';
+        kind.textContent = t.passthrough ? t.type + '·pt' : t.type;
+        kind.title = t.passthrough ? t.type + ' · passthrough' : t.type;
+        label.appendChild(name);
+        label.appendChild(kind);
+        card.appendChild(label);
+
+        card.addEventListener('click', () => select(t));
+        gallery.appendChild(card);
+        cards.set(t.id, card);
       }
-      sel.disabled = false;
 
-      const params = new URLSearchParams(location.search);
-      const initialId = params.get('id') || tilesets[0]?.id;
-      if (initialId) sel.value = initialId;
-      if (params.get('mode') === 'vector') vectorToggle.checked = true;
+      // -- thumbnails (async, best-effort) --------------------------
+      // One TileJSON fetch per raster tileset; the documents are tiny
+      // and edge-cached for 5 minutes.
+      for (const t of tilesets) {
+        if (t.type === 'vector') continue;
+        fetch(t.tilejson)
+          .then((r) => r.json())
+          .then((tj) => {
+            const tpl = tj.tiles && tj.tiles[0];
+            const img = cards.get(t.id)?.querySelector('img');
+            if (!tpl || !img) return;
+            img.src = tpl
+              .replace('{z}', THUMB.z)
+              .replace('{x}', THUMB.x)
+              .replace('{y}', THUMB.y);
+          })
+          .catch(() => {});
+      }
 
-      const refreshToggleState = () => {
-        const o = sel.selectedOptions[0];
-        if (!o) return;
-        // Vector mode requires a MapLibre style to load; raster
-        // tilesets without a style entry can't toggle.
-        const hasStyle = !!o.dataset.style;
-        const isVectorTileset = o.dataset.type === 'vector';
-        if (isVectorTileset) {
-          vectorToggle.checked = true;
-          vectorToggle.disabled = true;
-        } else if (!hasStyle) {
-          vectorToggle.checked = false;
-          vectorToggle.disabled = true;
-        } else {
-          vectorToggle.disabled = false;
+      // -- selection / map ------------------------------------------
+      const select = (t) => {
+        selected = t;
+        for (const [id, card] of cards) {
+          card.classList.toggle('selected', id === t.id);
         }
-      };
-
-      const showSelected = () => {
-        const o = sel.selectedOptions[0];
-        if (!o) return;
-        refreshToggleState();
 
         const u = new URL(location.href);
-        u.searchParams.set('id', o.value);
-        if (vectorToggle.checked) u.searchParams.set('mode', 'vector');
-        else u.searchParams.delete('mode');
+        u.searchParams.set('id', t.id);
+        u.searchParams.delete('mode'); // legacy toggle param
         history.replaceState(null, '', u.toString());
 
-        const useVector =
-          vectorToggle.checked && (o.dataset.style || o.dataset.type === 'vector');
-        // For the bare protomaps-vector tileset we don't ship a default
-        // style, so fall back to the light theme's full style so it has
-        // something to render with.
-        const styleUrl = o.dataset.style || '/styles/light/style.json';
-        const style = useVector ? styleUrl : rasterStyle(o.dataset.tilejson);
+        // Client-side (vector) rendering only exists for vector
+        // PMTiles tilesets; everything else shows its raster tiles.
+        // The bare protomaps-vector tileset ships no default style, so
+        // fall back to the light theme's full style.
+        const style =
+          t.type === 'vector'
+            ? (t.style || '/styles/light/style.json')
+            : rasterStyle(t.tilejson);
 
         if (!map) {
           map = new maplibregl.Map({
@@ -149,19 +368,22 @@
         } else {
           map.setStyle(style);
         }
+
+        copyTilejson.disabled = false;
+        copyXyz.disabled = false;
+        cards.get(t.id)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       };
 
-      sel.addEventListener('change', showSelected);
-      vectorToggle.addEventListener('change', showSelected);
-      showSelected();
+      const params = new URLSearchParams(location.search);
+      const initial =
+        tilesets.find((t) => t.id === params.get('id')) || tilesets[0];
+      if (initial) select(initial);
 
-      // Copy buttons. TileJSON URL comes straight from the catalog
-      // entry; the XYZ URL is read out of the live TileJSON document
-      // (so format-flavoured tilesets like esa_worldcover yield their
+      // -- copy buttons ----------------------------------------------
+      // TileJSON URL comes straight from the catalog entry; the XYZ
+      // URL is read out of the live TileJSON document (so
+      // format-flavoured tilesets like esa_worldcover yield their
       // default extension automatically).
-      const copyTilejson = document.getElementById('copy-tilejson');
-      const copyXyz = document.getElementById('copy-xyz');
-
       const flashCopied = (btn) => {
         btn.classList.add('copied');
         const orig = btn.textContent;
@@ -172,24 +394,18 @@
         }, 1200);
       };
 
-      const currentTilejsonUrl = () => {
-        const o = sel.selectedOptions[0];
-        return o ? new URL(o.dataset.tilejson, location.href).toString() : null;
-      };
-
       copyTilejson.addEventListener('click', async () => {
-        const url = currentTilejsonUrl();
-        if (!url) return;
+        if (!selected) return;
+        const url = new URL(selected.tilejson, location.href).toString();
         await navigator.clipboard.writeText(url);
         flashCopied(copyTilejson);
       });
 
       copyXyz.addEventListener('click', async () => {
-        const tilejsonUrl = currentTilejsonUrl();
-        if (!tilejsonUrl) return;
+        if (!selected) return;
         copyXyz.disabled = true;
         try {
-          const tj = await fetch(tilejsonUrl).then((r) => r.json());
+          const tj = await fetch(selected.tilejson).then((r) => r.json());
           const xyz = tj.tiles && tj.tiles[0];
           if (!xyz) throw new Error('no tiles[] in TileJSON');
           await navigator.clipboard.writeText(xyz);
@@ -201,14 +417,6 @@
           copyXyz.disabled = false;
         }
       });
-
-      const refreshCopyButtons = () => {
-        const ready = !!sel.selectedOptions[0];
-        copyTilejson.disabled = !ready;
-        copyXyz.disabled = !ready;
-      };
-      sel.addEventListener('change', refreshCopyButtons);
-      refreshCopyButtons();
     }
 
     init();
