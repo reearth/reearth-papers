@@ -25,15 +25,24 @@
 // registry — they're style permutations of one source with their own
 // route shape and a per-theme style.json (see style.ts).
 
-import { BLACKMARBLE_ATTRIBUTION, handleBlackmarbleTile } from "./blackmarble.js";
+import {
+  BLACKMARBLE_ATTRIBUTION,
+  BLACKMARBLE_COG_KEY,
+  handleBlackmarbleTile,
+} from "./blackmarble.js";
 import { ESA_WORLDCOVER_ATTRIBUTION, handleEsaWorldcoverTile } from "./esa_worldcover.js";
 import {
   handleNaturalEarthTile,
   NATURAL_EARTH_ATTRIBUTION,
   NATURAL_EARTH_RASTERS,
 } from "./naturalearth.js";
-import { handleVectorTile } from "./pmtiles.js";
-import { handleWatercolorTile, WATERCOLOR_ATTRIBUTION } from "./watercolor.js";
+import { handleVectorTile, readMirrorPointer } from "./pmtiles.js";
+import type { SourceFile } from "./source_file.js";
+import {
+  handleWatercolorTile,
+  WATERCOLOR_ARCHIVE_KEY,
+  WATERCOLOR_ATTRIBUTION,
+} from "./watercolor.js";
 
 export type TileFormat = "png" | "webp" | "jpg" | "mvt";
 
@@ -75,6 +84,11 @@ export interface TilesetDef {
     coords: TileCoords,
     fmt: TileFormat,
   ) => Promise<Response>;
+  /** For datasets backed by exactly one COG / PMTiles archive: expose
+   *  the file itself at /<id>.<ext> with HTTP Range support, so GIS
+   *  clients (GDAL /vsicurl/, the pmtiles protocol) can read it
+   *  directly. See source_file.ts. */
+  source?: SourceFile;
 }
 
 const PAPERS = '<a href="https://papers.reearth.land">Re:Earth Papers</a>';
@@ -100,6 +114,13 @@ export const TILESETS: readonly TilesetDef[] = [
     minzoom: 0,
     maxzoom: 15,
     handleTile: (_request, env, _ctx, coords) => handleVectorTile(coords, env),
+    source: {
+      // Monthly-rotated archive — resolve the current key through the
+      // mirror pointer on every request.
+      key: async (env) => (await readMirrorPointer(env)).key,
+      ext: "pmtiles",
+      contentType: "application/vnd.pmtiles",
+    },
   },
   {
     id: "watercolor",
@@ -114,6 +135,11 @@ export const TILESETS: readonly TilesetDef[] = [
     minzoom: 0,
     maxzoom: 18,
     handleTile: (_request, env, _ctx, coords) => handleWatercolorTile(coords, env),
+    source: {
+      key: WATERCOLOR_ARCHIVE_KEY,
+      ext: "pmtiles",
+      contentType: "application/vnd.pmtiles",
+    },
   },
   {
     id: "esa_worldcover_2021",
@@ -153,6 +179,7 @@ export const TILESETS: readonly TilesetDef[] = [
     // fast enough that the edge cache alone suffices.
     handleTile: (request, env, ctx, coords, fmt) =>
       handleBlackmarbleTile(request, env, ctx, coords, fmt as "png" | "webp", false),
+    source: { key: BLACKMARBLE_COG_KEY, ext: "tif", contentType: "image/tiff" },
   },
   // Natural Earth rasters — geometry + display metadata live in the
   // registry in naturalearth.ts; one TilesetDef per entry.
@@ -169,6 +196,7 @@ export const TILESETS: readonly TilesetDef[] = [
       // persist: false — small single-COG window reads; edge cache only.
       handleTile: (request, env, ctx, coords, fmt) =>
         handleNaturalEarthTile(request, env, ctx, d, coords, fmt as "png" | "webp", false),
+      source: { key: d.r2Key, ext: "tif", contentType: "image/tiff" },
     }),
   ),
   // Passthrough tilesets.

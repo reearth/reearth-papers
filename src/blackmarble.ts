@@ -32,7 +32,7 @@ interface TileCoords {
   y: number;
 }
 
-const R2_KEY = "mirror/blackmarble/black_marble_2016.tif";
+export const BLACKMARBLE_COG_KEY = "mirror/blackmarble/black_marble_2016.tif";
 
 // Base COG geometry — fixed by the mirror builder. 86400×43200 at
 // 1/240° per pixel, origin top-left at (-180°E, 90°N). Hard-coding
@@ -108,7 +108,7 @@ async function renderTileRGBA(
     }
   }
 
-  const tiff = await fromCustomClient(new R2GeoTiffClient(env.R2, R2_KEY));
+  const tiff = await fromCustomClient(new R2GeoTiffClient(env.R2, BLACKMARBLE_COG_KEY));
   const level = pickOverviewLevel(coords.z);
   // geotiff's getImage indexes IFDs in file order. COG writes base
   // first, then overviews largest→smallest, so `level` == IFD index.

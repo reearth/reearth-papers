@@ -38,9 +38,17 @@ raster tiles across a curated set of styles.
 - `https://papers.reearth.land/s2cloudless_2016/tilejson.json` —
   TileJSON for EOX Sentinel-2 cloudless 2016 (CC BY 4.0; a passthrough
   tileset served directly from EOX's WMTS).
+- `https://papers.reearth.land/{id}.{tif,pmtiles}` — the underlying
+  single-file archive for datasets backed by exactly one COG or
+  PMTiles (`blackmarble.tif`, `ne1.tif` … `oceanbottom.tif`,
+  `watercolor.pmtiles`, `protomaps.pmtiles`). HTTP Range is supported,
+  so GIS clients can read them directly — e.g.
+  `gdalinfo /vsicurl/https://papers.reearth.land/ne2.tif` or the
+  `pmtiles://` protocol in MapLibre.
 - `https://papers.reearth.land/catalog.json` — machine-readable index
   of every tileset exposed by the service (raster themes, vector,
-  watercolor), with the TileJSON / style.json URL for each.
+  watercolor), with the TileJSON / style.json URL for each (and the
+  `source` archive URL where one exists).
 
 `{theme}` is one of `light`, `dark`, `white`, `black`, `grayscale`.
 

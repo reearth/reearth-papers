@@ -7,7 +7,7 @@
 
 import { PMTiles, type RangeResponse, type Source } from "pmtiles";
 
-const WATERCOLOR_KEY = "mirror/watercolor/v1.pmtiles";
+export const WATERCOLOR_ARCHIVE_KEY = "mirror/watercolor/v1.pmtiles";
 
 // Attribution required by both upstreams:
 //   - Stamen Design (map tiles, CC BY 4.0)
@@ -51,7 +51,7 @@ class R2PmtilesSource implements Source {
 
 function getArchive(env: Env): PMTiles {
   if (archiveCache) return archiveCache;
-  archiveCache = new PMTiles(new R2PmtilesSource(env.R2, WATERCOLOR_KEY));
+  archiveCache = new PMTiles(new R2PmtilesSource(env.R2, WATERCOLOR_ARCHIVE_KEY));
   return archiveCache;
 }
 

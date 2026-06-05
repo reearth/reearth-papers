@@ -7,6 +7,9 @@
  *   /styles/{theme}/style.json           — MapLibre style with that theme
  *   /{id}/{z}/{x}/{y}.{ext}              — tiles for every registered tileset
  *   /{id}/tilejson.json                  — TileJSON (?format= where multi-format)
+ *   /{id}.{tif,pmtiles}                  — underlying single-file archive
+ *                                          (HTTP Range supported; GDAL /vsicurl/
+ *                                          and the pmtiles protocol read these)
  *   /catalog.json                        — index of all tilesets
  *   /viewer                              — preview page (public/viewer/index.html)
  *   /                                    — temporary 302 → /viewer (LP TBD)
@@ -27,6 +30,7 @@ import { Container, getContainer } from "@cloudflare/containers";
 const SHARD_COUNT = 4;
 import { lookupCachedTile, storeRenderedTile, tileCacheKey } from "./cache.js";
 import { handleCatalog } from "./catalog.js";
+import { handleSourceFile } from "./source_file.js";
 import { handleStyle, isTheme, type Theme } from "./style.js";
 import { handleRasterTilejson, handleTilesetTilejson } from "./tilejson.js";
 import { TILESETS_BY_ID, type TileFormat } from "./tilesets.js";
@@ -43,20 +47,37 @@ export class TileRenderer extends Container<Env> {
 const STYLE_TILE_RE = /^\/styles\/([a-z]+)\/tile\/(\d+)\/(\d+)\/(\d+)\.png$/;
 const STYLE_TILEJSON_RE = /^\/styles\/([a-z]+)\/tilejson\.json$/;
 const STYLE_STYLE_RE = /^\/styles\/([a-z]+)\/style\.json$/;
-// Tile + TileJSON shapes for every registered tileset, resolved
-// against the central registry (src/tilesets.ts).
+// Tile + TileJSON + source-archive shapes for every registered
+// tileset, resolved against the central registry (src/tilesets.ts).
 const TILESET_TILE_RE = /^\/([a-z0-9_]+)\/(\d+)\/(\d+)\/(\d+)\.([a-z]+)$/;
 const TILESET_TILEJSON_RE = /^\/([a-z0-9_]+)\/tilejson\.json$/;
+const TILESET_SOURCE_RE = /^\/([a-z0-9_]+)\.(tif|pmtiles)$/;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // CORS preflight. Browser clients send one before any request with
+    // a non-safelisted header — notably `Range`, which geotiff.js and
+    // the pmtiles protocol use against the /<id>.{tif,pmtiles} source
+    // routes. Answer globally; everything we serve is public.
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "access-control-allow-origin": "*",
+          "access-control-allow-methods": "GET, HEAD",
+          "access-control-allow-headers": "*",
+          "access-control-max-age": "86400",
+        },
+      });
+    }
+
     // Method gate: this is a read-only tile service. Anything other
     // than GET or HEAD is bounced with 405 (and an `Allow` header so
     // RFC-friendly clients don't have to guess).
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("method not allowed", {
         status: 405,
-        headers: { allow: "GET, HEAD" },
+        headers: { allow: "GET, HEAD, OPTIONS" },
       });
     }
 
@@ -121,6 +142,13 @@ async function dispatch(
         { z: Number(t[2]), x: Number(t[3]), y: Number(t[4]) },
         fmt,
       );
+    }
+  }
+  const sf = url.pathname.match(TILESET_SOURCE_RE);
+  if (sf) {
+    const def = TILESETS_BY_ID.get(sf[1]);
+    if (def?.source && def.source.ext === sf[2]) {
+      return handleSourceFile(request, env, def.source);
     }
   }
 

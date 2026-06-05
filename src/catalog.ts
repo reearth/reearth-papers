@@ -22,6 +22,9 @@ interface RegisteredTileset {
   // Tiles served straight from an upstream provider (not by us) — set
   // so clients (e.g. the viewer) can distinguish it from what we host.
   passthrough?: true;
+  // Direct range-readable URL of the underlying single-file archive
+  // (COG / PMTiles), where one exists.
+  source?: string;
 }
 
 type Tileset = ThemedRasterTileset | RegisteredTileset;
@@ -49,6 +52,7 @@ export function handleCatalog(request: Request): Response {
         type: def.type,
         tilejson: `${origin}/${def.id}/tilejson.json`,
         ...(def.upstreamTiles ? { passthrough: true as const } : {}),
+        ...(def.source ? { source: `${origin}/${def.id}.${def.source.ext}` } : {}),
       }),
     ),
   ];
