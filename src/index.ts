@@ -91,12 +91,14 @@ export default {
       env,
       ctx,
     );
-    if (!isHead) return response;
-    return new Response(null, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
-    });
+
+    // Everything this worker serves is public — stamp CORS once here
+    // instead of per handler. (Without this, cross-origin MapLibre
+    // clients can fetch our TileJSON but not the tiles it points at.)
+    // Cache API / R2-derived responses can be immutable, so re-wrap.
+    const out = new Response(isHead ? null : response.body, response);
+    out.headers.set("access-control-allow-origin", "*");
+    return out;
   },
 } satisfies ExportedHandler<Env>;
 
