@@ -38,10 +38,10 @@ import {
 } from "./naturalearth.js";
 import {
   handleNeVectorTile,
+  kindGeometry,
   naturalEarthVectorStyle,
   NE_VECTOR_ATTRIBUTION,
   NE_VECTOR_TILESETS,
-  type VectorLayer,
 } from "./naturalearth_vector.js";
 import { handleVectorTile, readMirrorPointer } from "./pmtiles.js";
 import type { SourceFile } from "./source_file.js";
@@ -52,6 +52,16 @@ import {
 } from "./watercolor.js";
 
 export type TileFormat = "png" | "webp" | "jpg" | "mvt";
+
+/** One MVT layer of a vector tileset, surfaced in TileJSON
+ *  `vector_layers`. `geometry` is a non-standard hint the viewer uses
+ *  to render the layer with the right primitive (fill / line / circle). */
+export interface VectorLayerInfo {
+  id: string;
+  description: string;
+  minzoom: number;
+  geometry: "polygon" | "line" | "point";
+}
 
 export interface TileCoords {
   z: number;
@@ -99,7 +109,7 @@ export interface TilesetDef {
   /** Vector tilesets: the MVT layers in the archive, surfaced in the
    *  TileJSON `vector_layers` array (required by TileJSON 3.0 for
    *  vector). */
-  vectorLayers?: readonly VectorLayer[];
+  vectorLayers?: readonly VectorLayerInfo[];
   /** Vector tilesets that ship their own cartography: builds the
    *  MapLibre style served at /<id>/style.json and linked from the
    *  catalog, so clients (the viewer) can render it directly. */
@@ -129,6 +139,19 @@ export const TILESETS: readonly TilesetDef[] = [
     minzoom: 0,
     maxzoom: 15,
     handleTile: (_request, env, _ctx, coords) => handleVectorTile(coords, env),
+    // The Protomaps basemap schema layers (ids from the archive's
+    // metadata); lets the viewer's inspector enumerate + toggle them.
+    vectorLayers: [
+      { id: "earth", description: "Landmass polygons", minzoom: 0, geometry: "polygon" },
+      { id: "landcover", description: "Landcover polygons", minzoom: 0, geometry: "polygon" },
+      { id: "landuse", description: "Landuse polygons", minzoom: 0, geometry: "polygon" },
+      { id: "water", description: "Water polygons", minzoom: 0, geometry: "polygon" },
+      { id: "buildings", description: "Building polygons", minzoom: 0, geometry: "polygon" },
+      { id: "roads", description: "Roads", minzoom: 0, geometry: "line" },
+      { id: "boundaries", description: "Administrative boundaries", minzoom: 0, geometry: "line" },
+      { id: "places", description: "Place labels", minzoom: 0, geometry: "point" },
+      { id: "pois", description: "Points of interest", minzoom: 0, geometry: "point" },
+    ],
     source: {
       // Monthly-rotated archive — resolve the current key through the
       // mirror pointer on every request.
@@ -154,7 +177,12 @@ export const TILESETS: readonly TilesetDef[] = [
       maxzoom: d.maxzoom,
       handleTile: (_request, env, _ctx, coords) =>
         handleNeVectorTile(d.archiveKey, coords, env),
-      vectorLayers: d.layers,
+      vectorLayers: d.layers.map((l) => ({
+        id: l.id,
+        description: l.description,
+        minzoom: l.minzoom,
+        geometry: kindGeometry(l.kind),
+      })),
       styleJson: (origin) => naturalEarthVectorStyle(d, origin),
       source: {
         key: d.archiveKey,

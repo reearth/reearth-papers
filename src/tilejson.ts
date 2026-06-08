@@ -67,6 +67,8 @@ export function handleTilesetTilejson(request: Request, def: TilesetDef): Respon
             description: l.description,
             minzoom: l.minzoom,
             maxzoom: def.maxzoom,
+            // Non-standard hint consumed by the viewer's inspector.
+            geometry: l.geometry,
             fields: {},
           })),
         }

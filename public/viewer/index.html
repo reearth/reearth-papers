@@ -425,30 +425,39 @@
       // layer (only the geometry-matching ones actually paint), plus a
       // highlight source for the selected feature. Records neLayers.
       function buildInspectorStyle(t, tj) {
-        const fills = [], lines = [], circles = [];
+        // One style layer per source-layer, of the geometry the
+        // TileJSON declares — so a polyline layer is never filled like a
+        // polygon. Drawn polygons → lines → points, bottom to top.
+        const polys = [], lines = [], points = [];
         neLayers = tj.vector_layers.map((vl, i) => {
           const c = layerColor(i);
-          const base = { source: 'ne', 'source-layer': vl.id };
-          fills.push({ id: `fill__${vl.id}`, type: 'fill', ...base,
-            paint: { 'fill-color': c, 'fill-opacity': 0.35 } });
-          lines.push({ id: `line__${vl.id}`, type: 'line', ...base,
-            paint: { 'line-color': c, 'line-width': 1.2 } });
-          circles.push({ id: `circle__${vl.id}`, type: 'circle', ...base,
-            paint: { 'circle-color': c, 'circle-radius': 3.5,
-              'circle-stroke-color': '#fff', 'circle-stroke-width': 1 } });
-          return { src: vl.id, color: c,
-            ids: [`fill__${vl.id}`, `line__${vl.id}`, `circle__${vl.id}`] };
+          const id = `ne__${vl.id}`;
+          const base = { id, source: 'ne', 'source-layer': vl.id };
+          const geom = vl.geometry || 'polygon';
+          if (geom === 'line') {
+            lines.push({ ...base, type: 'line',
+              paint: { 'line-color': c, 'line-width': 1.4 } });
+          } else if (geom === 'point') {
+            points.push({ ...base, type: 'circle',
+              paint: { 'circle-color': c, 'circle-radius': 3.5,
+                'circle-stroke-color': '#fff', 'circle-stroke-width': 1 } });
+          } else {
+            polys.push({ ...base, type: 'fill',
+              paint: { 'fill-color': c, 'fill-opacity': 0.35, 'fill-outline-color': c } });
+          }
+          return { src: vl.id, color: c, geom, ids: [id] };
         });
         return {
           version: 8,
           glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
           sources: {
-            ne: { type: 'vector', url: new URL(t.tilejson, location.href).toString() },
+            ne: { type: 'vector', url: new URL(t.tilejson, location.href).toString(),
+              attribution: tj.attribution || '' },
             selected: { type: 'geojson', data: EMPTY_FC },
           },
           layers: [
             { id: 'bg', type: 'background', paint: { 'background-color': '#f3f1ea' } },
-            ...fills, ...lines, ...circles,
+            ...polys, ...lines, ...points,
             // Selection highlight (drawn on top); each only paints its
             // matching geometry.
             { id: 'sel-fill', type: 'fill', source: 'selected',

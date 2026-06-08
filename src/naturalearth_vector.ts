@@ -22,8 +22,34 @@ import { PMTiles, type RangeResponse, type Source } from "pmtiles";
 // anyway, matching the raster side (src/naturalearth.ts).
 export const NE_VECTOR_ATTRIBUTION =
   '<a href="https://papers.reearth.land">Re:Earth Papers</a> · ' +
-  'Made with <a href="https://www.naturalearthdata.com">Natural Earth</a> · ' +
+  '<a href="https://www.naturalearthdata.com">Natural Earth</a> · ' +
   "public domain";
+
+/** Render geometry of a layer kind — drives the viewer's per-layer
+ *  inspector (one fill / line / circle layer of the right type) and is
+ *  surfaced in the TileJSON `vector_layers[].geometry`. */
+export function kindGeometry(kind: LayerKind): "polygon" | "line" | "point" {
+  switch (kind) {
+    case "river":
+    case "coast":
+    case "geo_line":
+    case "timezone":
+    case "park_line":
+    case "road":
+    case "rail":
+    case "boundary":
+    case "boundary_maritime":
+    case "boundary_disputed":
+    case "pacific":
+      return "line";
+    case "transport_point":
+    case "place":
+    case "label_point":
+      return "point";
+    default:
+      return "polygon";
+  }
+}
 
 // Cartographic role of a layer — drives both draw order and paint in
 // the generated style (see styleLayersFor below).

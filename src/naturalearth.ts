@@ -135,7 +135,7 @@ function pickOverviewLevel(def: NaturalEarthRaster, z: number): number {
 
 export const NATURAL_EARTH_ATTRIBUTION =
   '<a href="https://papers.reearth.land">Re:Earth Papers</a> · ' +
-  'Made with <a href="https://www.naturalearthdata.com">Natural Earth</a> · ' +
+  '<a href="https://www.naturalearthdata.com">Natural Earth</a> · ' +
   "public domain";
 
 // -- rendering -------------------------------------------------------------
