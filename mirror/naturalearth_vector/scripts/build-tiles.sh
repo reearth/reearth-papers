@@ -77,13 +77,14 @@ EOF
     tippecanoe \
       -o "$out_pm" \
       --name="Natural Earth ${tileset} ${tier}m" \
-      --attribution="Made with Natural Earth" \
+      --attribution="Natural Earth" \
       -Z"$minz" -z"$maxz" \
       --maximum-tile-bytes="$MAX_TILE_BYTES" \
       --drop-densest-as-needed \
       --extend-zooms-if-still-dropping \
       --coalesce-densest-as-needed \
       --simplification=4 \
+      --generate-ids \
       --force \
       "${layer_args[@]}"
     tier_archives+=( "$out_pm" )
@@ -92,7 +93,7 @@ EOF
   out="${WORK}/${out_key}"
   log "tile-join ${#tier_archives[@]} tier(s) → ${out_key}"
   tile-join -o "$out" --name="Natural Earth ${tileset}" \
-    --attribution="Made with Natural Earth" --force "${tier_archives[@]}"
+    --attribution="Natural Earth" --force "${tier_archives[@]}"
 
   log "Uploading ${out_key} ($(du -h "$out" | cut -f1)) → R2"
   wrangler_put "$out" "$out_key" "application/vnd.pmtiles"

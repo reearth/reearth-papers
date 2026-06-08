@@ -58,7 +58,7 @@ jq -n \
   source_base: $base,
   tilesets: $tilesets,
   license: "public domain (Natural Earth)",
-  attribution: "Made with Natural Earth"
+  attribution: "Natural Earth"
 }
 ' > "$TMP"
 

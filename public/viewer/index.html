@@ -409,25 +409,29 @@
       // click-to-select + an attribute popup. Vector tilesets without
       // `vector_layers` (e.g. protomaps) fall back to a MapLibre style.
       let popup = null;
-      let neLayers = []; // [{ src, color, ids:[fill,line,circle] }]
+      let neLayers = []; // [{ src, color, geom, ids:[id] }]
+      let selKey = null; // currently selected feature: { sl, id } | null
       const layersPanel = document.createElement('aside');
       layersPanel.id = 'layers';
       layersPanel.hidden = true;
 
-      const EMPTY_FC = { type: 'FeatureCollection', features: [] };
       // Distinct, deterministic colour per layer index (golden-angle hue).
       const layerColor = (i) => `hsl(${Math.round(i * 137.508) % 360} 65% 45%)`;
       const esc = (v) =>
         String(v).replace(/[&<>"]/g, (s) =>
           ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[s]));
 
-      // Build a debug-style style doc: one fill+line+circle per source-
-      // layer (only the geometry-matching ones actually paint), plus a
-      // highlight source for the selected feature. Records neLayers.
+      // Build an inspector style: one style layer per source-layer, of
+      // the geometry the TileJSON declares (so a polyline layer is never
+      // filled like a polygon). Selection is driven by feature-state
+      // (`sel`) baked into each layer's paint, so the whole feature
+      // highlights across every tile it spans — not just the clicked
+      // tile's clipped piece. (Requires feature ids in the tiles, which
+      // the build adds via tippecanoe `--generate-ids`.)
       function buildInspectorStyle(t, tj) {
-        // One style layer per source-layer, of the geometry the
-        // TileJSON declares — so a polyline layer is never filled like a
-        // polygon. Drawn polygons → lines → points, bottom to top.
+        const SEL = ['boolean', ['feature-state', 'sel'], false];
+        const hl = (selVal, base) => ['case', SEL, selVal, base]; // highlight switch
+        const RED = '#ff3b00';
         const polys = [], lines = [], points = [];
         neLayers = tj.vector_layers.map((vl, i) => {
           const c = layerColor(i);
@@ -436,37 +440,29 @@
           const geom = vl.geometry || 'polygon';
           if (geom === 'line') {
             lines.push({ ...base, type: 'line',
-              paint: { 'line-color': c, 'line-width': 1.4 } });
+              paint: { 'line-color': hl(RED, c), 'line-width': hl(3, 1.4) } });
           } else if (geom === 'point') {
             points.push({ ...base, type: 'circle',
-              paint: { 'circle-color': c, 'circle-radius': 3.5,
+              paint: { 'circle-color': hl(RED, c), 'circle-radius': hl(6, 3.5),
                 'circle-stroke-color': '#fff', 'circle-stroke-width': 1 } });
           } else {
             polys.push({ ...base, type: 'fill',
-              paint: { 'fill-color': c, 'fill-opacity': 0.35, 'fill-outline-color': c } });
+              paint: { 'fill-color': hl(RED, c), 'fill-opacity': hl(0.6, 0.35),
+                'fill-outline-color': hl(RED, c) } });
           }
           return { src: vl.id, color: c, geom, ids: [id] };
         });
+        selKey = null;
         return {
           version: 8,
           glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
           sources: {
             ne: { type: 'vector', url: new URL(t.tilejson, location.href).toString(),
               attribution: tj.attribution || '' },
-            selected: { type: 'geojson', data: EMPTY_FC },
           },
           layers: [
             { id: 'bg', type: 'background', paint: { 'background-color': '#f3f1ea' } },
             ...polys, ...lines, ...points,
-            // Selection highlight (drawn on top); each only paints its
-            // matching geometry.
-            { id: 'sel-fill', type: 'fill', source: 'selected',
-              paint: { 'fill-color': '#ff3b00', 'fill-opacity': 0.25 } },
-            { id: 'sel-line', type: 'line', source: 'selected',
-              paint: { 'line-color': '#ff3b00', 'line-width': 2.5 } },
-            { id: 'sel-pt', type: 'circle', source: 'selected',
-              paint: { 'circle-color': '#ff3b00', 'circle-radius': 6,
-                'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } },
           ],
         };
       }
@@ -527,6 +523,7 @@
         layersPanel.hidden = true;
         layersPanel.innerHTML = '';
         neLayers = [];
+        selKey = null; // feature-state is discarded with the old style
         if (popup) { popup.remove(); popup = null; }
         if (map) map.getCanvas().style.cursor = '';
       }
@@ -537,20 +534,28 @@
         document.getElementById('map').appendChild(layersPanel);
         const hitIds = () => neLayers.flatMap((l) => l.ids).filter((id) => map.getLayer(id));
 
+        const clearSel = () => {
+          if (selKey) {
+            map.removeFeatureState({ source: 'ne', sourceLayer: selKey.sl, id: selKey.id });
+            selKey = null;
+          }
+        };
+
         map.on('click', (e) => {
           if (!neLayers.length) return;
           const ids = hitIds();
           const feats = ids.length ? map.queryRenderedFeatures(e.point, { layers: ids }) : [];
-          const sel = map.getSource('selected');
+          clearSel();
           if (!feats.length) {
-            if (sel) sel.setData(EMPTY_FC);
             if (popup) { popup.remove(); popup = null; }
             return;
           }
           const f = feats[0];
-          if (sel) {
-            sel.setData({ type: 'FeatureCollection',
-              features: [{ type: 'Feature', geometry: f.geometry, properties: {} }] });
+          // Highlight the whole feature across tiles via feature-state.
+          // Needs a feature id (tippecanoe --generate-ids); skip if absent.
+          if (f.id != null) {
+            selKey = { sl: f.sourceLayer, id: f.id };
+            map.setFeatureState({ source: 'ne', sourceLayer: f.sourceLayer, id: f.id }, { sel: true });
           }
           const props = f.properties || {};
           const rows = Object.keys(props).sort().map((k) =>

@@ -421,8 +421,11 @@ export async function handleNeVectorTile(
   return new Response(tile.data, {
     headers: {
       "content-type": "application/vnd.mapbox-vector-tile",
-      // Immutable, theme-keyed archive; cache hard at the edge.
-      "cache-control": "public, max-age=31536000, immutable",
+      // The archive can be rebuilt in place under the same key (e.g. to
+      // regenerate feature ids), so don't cache as immutable — a
+      // moderate TTL with SWR lets a fresh build reach clients within a
+      // day instead of being pinned for a year.
+      "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
       "x-attribution": NE_VECTOR_ATTRIBUTION,
     },
   });
