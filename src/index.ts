@@ -7,6 +7,7 @@
  *   /styles/{theme}/style.json           — MapLibre style with that theme
  *   /{id}/{z}/{x}/{y}.{ext}              — tiles for every registered tileset
  *   /{id}/tilejson.json                  — TileJSON (?format= where multi-format)
+ *   /{id}/style.json                     — MapLibre style (vector tilesets that ship cartography)
  *   /{id}.{tif,pmtiles}                  — underlying single-file archive
  *                                          (HTTP Range supported; GDAL /vsicurl/
  *                                          and the pmtiles protocol read these)
@@ -51,6 +52,7 @@ const STYLE_STYLE_RE = /^\/styles\/([a-z]+)\/style\.json$/;
 // tileset, resolved against the central registry (src/tilesets.ts).
 const TILESET_TILE_RE = /^\/([a-z0-9_]+)\/(\d+)\/(\d+)\/(\d+)\.([a-z]+)$/;
 const TILESET_TILEJSON_RE = /^\/([a-z0-9_]+)\/tilejson\.json$/;
+const TILESET_STYLE_RE = /^\/([a-z0-9_]+)\/style\.json$/;
 const TILESET_SOURCE_RE = /^\/([a-z0-9_]+)\.(tif|pmtiles)$/;
 
 export default {
@@ -131,6 +133,21 @@ async function dispatch(
   if (tj) {
     const def = TILESETS_BY_ID.get(tj[1]);
     if (def) return handleTilesetTilejson(request, def);
+  }
+  // Vector tilesets that ship their own cartography expose a MapLibre
+  // style at /<id>/style.json (linked from the catalog).
+  const sj = url.pathname.match(TILESET_STYLE_RE);
+  if (sj) {
+    const def = TILESETS_BY_ID.get(sj[1]);
+    if (def?.styleJson) {
+      return new Response(JSON.stringify(def.styleJson(url.origin)), {
+        headers: {
+          "content-type": "application/json",
+          "cache-control": "public, max-age=300",
+          "access-control-allow-origin": "*",
+        },
+      });
+    }
   }
   const t = url.pathname.match(TILESET_TILE_RE);
   if (t) {

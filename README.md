@@ -16,7 +16,8 @@ are listed in the table below):
 | URL | What it is |
 |---|---|
 | `/catalog.json` | Machine-readable index of every tileset: TileJSON URL, MapLibre style (themes), and the `source` archive URL where one exists. |
-| `/{id}/tilejson.json` | TileJSON 3.0.0 (`?format=png\|webp` on multi-format rasters; default `webp`). |
+| `/{id}/tilejson.json` | TileJSON 3.0.0 (`?format=png\|webp` on multi-format rasters; default `webp`). Vector entries carry `vector_layers`. |
+| `/{id}/style.json` | MapLibre style, for vector tilesets that ship their own cartography (e.g. `naturalearth_vector`). |
 | `/{id}/{z}/{x}/{y}.{ext}` | XYZ tiles in the tileset's format(s). |
 | `/{id}.{tif,pmtiles}` | The underlying single-file archive, with HTTP Range support — see [Direct archive access](#direct-archive-access). |
 | `/styles/{theme}/tile/{z}/{x}/{y}.png` | Rendered OSM raster tile. `{theme}` ∈ `light dark white black grayscale`. |
@@ -32,6 +33,12 @@ All responses are CORS-open (`access-control-allow-origin: *`).
 |---|---|---|---|---|---|
 | `styles/{theme}` | OpenStreetMap via Protomaps, 5 rendered themes | `png` | 15 | — | © OpenStreetMap contributors |
 | `protomaps` | Protomaps daily basemap, mirrored monthly | `mvt` | 15 | `protomaps.pmtiles` | © OpenStreetMap contributors |
+| `naturalearth_physical` | Natural Earth physical layers (coastline, land/ocean, lakes, rivers, ice, reefs, islands, regions) | `mvt` | 8 | `naturalearth_physical.pmtiles` | public domain |
+| `naturalearth_admin` | Natural Earth admin layers (countries, units, states, counties, boundary lines) | `mvt` | 8 | `naturalearth_admin.pmtiles` | public domain |
+| `naturalearth_labels` | Natural Earth label points (places, admin & region labels) | `mvt` | 8 | `naturalearth_labels.pmtiles` | public domain |
+| `naturalearth_landuse` | Natural Earth land use (urban areas, parks & protected lands) | `mvt` | 8 | `naturalearth_landuse.pmtiles` | public domain |
+| `naturalearth_transport` | Natural Earth transport (roads, railroads, airports, ports, time zones) | `mvt` | 10 | `naturalearth_transport.pmtiles` | public domain |
+| `naturalearth_bathymetry` | Natural Earth ocean-bottom bathymetry (depth bands) | `mvt` | 6 | `naturalearth_bathymetry.pmtiles` | public domain |
 | `watercolor` | Stamen Watercolor (frozen historical set) | `jpg` | 18 | `watercolor.pmtiles` | CC BY 4.0 |
 | `esa_worldcover_2021` | ESA WorldCover 2021 v200 — 10 m land cover | `webp` `png` | 13 | — | CC BY 4.0 |
 | `blackmarble` | NASA Black Marble 2016 — Earth at night | `webp` `png` | 8 | `blackmarble.tif` | public domain |

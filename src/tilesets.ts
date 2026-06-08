@@ -36,6 +36,13 @@ import {
   NATURAL_EARTH_ATTRIBUTION,
   NATURAL_EARTH_RASTERS,
 } from "./naturalearth.js";
+import {
+  handleNeVectorTile,
+  naturalEarthVectorStyle,
+  NE_VECTOR_ATTRIBUTION,
+  NE_VECTOR_TILESETS,
+  type VectorLayer,
+} from "./naturalearth_vector.js";
 import { handleVectorTile, readMirrorPointer } from "./pmtiles.js";
 import type { SourceFile } from "./source_file.js";
 import {
@@ -89,6 +96,14 @@ export interface TilesetDef {
    *  clients (GDAL /vsicurl/, the pmtiles protocol) can read it
    *  directly. See source_file.ts. */
   source?: SourceFile;
+  /** Vector tilesets: the MVT layers in the archive, surfaced in the
+   *  TileJSON `vector_layers` array (required by TileJSON 3.0 for
+   *  vector). */
+  vectorLayers?: readonly VectorLayer[];
+  /** Vector tilesets that ship their own cartography: builds the
+   *  MapLibre style served at /<id>/style.json and linked from the
+   *  catalog, so clients (the viewer) can render it directly. */
+  styleJson?: (origin: string) => unknown;
 }
 
 const PAPERS = '<a href="https://papers.reearth.land">Re:Earth Papers</a>';
@@ -122,6 +137,32 @@ export const TILESETS: readonly TilesetDef[] = [
       contentType: "application/vnd.pmtiles",
     },
   },
+  // Natural Earth vector — one themed tileset per NE_VECTOR_TILESETS
+  // entry (physical, admin, labels, land use, transport, bathymetry);
+  // geometry + display metadata live in naturalearth_vector.ts.
+  ...NE_VECTOR_TILESETS.map(
+    (d): TilesetDef => ({
+      id: d.id,
+      catalogId: d.catalogId,
+      name: d.name,
+      catalogName: d.catalogName,
+      description: d.description,
+      attribution: NE_VECTOR_ATTRIBUTION,
+      type: "vector",
+      formats: ["mvt"],
+      minzoom: d.minzoom,
+      maxzoom: d.maxzoom,
+      handleTile: (_request, env, _ctx, coords) =>
+        handleNeVectorTile(d.archiveKey, coords, env),
+      vectorLayers: d.layers,
+      styleJson: (origin) => naturalEarthVectorStyle(d, origin),
+      source: {
+        key: d.archiveKey,
+        ext: "pmtiles",
+        contentType: "application/vnd.pmtiles",
+      },
+    }),
+  ),
   {
     id: "watercolor",
     name: "Re:Earth Papers — watercolor",

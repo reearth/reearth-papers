@@ -37,3 +37,9 @@ dist/
 
 # Fetch/COG scratch space (naturalearth mirror).
 /mirror/naturalearth/.work/
+
+# Fetch/build scratch space (naturalearth_vector mirror). The built
+# archives live in R2, never in the repo — guard against stray copies
+# (e.g. a `wrangler r2 object get` that writes the key path locally).
+/mirror/naturalearth_vector/.work/
+/mirror/naturalearth_vector/*.pmtiles

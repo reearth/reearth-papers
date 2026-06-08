@@ -58,6 +58,19 @@ export function handleTilesetTilejson(request: Request, def: TilesetDef): Respon
     maxzoom: def.maxzoom,
     bounds: def.bounds ?? BOUNDS,
     center: def.center ?? CENTER,
+    // Required by TileJSON 3.0 for vector tilesets; lets clients
+    // enumerate the MVT layers without parsing a tile first.
+    ...(def.vectorLayers
+      ? {
+          vector_layers: def.vectorLayers.map((l) => ({
+            id: l.id,
+            description: l.description,
+            minzoom: l.minzoom,
+            maxzoom: def.maxzoom,
+            fields: {},
+          })),
+        }
+      : {}),
   });
 }
 

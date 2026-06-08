@@ -25,6 +25,9 @@ interface RegisteredTileset {
   // Direct range-readable URL of the underlying single-file archive
   // (COG / PMTiles), where one exists.
   source?: string;
+  // Self-contained MapLibre style for vector tilesets that ship their
+  // own cartography; the viewer renders these client-side.
+  style?: string;
 }
 
 type Tileset = ThemedRasterTileset | RegisteredTileset;
@@ -53,6 +56,7 @@ export function handleCatalog(request: Request): Response {
         tilejson: `${origin}/${def.id}/tilejson.json`,
         ...(def.upstreamTiles ? { passthrough: true as const } : {}),
         ...(def.source ? { source: `${origin}/${def.id}.${def.source.ext}` } : {}),
+        ...(def.styleJson ? { style: `${origin}/${def.id}/style.json` } : {}),
       }),
     ),
   ];
