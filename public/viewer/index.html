@@ -206,6 +206,74 @@
       .card .kind { display: none; }
       #actions { padding: 8px 12px; border-top: none; }
     }
+
+    /* -- vector inspector (layer panel + attribute popup) ------------- */
+    #layers {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 210px;
+      max-height: calc(100% - 20px);
+      overflow-y: auto;
+      z-index: 2;
+      background: var(--card);
+      border: 1px solid var(--paper-edge);
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(31,28,23,.15);
+      font-size: 12px;
+    }
+    #layers h2 {
+      position: sticky;
+      top: 0;
+      margin: 0;
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font: 600 12px/1.2 'Iowan Old Style', Palatino, Georgia, serif;
+      background: var(--card);
+      border-bottom: 1px solid var(--paper-edge);
+    }
+    #layers .all {
+      font: 500 10px/1 ui-monospace, Menlo, monospace;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+    #layers .all:hover { color: var(--accent); }
+    #layers .lyr {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 4px 10px;
+      cursor: pointer;
+    }
+    #layers .lyr:hover { background: #f3efe6; }
+    #layers .lyr input { margin: 0; flex: none; }
+    #layers .sw {
+      width: 11px;
+      height: 11px;
+      border-radius: 2px;
+      flex: none;
+      border: 1px solid rgba(0,0,0,.15);
+    }
+    #layers .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .maplibregl-popup-content { font: 12px/1.4 system-ui, -apple-system, sans-serif; }
+    .ne-pop .h {
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+    .ne-pop table { border-collapse: collapse; display: block; max-height: 240px; overflow: auto; }
+    .ne-pop td { border-top: 1px solid #eee; padding: 1px 8px 1px 0; vertical-align: top; }
+    .ne-pop td.k { color: var(--ink-soft); white-space: nowrap; }
+    @media (max-width: 720px) {
+      #layers { top: auto; bottom: 10px; right: 10px; max-height: 45%; width: 180px; }
+    }
   </style>
 </head>
 <body>
@@ -334,27 +402,167 @@
           .catch(() => {});
       }
 
-      // -- selection / map ------------------------------------------
-      const select = (t) => {
-        selected = t;
-        for (const [id, card] of cards) {
-          card.classList.toggle('selected', id === t.id);
+      // -- vector inspector -----------------------------------------
+      // A vector tileset that advertises `vector_layers` in its
+      // TileJSON gets an "inspector": every source-layer rendered in
+      // its own auto-assigned colour, individually toggleable, with
+      // click-to-select + an attribute popup. Vector tilesets without
+      // `vector_layers` (e.g. protomaps) fall back to a MapLibre style.
+      let popup = null;
+      let neLayers = []; // [{ src, color, ids:[fill,line,circle] }]
+      const layersPanel = document.createElement('aside');
+      layersPanel.id = 'layers';
+      layersPanel.hidden = true;
+
+      const EMPTY_FC = { type: 'FeatureCollection', features: [] };
+      // Distinct, deterministic colour per layer index (golden-angle hue).
+      const layerColor = (i) => `hsl(${Math.round(i * 137.508) % 360} 65% 45%)`;
+      const esc = (v) =>
+        String(v).replace(/[&<>"]/g, (s) =>
+          ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[s]));
+
+      // Build a debug-style style doc: one fill+line+circle per source-
+      // layer (only the geometry-matching ones actually paint), plus a
+      // highlight source for the selected feature. Records neLayers.
+      function buildInspectorStyle(t, tj) {
+        const fills = [], lines = [], circles = [];
+        neLayers = tj.vector_layers.map((vl, i) => {
+          const c = layerColor(i);
+          const base = { source: 'ne', 'source-layer': vl.id };
+          fills.push({ id: `fill__${vl.id}`, type: 'fill', ...base,
+            paint: { 'fill-color': c, 'fill-opacity': 0.35 } });
+          lines.push({ id: `line__${vl.id}`, type: 'line', ...base,
+            paint: { 'line-color': c, 'line-width': 1.2 } });
+          circles.push({ id: `circle__${vl.id}`, type: 'circle', ...base,
+            paint: { 'circle-color': c, 'circle-radius': 3.5,
+              'circle-stroke-color': '#fff', 'circle-stroke-width': 1 } });
+          return { src: vl.id, color: c,
+            ids: [`fill__${vl.id}`, `line__${vl.id}`, `circle__${vl.id}`] };
+        });
+        return {
+          version: 8,
+          glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
+          sources: {
+            ne: { type: 'vector', url: new URL(t.tilejson, location.href).toString() },
+            selected: { type: 'geojson', data: EMPTY_FC },
+          },
+          layers: [
+            { id: 'bg', type: 'background', paint: { 'background-color': '#f3f1ea' } },
+            ...fills, ...lines, ...circles,
+            // Selection highlight (drawn on top); each only paints its
+            // matching geometry.
+            { id: 'sel-fill', type: 'fill', source: 'selected',
+              paint: { 'fill-color': '#ff3b00', 'fill-opacity': 0.25 } },
+            { id: 'sel-line', type: 'line', source: 'selected',
+              paint: { 'line-color': '#ff3b00', 'line-width': 2.5 } },
+            { id: 'sel-pt', type: 'circle', source: 'selected',
+              paint: { 'circle-color': '#ff3b00', 'circle-radius': 6,
+                'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } },
+          ],
+        };
+      }
+
+      // (Re)build the layer toggle panel from neLayers.
+      function setupInspector() {
+        layersPanel.innerHTML = '';
+        const h = document.createElement('h2');
+        const title = document.createElement('span');
+        title.textContent = 'Layers';
+        const allBtn = document.createElement('button');
+        allBtn.type = 'button';
+        allBtn.className = 'all';
+        allBtn.textContent = 'toggle all';
+        h.append(title, allBtn);
+        layersPanel.appendChild(h);
+
+        const setVis = (layer, on) => {
+          for (const id of layer.ids) {
+            if (map.getLayer(id)) {
+              map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+            }
+          }
+        };
+
+        const boxes = [];
+        for (const layer of neLayers) {
+          const row = document.createElement('label');
+          row.className = 'lyr';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = true;
+          const sw = document.createElement('span');
+          sw.className = 'sw';
+          sw.style.background = layer.color;
+          const nm = document.createElement('span');
+          nm.className = 'nm';
+          nm.textContent = layer.src;
+          nm.title = layer.src;
+          cb.addEventListener('change', () => setVis(layer, cb.checked));
+          row.append(cb, sw, nm);
+          layersPanel.appendChild(row);
+          boxes.push(cb);
         }
 
-        const u = new URL(location.href);
-        u.searchParams.set('id', t.id);
-        u.searchParams.delete('mode'); // legacy toggle param
-        history.replaceState(null, '', u.toString());
+        let allOn = true;
+        allBtn.addEventListener('click', () => {
+          allOn = !allOn;
+          neLayers.forEach((layer, i) => {
+            boxes[i].checked = allOn;
+            setVis(layer, allOn);
+          });
+        });
+        layersPanel.hidden = false;
+      }
 
-        // Client-side (vector) rendering only exists for vector
-        // PMTiles tilesets; everything else shows its raster tiles.
-        // The bare protomaps-vector tileset ships no default style, so
-        // fall back to the light theme's full style.
-        const style =
-          t.type === 'vector'
-            ? (t.style || '/styles/light/style.json')
-            : rasterStyle(t.tilejson);
+      function teardownInspector() {
+        layersPanel.hidden = true;
+        layersPanel.innerHTML = '';
+        neLayers = [];
+        if (popup) { popup.remove(); popup = null; }
+        if (map) map.getCanvas().style.cursor = '';
+      }
 
+      // Bound once, after the map exists: click → select + attributes,
+      // hover → pointer cursor. No-ops unless an inspector is active.
+      function bindInspector() {
+        document.getElementById('map').appendChild(layersPanel);
+        const hitIds = () => neLayers.flatMap((l) => l.ids).filter((id) => map.getLayer(id));
+
+        map.on('click', (e) => {
+          if (!neLayers.length) return;
+          const ids = hitIds();
+          const feats = ids.length ? map.queryRenderedFeatures(e.point, { layers: ids }) : [];
+          const sel = map.getSource('selected');
+          if (!feats.length) {
+            if (sel) sel.setData(EMPTY_FC);
+            if (popup) { popup.remove(); popup = null; }
+            return;
+          }
+          const f = feats[0];
+          if (sel) {
+            sel.setData({ type: 'FeatureCollection',
+              features: [{ type: 'Feature', geometry: f.geometry, properties: {} }] });
+          }
+          const props = f.properties || {};
+          const rows = Object.keys(props).sort().map((k) =>
+            `<tr><td class="k">${esc(k)}</td><td>${esc(props[k])}</td></tr>`).join('');
+          const html = `<div class="ne-pop"><div class="h">${esc(f.sourceLayer)}</div>` +
+            (rows ? `<table>${rows}</table>` : '<em>no attributes</em>') + '</div>';
+          if (popup) popup.remove();
+          popup = new maplibregl.Popup({ maxWidth: '300px' })
+            .setLngLat(e.lngLat).setHTML(html).addTo(map);
+        });
+
+        map.on('mousemove', (e) => {
+          if (!neLayers.length) return;
+          const ids = hitIds();
+          const hit = ids.length && map.queryRenderedFeatures(e.point, { layers: ids }).length;
+          map.getCanvas().style.cursor = hit ? 'pointer' : '';
+        });
+      }
+
+      // -- selection / map ------------------------------------------
+      const ensureMap = (style) => {
         if (!map) {
           map = new maplibregl.Map({
             container: 'map',
@@ -365,13 +573,48 @@
           });
           map.addControl(new maplibregl.NavigationControl());
           map.addControl(new maplibregl.ScaleControl());
+          bindInspector();
         } else {
           map.setStyle(style);
         }
+      };
+
+      const select = async (t) => {
+        selected = t;
+        for (const [id, card] of cards) {
+          card.classList.toggle('selected', id === t.id);
+        }
+
+        const u = new URL(location.href);
+        u.searchParams.set('id', t.id);
+        u.searchParams.delete('mode'); // legacy toggle param
+        history.replaceState(null, '', u.toString());
 
         copyTilejson.disabled = false;
         copyXyz.disabled = false;
         cards.get(t.id)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+
+        // Raster: show served tiles, no inspector.
+        if (t.type !== 'vector') {
+          teardownInspector();
+          ensureMap(rasterStyle(t.tilejson));
+          return;
+        }
+
+        // Vector: inspector when the TileJSON lists vector_layers,
+        // otherwise fall back to a MapLibre style (protomaps ships
+        // none of its own, so use the light theme).
+        let tj = null;
+        try {
+          tj = await fetch(t.tilejson).then((r) => r.json());
+        } catch (e) {}
+        if (tj && Array.isArray(tj.vector_layers) && tj.vector_layers.length) {
+          ensureMap(buildInspectorStyle(t, tj));
+          setupInspector();
+        } else {
+          teardownInspector();
+          ensureMap(t.style || '/styles/light/style.json');
+        }
       };
 
       const params = new URLSearchParams(location.search);
