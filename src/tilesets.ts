@@ -43,6 +43,11 @@ import {
   NE_VECTOR_ATTRIBUTION,
   NE_VECTOR_TILESETS,
 } from "./naturalearth_vector.js";
+import {
+  handleOvertureTile,
+  OVERTURE_ATTRIBUTION,
+  OVERTURE_TILESETS,
+} from "./overture.js";
 import { handleVectorTile, readMirrorPointer } from "./pmtiles.js";
 import type { SourceFile } from "./source_file.js";
 import {
@@ -189,6 +194,34 @@ export const TILESETS: readonly TilesetDef[] = [
         ext: "pmtiles",
         contentType: "application/vnd.pmtiles",
       },
+    }),
+  ),
+  // Overture Maps vector — one themed tileset per OVERTURE_TILESETS
+  // entry (base, buildings, places, transportation, divisions). Unlike
+  // the entries above, these are *not* R2-backed: the handler range-reads
+  // Overture's official PMTiles straight from S3 (see overture.ts). No
+  // `source` (the archive lives off our origin) and no `styleJson` (the
+  // viewer auto-colours from `vector_layers`, same as the protomaps
+  // entry).
+  ...OVERTURE_TILESETS.map(
+    (d): TilesetDef => ({
+      id: d.id,
+      catalogId: d.catalogId,
+      name: d.name,
+      catalogName: d.catalogName,
+      description: d.description,
+      attribution: OVERTURE_ATTRIBUTION,
+      type: "vector",
+      formats: ["mvt"],
+      minzoom: d.minzoom,
+      maxzoom: d.maxzoom,
+      handleTile: (_request, _env, _ctx, coords) => handleOvertureTile(d.theme, coords),
+      vectorLayers: d.layers.map((l) => ({
+        id: l.id,
+        description: l.description,
+        minzoom: l.minzoom,
+        geometry: l.geometry,
+      })),
     }),
   ),
   {
