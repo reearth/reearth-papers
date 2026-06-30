@@ -368,12 +368,16 @@
         name.className = 'name';
         name.textContent = t.name;
         name.title = t.name;
-        // Passthrough tilesets are served straight from an upstream
-        // provider — flag them so it's clear they aren't hosted by us.
+        // Flag how each tileset is sourced: passthrough (·pt) is served
+        // straight from an upstream provider; proxy (·px) is served by us
+        // but range-read from a remote archive we don't mirror. Plain
+        // entries are hosted from our own R2.
         const kind = document.createElement('span');
         kind.className = 'kind';
-        kind.textContent = t.passthrough ? t.type + '·pt' : t.type;
-        kind.title = t.passthrough ? t.type + ' · passthrough' : t.type;
+        const hosting = t.passthrough ? 'passthrough' : t.proxy ? 'proxy' : '';
+        const suffix = t.passthrough ? '·pt' : t.proxy ? '·px' : '';
+        kind.textContent = t.type + suffix;
+        kind.title = hosting ? t.type + ' · ' + hosting : t.type;
         label.appendChild(name);
         label.appendChild(kind);
         card.appendChild(label);

@@ -6,14 +6,19 @@
 //   - the TileJSON route  /<id>/tilejson.json       (see tilejson.ts)
 //   - the catalog.json entry                        (see catalog.ts)
 //
-// Two kinds of entries:
-//   - self-hosted: `handleTile` serves/renders bytes (R2-backed COGs,
-//     PMTiles archives). `formats` lists the served extensions; the
-//     first is the TileJSON default (override with ?format=). For the
-//     COG-rendered tilesets, the `persist` literal passed to the
-//     handler decides whether rendered tiles are stored in R2 as a
-//     global cache layer (expensive renders) or served from the edge
-//     cache alone (cheap renders) — see src/render_cache.ts.
+// Three kinds of entries:
+//   - self-hosted: `handleTile` serves/renders bytes from data we mirror
+//     to R2 (COGs, PMTiles archives). `formats` lists the served
+//     extensions; the first is the TileJSON default (override with
+//     ?format=). For the COG-rendered tilesets, the `persist` literal
+//     passed to the handler decides whether rendered tiles are stored in
+//     R2 as a global cache layer (expensive renders) or served from the
+//     edge cache alone (cheap renders) — see src/render_cache.ts.
+//   - proxy: `handleTile` + `proxy: true`. We serve the bytes (so the
+//     browser only ever talks to us — no upstream CORS needed), but we
+//     mirror nothing: the handler range-reads a remote archive on demand
+//     and re-serves it (see src/overture.ts). Between self-hosted (we
+//     mirror) and passthrough (browser hits upstream): we proxy.
 //   - passthrough: `upstreamTiles` points the TileJSON straight at an
 //     upstream provider — we serve no bytes and store nothing in R2;
 //     attribution, baked into the TileJSON, is all we own. The
@@ -106,6 +111,11 @@ export interface TilesetDef {
     coords: TileCoords,
     fmt: TileFormat,
   ) => Promise<Response>;
+  /** Self-hosted-but-not-mirrored: `handleTile` proxies a remote archive
+   *  on demand (range-read + re-serve) rather than reading R2. Surfaced
+   *  in the catalog so clients can tell it apart from data we mirror and
+   *  from passthrough (where the browser hits the upstream itself). */
+  proxy?: boolean;
   /** For datasets backed by exactly one COG / PMTiles archive: expose
    *  the file itself at /<id>.<ext> with HTTP Range support, so GIS
    *  clients (GDAL /vsicurl/, the pmtiles protocol) can read it
@@ -215,6 +225,8 @@ export const TILESETS: readonly TilesetDef[] = [
       formats: ["mvt"],
       minzoom: d.minzoom,
       maxzoom: d.maxzoom,
+      // Range-read from Overture's S3 on demand; we mirror nothing.
+      proxy: true,
       handleTile: (_request, _env, _ctx, coords) => handleOvertureTile(d.theme, coords),
       vectorLayers: d.layers.map((l) => ({
         id: l.id,
