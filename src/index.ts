@@ -28,7 +28,7 @@ import { Container, getContainer } from "@cloudflare/containers";
 // style cache and warm GL pool), while *different* tiles can land on
 // different shards and render concurrently. Keep this ≤ max_instances
 // in wrangler.toml so CF can actually spin up that many.
-const SHARD_COUNT = 4;
+const SHARD_COUNT = 8;
 import { lookupCachedTile, storeRenderedTile, tileCacheKey } from "./cache.js";
 import { handleCatalog } from "./catalog.js";
 import { handleSourceFile } from "./source_file.js";
