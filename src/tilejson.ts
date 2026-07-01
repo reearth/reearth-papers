@@ -10,6 +10,15 @@ import {
 const BOUNDS = [-180, -85.0511, 180, 85.0511];
 const CENTER = [0, 20, 2];
 
+// Max zoom advertised for (and served by) the rendered raster route.
+// The Protomaps vector source only carries data through z15, but the
+// container's maplibre-native overzooms that vector internally, so it
+// renders crisp raster past z15 — no bitmap upscaling. We advertise a
+// bounded max (rather than the source's z15) so clients keep requesting
+// freshly-rendered deep tiles instead of stretching the z15 PNG, while
+// still capping the 4×-per-level render cost somewhere sane.
+export const RENDERED_RASTER_MAXZOOM = 20;
+
 // Themed OSM rasters — outside the tileset registry (see tilesets.ts).
 export function handleRasterTilejson(request: Request, theme: Theme): Response {
   const origin = new URL(request.url).origin;
@@ -23,7 +32,7 @@ export function handleRasterTilejson(request: Request, theme: Theme): Response {
     scheme: "xyz",
     tiles: [`${origin}/styles/${theme}/tile/{z}/{x}/{y}.png`],
     minzoom: 0,
-    maxzoom: 15,
+    maxzoom: RENDERED_RASTER_MAXZOOM,
     bounds: BOUNDS,
     center: CENTER,
   });

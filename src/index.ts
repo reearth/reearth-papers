@@ -33,7 +33,11 @@ import { lookupCachedTile, storeRenderedTile, tileCacheKey } from "./cache.js";
 import { handleCatalog } from "./catalog.js";
 import { handleSourceFile } from "./source_file.js";
 import { handleStyle, isTheme, type Theme } from "./style.js";
-import { handleRasterTilejson, handleTilesetTilejson } from "./tilejson.js";
+import {
+  handleRasterTilejson,
+  handleTilesetTilejson,
+  RENDERED_RASTER_MAXZOOM,
+} from "./tilejson.js";
 import { TILESETS_BY_ID, type TileFormat } from "./tilesets.js";
 
 export class TileRenderer extends Container<Env> {
@@ -187,8 +191,15 @@ async function dispatch(
   if (tile) {
     const theme = requireTheme(tile[1]);
     if (theme instanceof Response) return theme;
+    const z = Number(tile[2]);
+    // Bound render cost: the tilejson only advertises tiles through
+    // RENDERED_RASTER_MAXZOOM, so a request past it is a direct hit — no
+    // point spinning the container up to overzoom the z15 vector further.
+    if (z > RENDERED_RASTER_MAXZOOM) {
+      return new Response("zoom above available range", { status: 404 });
+    }
     return renderRasterTile(request, env, ctx, theme, {
-      z: Number(tile[2]),
+      z,
       x: Number(tile[3]),
       y: Number(tile[4]),
     });
