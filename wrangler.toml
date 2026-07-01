@@ -44,9 +44,11 @@ directory = "./public"
 [[containers]]
 class_name = "TileRenderer"
 image = "./container/Dockerfile"
-# Up to 8 instances so the SHARD_COUNT shards in src/index.ts can run
-# in parallel under load.
-max_instances = 8
+# Ceiling only — instances spawn on demand (per shard) and cost nothing
+# idle. The real knob is SHARD_COUNT in src/index.ts (32); this just has
+# to sit above it with rollout headroom. Well within the account cap
+# (1,500 concurrent vCPU ÷ 4 for standard-4 ≈ 375 instances).
+max_instances = 100
 # standard-4 is the largest instance type (4 vCPU / 12 GiB / 20 GB).
 # Software-Vulkan (lavapipe) rasterization is CPU bound, so maxing the
 # cores minimises single-tile render time.

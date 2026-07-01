@@ -17,7 +17,7 @@ const CENTER = [0, 20, 2];
 // bounded max (rather than the source's z15) so clients keep requesting
 // freshly-rendered deep tiles instead of stretching the z15 PNG, while
 // still capping the 4×-per-level render cost somewhere sane.
-export const RENDERED_RASTER_MAXZOOM = 20;
+export const RENDERED_RASTER_MAXZOOM = 22;
 
 // Themed OSM rasters — outside the tileset registry (see tilesets.ts).
 export function handleRasterTilejson(request: Request, theme: Theme): Response {

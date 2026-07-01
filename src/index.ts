@@ -28,7 +28,16 @@ import { Container, getContainer } from "@cloudflare/containers";
 // style cache and warm GL pool), while *different* tiles can land on
 // different shards and render concurrently. Keep this ≤ max_instances
 // in wrangler.toml so CF can actually spin up that many.
-const SHARD_COUNT = 8;
+//
+// The render pool is single-threaded per instance (maplibre-native
+// serialises tiles through one Vulkan context), so shards ARE our only
+// render parallelism. Sized to ~a full viewport's tile count so an
+// interactive pan/zoom fans its tiles across distinct instances and
+// renders them concurrently (~1 warm render each) instead of queueing
+// several per instance. Past ~viewport size there's no single-viewport
+// gain — only headroom for concurrent users — and it scatters traffic
+// across more (cold) instances, so don't over-shard.
+const SHARD_COUNT = 32;
 import { lookupCachedTile, storeRenderedTile, tileCacheKey } from "./cache.js";
 import { handleCatalog } from "./catalog.js";
 import { handleSourceFile } from "./source_file.js";
