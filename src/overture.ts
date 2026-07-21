@@ -28,7 +28,7 @@ import { FetchSource, PMTiles } from "pmtiles";
 // Bump this (and re-check layer ids / zoom ranges) when adopting a newer
 // release. The route path (/overture_*/{z}/{x}/{y}.mvt) is stable across
 // bumps, so the edge cache rolls over within the tile TTL below.
-export const OVERTURE_RELEASE = "2026-05-20.0";
+export const OVERTURE_RELEASE = "2026-06-17.0";
 
 const S3_BASE =
   "https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles";
@@ -73,7 +73,7 @@ export interface OvertureTileset {
 }
 
 // Layer ids, zoom ranges and theme zoom caps were read from the live
-// 2026-05-20.0 archives' PMTiles metadata. The `addresses` theme (z14
+// 2026-06-17.0 archives' PMTiles metadata. The `addresses` theme (z14
 // only, hundreds of millions of points) is intentionally omitted.
 export const OVERTURE_TILESETS: readonly OvertureTileset[] = [
   {
@@ -109,12 +109,12 @@ export const OVERTURE_TILESETS: readonly OvertureTileset[] = [
     catalogName: "Overture Buildings",
     description:
       "Overture Maps buildings theme — building footprints and 3D " +
-      "building parts, served from Overture's official PMTiles. z5–14.",
+      "building parts, served from Overture's official PMTiles. z6–14.",
     theme: "buildings",
     minzoom: 0,
     maxzoom: 14,
     layers: [
-      { id: "building", description: "Building footprint polygons", geometry: "polygon", minzoom: 5 },
+      { id: "building", description: "Building footprint polygons", geometry: "polygon", minzoom: 6 },
       {
         id: "building_part",
         description: "Building part polygons (3D detail)",
