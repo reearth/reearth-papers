@@ -55,6 +55,32 @@
       color: var(--ink-soft);
     }
 
+    /* -- tabs (Raster / MVT) ----------------------------------------- */
+    #tabs {
+      display: flex;
+      gap: 4px;
+      margin-top: 10px;
+    }
+    #tabs .tab {
+      flex: 1;
+      font: 500 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      background: none;
+      border: 1px solid var(--paper-edge);
+      border-radius: 5px;
+      padding: 5px 8px;
+      cursor: pointer;
+      transition: color .15s, border-color .15s;
+    }
+    #tabs .tab:hover { color: var(--ink); border-color: #c9c2b2; }
+    #tabs .tab[aria-selected="true"] {
+      color: var(--accent);
+      border-color: var(--accent);
+      box-shadow: inset 0 0 0 1px var(--accent);
+    }
+
     /* -- gallery ------------------------------------------------------ */
     #gallery {
       flex: 1;
@@ -68,6 +94,10 @@
       gap: 10px;
       align-content: start;
     }
+    /* Author `display:block` on .card would defeat the plain [hidden]
+       attribute (author origin beats the UA rule), so hide filtered-out
+       cards with a higher-specificity author rule. */
+    .card[hidden] { display: none; }
     .card {
       display: block;
       width: 100%;
@@ -192,6 +222,10 @@
         border-bottom: none;
       }
       #panel h1 { font-size: 14px; }
+      /* Inline in the header row (pushed to the right) so the tabs cost
+         no extra vertical space on the mobile strip. */
+      #tabs { margin: 0 0 0 auto; flex: none; }
+      #tabs .tab { flex: none; }
       #gallery {
         display: flex;
         overflow-x: auto;
@@ -281,6 +315,10 @@
     <header>
       <h1>Re:Earth Papers</h1>
       <p class="sub">tileset preview</p>
+      <div id="tabs" role="tablist" aria-label="Tileset type">
+        <button type="button" class="tab" role="tab" data-tab="raster" aria-selected="true">Raster</button>
+        <button type="button" class="tab" role="tab" data-tab="vector" aria-selected="false">MVT</button>
+      </div>
     </header>
     <nav id="gallery" aria-label="Tilesets">
       <p class="pending">loading /catalog.json…</p>
@@ -341,6 +379,9 @@
         card.type = 'button';
         card.className = 'card';
         card.dataset.id = t.id;
+        // Which tab this card belongs to: MVT tab holds vector tilesets,
+        // Raster tab holds everything else.
+        card.dataset.tab = t.type === 'vector' ? 'vector' : 'raster';
 
         const thumb = document.createElement('span');
         thumb.className = 'thumb';
@@ -597,11 +638,32 @@
         }
       };
 
+      // -- tabs (Raster / MVT) --------------------------------------
+      // The gallery holds every card; the active tab just filters which
+      // are visible. Switching tabs never changes the map selection.
+      const tabBtns = document.querySelectorAll('#tabs .tab');
+      let activeTab = 'raster';
+      const applyTab = (tab) => {
+        activeTab = tab;
+        for (const b of tabBtns) {
+          b.setAttribute('aria-selected', String(b.dataset.tab === tab));
+        }
+        for (const card of cards.values()) {
+          card.hidden = card.dataset.tab !== tab;
+        }
+      };
+      for (const b of tabBtns) {
+        b.addEventListener('click', () => applyTab(b.dataset.tab));
+      }
+
       const select = async (t) => {
         selected = t;
         for (const [id, card] of cards) {
           card.classList.toggle('selected', id === t.id);
         }
+        // Make sure the tab holding the selected card is the active one,
+        // so the card is visible (and scrollIntoView below can reach it).
+        applyTab(t.type === 'vector' ? 'vector' : 'raster');
 
         const u = new URL(location.href);
         u.searchParams.set('id', t.id);
