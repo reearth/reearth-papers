@@ -15,7 +15,8 @@
  *   /viewer                              — preview page (public/viewer/index.html)
  *   /                                    — temporary 302 → /viewer (LP TBD)
  *
- * `{theme}` is one of light / dark / white / black / grayscale.
+ * `{theme}` is one of papers-light / papers-dark (the house styles) or
+ * light / dark / white / black / grayscale (stock Protomaps themes).
  * `{id}` and `{ext}` are data-driven from the central tileset registry
  * (src/tilesets.ts) — adding a dataset is one entry there; the tile
  * route, TileJSON route, and catalog entry all derive from it.

@@ -2,7 +2,7 @@
 // service exposes, with links to each one's TileJSON / style.json so
 // downstream tools can crawl the surface without hard-coding URLs.
 
-import { THEMES } from "./style.js";
+import { THEMES, themeCatalogId, themeName } from "./style.js";
 import { TILESETS } from "./tilesets.js";
 
 interface ThemedRasterTileset {
@@ -40,11 +40,13 @@ export function handleCatalog(request: Request): Response {
   const origin = new URL(request.url).origin;
 
   const tilesets: Tileset[] = [
-    // Themed OSM rasters: one tileset + MapLibre style per theme.
+    // Themed OSM rasters: one tileset + MapLibre style per theme. The
+    // house styles (Papers Light / Papers Dark) lead the list — see
+    // THEMES in style.ts.
     ...THEMES.map(
       (theme): ThemedRasterTileset => ({
-        id: `protomaps-${theme}`,
-        name: `Protomaps Basemap (${theme})`,
+        id: themeCatalogId(theme),
+        name: themeName(theme),
         type: "raster",
         theme,
         tilejson: `${origin}/styles/${theme}/tilejson.json`,

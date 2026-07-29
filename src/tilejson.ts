@@ -1,6 +1,6 @@
 // TileJSON 3.0.0 — https://github.com/mapbox/tilejson-spec/tree/master/3.0.0
 
-import type { Theme } from "./style.js";
+import { type Theme, themeName } from "./style.js";
 import {
   PROTOMAPS_ATTRIBUTION,
   type TileFormat,
@@ -24,7 +24,7 @@ export function handleRasterTilejson(request: Request, theme: Theme): Response {
   const origin = new URL(request.url).origin;
   return json({
     tilejson: "3.0.0",
-    name: `Re:Earth Papers — ${theme}`,
+    name: `Re:Earth Papers — ${themeName(theme)}`,
     description:
       "Beautiful raster tiles rendered from OpenStreetMap (Protomaps) " +
       "across a curated set of styles.",

@@ -9,14 +9,31 @@
 
 import { layers, namedTheme } from "protomaps-themes-base";
 
+// Reaches across into the main worker's source on purpose: the house
+// cartography is ~300 lines and both workers must render it
+// identically, so it lives in exactly one file. The two projects
+// deploy separately but always from the same checkout.
+import { isPapersTheme, papersLayers } from "../../../src/papers_layers.js";
+
 const ASSETS_BASE = "https://protomaps.github.io/basemaps-assets";
 // Tile source name referenced by the generated layers — must match the
 // first argument passed to `layers(...)` below.
 const SOURCE_NAME = "protomaps";
 
-type Theme = "light" | "dark" | "white" | "black" | "grayscale";
+// Keep in sync with THEMES in the main worker's src/style.ts — it's
+// what decides which `?theme=` values the renderer can be asked for.
+type Theme =
+  | "papers-light"
+  | "papers-dark"
+  | "light"
+  | "dark"
+  | "white"
+  | "black"
+  | "grayscale";
 
 const VALID_THEMES: ReadonlySet<Theme> = new Set([
+  "papers-light",
+  "papers-dark",
   "light",
   "dark",
   "white",
@@ -51,7 +68,12 @@ export function handleStyle(url: URL, env: Env): Response {
   const tileUrl =
     `https://reearth-papers-mirror.reearth.workers.dev/protomaps/{z}/{x}/{y}.mvt?token=${token}`;
 
-  const allLayers = layers(SOURCE_NAME, namedTheme(theme), { lang: "en" });
+  // The house styles carry no symbol layers, so `?minimal=1` is a
+  // no-op for them and they never need glyphs or a sprite.
+  const papers = isPapersTheme(theme);
+  const allLayers: { type?: unknown }[] = papers
+    ? papersLayers(SOURCE_NAME, theme)
+    : layers(SOURCE_NAME, namedTheme(theme), { lang: "en" });
   const keptLayers = minimal
     ? allLayers.filter((l) => l.type !== "symbol")
     : allLayers;
@@ -72,7 +94,7 @@ export function handleStyle(url: URL, env: Env): Response {
     },
     layers: keptLayers,
   };
-  if (!minimal) {
+  if (!minimal && !papers) {
     style.glyphs = `${ASSETS_BASE}/fonts/{fontstack}/{range}.pbf`;
     style.sprite = `${ASSETS_BASE}/sprites/v4/${theme}`;
   }

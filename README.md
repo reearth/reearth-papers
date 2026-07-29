@@ -20,7 +20,7 @@ are listed in the table below):
 | `/{id}/style.json` | MapLibre style, for vector tilesets that ship their own cartography (e.g. `naturalearth_vector`). |
 | `/{id}/{z}/{x}/{y}.{ext}` | XYZ tiles in the tileset's format(s). |
 | `/{id}.{tif,pmtiles}` | The underlying single-file archive, with HTTP Range support — see [Direct archive access](#direct-archive-access). |
-| `/styles/{theme}/tile/{z}/{x}/{y}.png` | Rendered OSM raster tile. `{theme}` ∈ `light dark white black grayscale`. |
+| `/styles/{theme}/tile/{z}/{x}/{y}.png` | Rendered OSM raster tile. `{theme}` ∈ `papers-light papers-dark light dark white black grayscale`. |
 | `/styles/{theme}/tilejson.json` | TileJSON for a rendered theme. |
 | `/styles/{theme}/style.json` | The theme's full MapLibre style, for client-side vector rendering. |
 | `/viewer` | Interactive preview of all of the above. |
@@ -31,7 +31,7 @@ All responses are CORS-open (`access-control-allow-origin: *`).
 
 | `{id}` | Dataset | Format | Native max zoom | Archive | License |
 |---|---|---|---|---|---|
-| `styles/{theme}` | OpenStreetMap via Protomaps, 5 rendered themes | `png` | 15 | — | © OpenStreetMap contributors |
+| `styles/{theme}` | OpenStreetMap via Protomaps, 7 rendered themes: the two house styles (Papers Light / Papers Dark — a label-free greyscale basemap meant to sit under data overlays) plus 5 stock Protomaps themes | `png` | 15 | — | © OpenStreetMap contributors |
 | `protomaps` | Protomaps daily basemap, mirrored monthly | `mvt` | 15 | `protomaps.pmtiles` | © OpenStreetMap contributors |
 | `naturalearth_physical` | Natural Earth physical layers (coastline, land/ocean, lakes, rivers, ice, reefs, islands, regions) | `mvt` | 8 | `naturalearth_physical.pmtiles` | public domain |
 | `naturalearth_admin` | Natural Earth admin layers (countries, units, states, counties, boundary lines) | `mvt` | 8 | `naturalearth_admin.pmtiles` | public domain |
