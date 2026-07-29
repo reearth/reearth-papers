@@ -101,9 +101,14 @@ const DETAIL_MINZOOM = 11;
 /** Below this, railways are a single hairline rather than a ladder. */
 const RAIL_LADDER_MINZOOM = 15;
 
-/** Roads are `kind: highway | major_road | minor_road | path | other`
- *  in the Protomaps schema. Motorway-class gets the darker of the two
- *  road colours, matching GSI's 高速自動車国道等 / vt_motorway split. */
+/** The `roads` source layer also carries `rail`, `ferry` and `aeroway`
+ *  features. Only these five are roads — the rest get their own
+ *  treatment or none at all, and matching on "not rail" would draw
+ *  ferry routes and runways as if they were streets. */
+const ROAD_KINDS = ["highway", "major_road", "minor_road", "other", "path"];
+
+/** Motorway-class gets the darker of the two road colours, matching
+ *  GSI's 高速自動車国道等 / vt_motorway split. */
 const IS_MOTORWAY: Expr = [
   "any",
   ["==", ["get", "kind"], "highway"],
@@ -142,13 +147,16 @@ const RAIL_GROUND_WIDTH: Expr = [
   600,
 ];
 
-/** Tunnels and subways are drawn through at half opacity, as upstream. */
-const SUBSURFACE_OPACITY: Expr = [
-  "case",
-  ["any", ["has", "is_tunnel"], ["==", ["get", "kind_detail"], "subway"]],
-  0.5,
-  1,
+/** Everything below the surface — tunnels, and subways whether or not
+ *  they carry the flag — is drawn through at half opacity, as upstream. */
+const SUBSURFACE_OPACITY = 0.5;
+/** Subways read as tunnels even where OSM doesn't tag them as one. */
+const IS_SUBSURFACE: Expr = [
+  "any",
+  ["has", "is_tunnel"],
+  ["==", ["get", "kind_detail"], "subway"],
 ];
+const IS_SURFACE: Expr = ["!", IS_SUBSURFACE];
 
 /**
  * A width that stays constant *on the ground*: `w` px at z23, halving
@@ -186,8 +194,9 @@ function overviewWidth(w: Expr): Expr {
   ];
 }
 
-/** Casing + fill pair for one road pass (tunnel / ground / bridge). */
-function roadPass(id: string, filter: Expr, p: Palette): Layer[] {
+/** Casing + fill pair for one road pass (tunnel / ground / bridge).
+ *  `opacity` is 0.5 for the subsurface pass. */
+function roadPass(id: string, filter: Expr, p: Palette, opacity = 1): Layer[] {
   const color = (motorway: string, other: string): Expr => [
     "case",
     IS_MOTORWAY,
@@ -210,7 +219,7 @@ function roadPass(id: string, filter: Expr, p: Palette): Layer[] {
       layout,
       paint: {
         "line-color": color(p.motorwayCasing, p.roadCasing),
-        "line-opacity": SUBSURFACE_OPACITY,
+        "line-opacity": opacity,
         "line-width": groundWidth(ROAD_GROUND_WIDTH, 3),
       },
     },
@@ -224,7 +233,7 @@ function roadPass(id: string, filter: Expr, p: Palette): Layer[] {
       layout,
       paint: {
         "line-color": color(p.motorway, p.road),
-        "line-opacity": SUBSURFACE_OPACITY,
+        "line-opacity": opacity,
         "line-width": groundWidth(ROAD_GROUND_WIDTH),
       },
     },
@@ -240,9 +249,12 @@ function roadPass(id: string, filter: Expr, p: Palette): Layer[] {
 export function papersLayers(source: string, theme: PapersTheme): Layer[] {
   const p = PALETTES[theme];
 
-  const notRail: Expr = ["!=", ["get", "kind"], "rail"];
   const isRail: Expr = ["==", ["get", "kind"], "rail"];
-  const road = (extra: Expr): Expr => ["all", notRail, extra];
+  const road = (extra: Expr): Expr => [
+    "all",
+    ["in", ["get", "kind"], ["literal", ROAD_KINDS]],
+    extra,
+  ];
 
   const layers: Layer[] = [
     {
@@ -270,6 +282,76 @@ export function papersLayers(source: string, theme: PapersTheme): Layer[] {
       filter: ["==", ["geometry-type"], "Polygon"],
       paint: { "fill-color": p.earth },
     },
+
+    // -- subsurface pass, drawn *under* the water fill on purpose. An
+    // undersea tunnel (Tokyo Bay Aqua-Line, the Channel Tunnel) is then
+    // masked by the sea it runs beneath, while a tunnel on land still
+    // shows through at half opacity the way GSI draws its 地下 features.
+    // No attribute tells us "this tunnel is under water", so the draw
+    // order does the work instead.
+    ...roadPass("tunnel", road(IS_SUBSURFACE), p, SUBSURFACE_OPACITY),
+    {
+      id: "railway_tunnel",
+      type: "line",
+      source: "@@source",
+      "source-layer": "roads",
+      minzoom: DETAIL_MINZOOM,
+      filter: ["all", isRail, IS_SUBSURFACE],
+      paint: {
+        "line-color": p.railway,
+        "line-opacity": SUBSURFACE_OPACITY,
+        // A plain line, not the ladder — matching GSI, which excludes
+        // トンネル/地下 from its ladder rendering entirely.
+        "line-width": groundWidth(RAIL_GROUND_WIDTH),
+      },
+    },
+
+    // -- overview network (z4–11). Screen-constant widths: at this
+    // scale a ground-constant road would be sub-pixel everywhere.
+    //
+    // Also under the water fill, for a different reason: Protomaps drops
+    // `is_tunnel` at overview zooms, so an undersea crossing can't be
+    // filtered out here — letting the sea paint over it is the only way.
+    // The trade is that a long bridge (the Aqua-Line's span, Øresund)
+    // disappears too, which at 1px on a z9 map costs nothing.
+    {
+      id: "roads_overview",
+      type: "line",
+      source: "@@source",
+      "source-layer": "roads",
+      maxzoom: DETAIL_MINZOOM,
+      filter: [
+        "in",
+        ["get", "kind"],
+        ["literal", ["highway", "major_road", "minor_road"]],
+      ],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": ["case", IS_MOTORWAY, p.motorway, p.road],
+        "line-width": overviewWidth([
+          "match",
+          ["get", "kind"],
+          "highway",
+          2,
+          "major_road",
+          1.5,
+          1,
+        ]),
+      },
+    },
+    {
+      id: "railway_overview",
+      type: "line",
+      source: "@@source",
+      "source-layer": "roads",
+      maxzoom: DETAIL_MINZOOM,
+      filter: isRail,
+      paint: {
+        "line-color": p.railway,
+        "line-width": overviewWidth(2),
+      },
+    },
+
     {
       id: "water",
       type: "fill",
@@ -358,61 +440,20 @@ export function papersLayers(source: string, theme: PapersTheme): Layer[] {
       },
     },
 
-    // -- overview network (z4–11). Screen-constant widths: at this
-    // scale a ground-constant road would be sub-pixel everywhere.
-    {
-      id: "roads_overview",
-      type: "line",
-      source: "@@source",
-      "source-layer": "roads",
-      maxzoom: DETAIL_MINZOOM,
-      filter: [
-        "all",
-        notRail,
-        ["in", ["get", "kind"], ["literal", ["highway", "major_road", "minor_road"]]],
-      ],
-      layout: { "line-cap": "round", "line-join": "round" },
-      paint: {
-        "line-color": ["case", IS_MOTORWAY, p.motorway, p.road],
-        "line-opacity": SUBSURFACE_OPACITY,
-        "line-width": overviewWidth([
-          "match",
-          ["get", "kind"],
-          "highway",
-          2,
-          "major_road",
-          1.5,
-          1,
-        ]),
-      },
-    },
-    {
-      id: "railway_overview",
-      type: "line",
-      source: "@@source",
-      "source-layer": "roads",
-      maxzoom: DETAIL_MINZOOM,
-      filter: isRail,
-      paint: {
-        "line-color": p.railway,
-        "line-opacity": SUBSURFACE_OPACITY,
-        "line-width": overviewWidth(2),
-      },
-    },
-
-    // -- detail network (z11+). Three passes in drawing order, so a
-    // bridge deck covers what it crosses and a tunnel stays under it.
-    ...roadPass("tunnel", road(["has", "is_tunnel"]), p),
+    // -- surface network (z11+). Bridges come after the railways below,
+    // so a deck covers what it crosses.
     ...roadPass(
       "ground",
-      road(["all", ["!", ["has", "is_tunnel"]], ["!", ["has", "is_bridge"]]]),
+      road(["all", IS_SURFACE, ["!", ["has", "is_bridge"]]]),
       p,
     ),
   ];
 
   // -- railways at detail zoom. Below the ladder threshold: a solid
   // line with a heavy dashed overlay, which renders as ties across the
-  // track. Above it: dark casing with a light infill.
+  // track. Above it: dark casing with a light infill. Tunnels are
+  // handled by the subsurface pass above and excluded here.
+  const surfaceRail: Expr = ["all", isRail, IS_SURFACE];
   layers.push(
     {
       id: "railway_casing",
@@ -420,10 +461,9 @@ export function papersLayers(source: string, theme: PapersTheme): Layer[] {
       source: "@@source",
       "source-layer": "roads",
       minzoom: DETAIL_MINZOOM,
-      filter: isRail,
+      filter: surfaceRail,
       paint: {
         "line-color": p.railway,
-        "line-opacity": SUBSURFACE_OPACITY,
         // Proportional, not a fixed halo — GSI sizes its rail casing as
         // a multiple of the track width, so the ladder keeps reading at
         // every zoom instead of collapsing once the track gets wide.
@@ -437,7 +477,7 @@ export function papersLayers(source: string, theme: PapersTheme): Layer[] {
       "source-layer": "roads",
       minzoom: DETAIL_MINZOOM,
       maxzoom: RAIL_LADDER_MINZOOM,
-      filter: isRail,
+      filter: surfaceRail,
       paint: {
         "line-color": p.railway,
         "line-width": groundWidth(["*", RAIL_GROUND_WIDTH, 2]),
@@ -450,10 +490,9 @@ export function papersLayers(source: string, theme: PapersTheme): Layer[] {
       source: "@@source",
       "source-layer": "roads",
       minzoom: RAIL_LADDER_MINZOOM,
-      filter: isRail,
+      filter: surfaceRail,
       paint: {
         "line-color": p.railwayFill,
-        "line-opacity": SUBSURFACE_OPACITY,
         "line-width": groundWidth(RAIL_GROUND_WIDTH),
       },
     },
@@ -461,7 +500,9 @@ export function papersLayers(source: string, theme: PapersTheme): Layer[] {
 
   // Bridges last: they sit above both the ground network and the rails
   // they cross.
-  layers.push(...roadPass("bridge", road(["has", "is_bridge"]), p));
+  layers.push(
+    ...roadPass("bridge", road(["all", IS_SURFACE, ["has", "is_bridge"]]), p),
+  );
 
   // The `source` placeholder keeps the layer definitions above free of
   // per-caller plumbing.
