@@ -59,9 +59,11 @@ export class TileRenderer extends Container<Env> {
   sleepAfter = "30m";
 }
 
-const STYLE_TILE_RE = /^\/styles\/([a-z]+)\/tile\/(\d+)\/(\d+)\/(\d+)\.png$/;
-const STYLE_TILEJSON_RE = /^\/styles\/([a-z]+)\/tilejson\.json$/;
-const STYLE_STYLE_RE = /^\/styles\/([a-z]+)\/style\.json$/;
+// The theme capture allows hyphens (`papers-light`); `requireTheme`
+// narrows it to an actual member of THEMES right after the match.
+const STYLE_TILE_RE = /^\/styles\/([a-z-]+)\/tile\/(\d+)\/(\d+)\/(\d+)\.png$/;
+const STYLE_TILEJSON_RE = /^\/styles\/([a-z-]+)\/tilejson\.json$/;
+const STYLE_STYLE_RE = /^\/styles\/([a-z-]+)\/style\.json$/;
 // Tile + TileJSON + source-archive shapes for every registered
 // tileset, resolved against the central registry (src/tilesets.ts).
 const TILESET_TILE_RE = /^\/([a-z0-9_]+)\/(\d+)\/(\d+)\/(\d+)\.([a-z]+)$/;
