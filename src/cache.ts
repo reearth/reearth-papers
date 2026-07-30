@@ -36,7 +36,9 @@ import { readMirrorPointer } from "./pmtiles.js";
 // v6: v5 renders went out with randomly missing glyph ranges (the
 // container proxy's per-request TLS storm, fixed in proxy.rs) — those
 // half-labeled tiles are baked into the v5 namespace.
-export const STYLE_VERSION = 6;
+// v7: pois anchors pinned for Tile-mode placement (see the mirror's
+// pinVariableAnchors) — v6 tiles are missing a large share of POIs.
+export const STYLE_VERSION = 7;
 
 interface CacheCoords {
   z: number;
