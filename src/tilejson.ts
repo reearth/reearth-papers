@@ -36,11 +36,11 @@ export function handleRasterTilejson(request: Request, theme: Theme): Response {
     bounds: BOUNDS,
     center: CENTER,
     // Not part of TileJSON 3.0, but MapLibre GL picks `tileSize` off a
-    // raster source's TileJSON and it overrides the source's own value
-    // (load_tilejson.ts). The container renders each z tile over a
-    // 512-logical-px viewport at camera zoom z, so the PNGs are true
-    // 512px tiles — consumed as 256 they'd show every label at half
-    // size.
+    // raster source's TileJSON when the source doesn't set one
+    // explicitly (an explicit source option wins — load_tilejson.ts).
+    // The container renders each z tile over a 512-logical-px viewport
+    // at camera zoom z, so the PNGs are true 512px tiles — consumed as
+    // 256 they'd show every label at half size.
     tileSize: 512,
   });
 }

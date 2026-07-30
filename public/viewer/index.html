@@ -347,11 +347,12 @@
       return {
         version: 8,
         sources: {
-          // 256 is only the fallback: MapLibre overrides tileSize with
-          // the TileJSON's own value once it loads, and every raster
-          // TileJSON we serve carries one (512 for the themed styles,
-          // 256 for the data rasters).
-          raster: { type: 'raster', url: tilejsonUrl, tileSize: 256 },
+          // No tileSize here on purpose: an explicit source option
+          // would take precedence over the TileJSON (see MapLibre's
+          // load_tilejson.ts), and every raster TileJSON we serve
+          // carries the correct value (512 for the themed styles, 256
+          // for the data rasters).
+          raster: { type: 'raster', url: tilejsonUrl },
         },
         layers: [{ id: 'raster', type: 'raster', source: 'raster' }],
       };
