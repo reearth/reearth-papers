@@ -3,10 +3,10 @@
 // can either render the style directly (full client-side vector path)
 // or use the rendered raster output via `/styles/{theme}/tile/...`.
 //
-// Glyphs and sprites are referenced from Protomaps' public GitHub
-// Pages CDN — small enough that mirroring them is premature, and
-// they're versioned by URL path so an upstream change can't silently
-// shift our rendering.
+// Glyphs are self-hosted at /fonts/ (mirror/fonts/ fills the CJK gap
+// Protomaps' hosted PBFs deliberately leave to browser local fonts —
+// our headless renderer has no such fallback). Sprites still come from
+// Protomaps' GitHub Pages CDN, versioned by URL path.
 
 import { layers, namedTheme } from "protomaps-themes-base";
 
@@ -90,7 +90,7 @@ export function buildStyle(theme: Theme, origin: string): Record<string, unknown
     version: 8,
     name: `Re:Earth Papers — ${theme}`,
     sources: { [SOURCE_NAME]: source },
-    glyphs: `${ASSETS_BASE}/fonts/{fontstack}/{range}.pbf`,
+    glyphs: `${origin}/fonts/{fontstack}/{range}.pbf`,
     sprite: `${ASSETS_BASE}/sprites/v4/${theme}`,
     layers: layers(SOURCE_NAME, namedTheme(theme), { lang: "en" }),
   };

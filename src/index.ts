@@ -75,6 +75,10 @@ const TILESET_TILE_RE = /^\/([a-z0-9_]+)\/(\d+)\/(\d+)\/(\d+)\.([a-z]+)$/;
 const TILESET_TILEJSON_RE = /^\/([a-z0-9_]+)\/tilejson\.json$/;
 const TILESET_STYLE_RE = /^\/([a-z0-9_]+)\/style\.json$/;
 const TILESET_SOURCE_RE = /^\/([a-z0-9_]+)\.(tif|pmtiles)$/;
+// Self-hosted glyph PBFs (see mirror/fonts/): Protomaps' stacks with
+// the CJK gap filled. Referenced by the styles' `glyphs` template and
+// fetched by both browsers and the renderer container.
+const FONT_RE = /^\/fonts\/([^/]+)\/(\d+-\d+\.pbf)$/;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -192,6 +196,11 @@ async function dispatch(
     }
   }
 
+  const font = url.pathname.match(FONT_RE);
+  if (font) {
+    return handleFont(request, env, ctx, font[1], font[2]);
+  }
+
   // Themed routes. We validate the theme once at parse time and pass
   // the narrowed type into the handlers.
   const styleJson = url.pathname.match(STYLE_STYLE_RE);
@@ -223,6 +232,41 @@ async function dispatch(
   }
 
   return new Response("not found", { status: 404 });
+}
+
+async function handleFont(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  stackEnc: string,
+  file: string,
+): Promise<Response> {
+  // Fontstack names carry spaces ("Noto Sans Regular") so the path
+  // segment arrives percent-encoded; decode before the R2 lookup and
+  // reject anything that would escape the prefix.
+  const stack = decodeURIComponent(stackEnc);
+  if (stack.includes("/") || stack.includes("..")) {
+    return new Response("not found", { status: 404 });
+  }
+
+  // Glyph ranges are hot during a container cold start (a CJK-dense
+  // style load touches dozens of them) — front R2 with the edge cache.
+  const cache = caches.default;
+  const cached = await cache.match(request);
+  if (cached) return cached;
+
+  const obj = await env.R2.get(`mirror/fonts/${stack}/${file}`);
+  if (!obj) return new Response("not found", { status: 404 });
+
+  const response = new Response(obj.body, {
+    headers: {
+      "content-type": "application/x-protobuf",
+      "cache-control": "public, max-age=86400",
+      "access-control-allow-origin": "*",
+    },
+  });
+  ctx.waitUntil(cache.put(request, response.clone()));
+  return response;
 }
 
 function tileShard(coords: { z: number; x: number; y: number }): number {

@@ -31,7 +31,9 @@ import { readMirrorPointer } from "./pmtiles.js";
 // v4: tiles went 256px → 512px (rendered at native viewport size, no
 // downscale) — mixing sizes within one cache namespace would corrupt
 // client rendering, so the old namespace must be orphaned wholesale.
-export const STYLE_VERSION = 4;
+// v5: self-hosted glyphs with CJK (mirror/fonts/) — cached tiles
+// rendered before the switch have no kanji/kana/hangul baked in.
+export const STYLE_VERSION = 5;
 
 interface CacheCoords {
   z: number;

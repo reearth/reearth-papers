@@ -2,10 +2,12 @@
 // PMTiles vector tiles served from this worker.
 //
 // The layers come from `protomaps-themes-base`, the official Protomaps
-// theme package. Glyphs and sprites are referenced from Protomaps'
-// public GitHub Pages CDN — small enough that mirroring them is
-// premature, and they're versioned by URL path so an upstream change
-// can't silently shift our rendering.
+// theme package. Glyphs come from the main worker's /fonts/ route
+// (mirror/fonts/ fills the CJK gap Protomaps' hosted PBFs leave to
+// browser local fonts — the headless renderer has no such fallback);
+// the container's loopback proxy fetches them with reqwest/rustls, so
+// the libcurl TLS issue that pushed tiles onto workers.dev doesn't
+// apply. Sprites still come from Protomaps' GitHub Pages CDN.
 
 import { layers, namedTheme } from "protomaps-themes-base";
 
@@ -16,6 +18,7 @@ import { layers, namedTheme } from "protomaps-themes-base";
 import { isPapersTheme, papersLayers } from "../../../src/papers_layers.js";
 
 const ASSETS_BASE = "https://protomaps.github.io/basemaps-assets";
+const FONTS_BASE = "https://papers.reearth.land/fonts";
 // Tile source name referenced by the generated layers — must match the
 // first argument passed to `layers(...)` below.
 const SOURCE_NAME = "protomaps";
@@ -95,7 +98,7 @@ export function handleStyle(url: URL, env: Env): Response {
     layers: keptLayers,
   };
   if (!minimal && !papers) {
-    style.glyphs = `${ASSETS_BASE}/fonts/{fontstack}/{range}.pbf`;
+    style.glyphs = `${FONTS_BASE}/{fontstack}/{range}.pbf`;
     style.sprite = `${ASSETS_BASE}/sprites/v4/${theme}`;
   }
 

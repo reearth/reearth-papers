@@ -12,6 +12,7 @@ root Worker (`../src/`) then serves those archives to clients.
 | Black Marble 2016   | one-shot | local (bash + curl + gdal) | `mirror/blackmarble/`          |
 | Natural Earth 10m   | one-shot | local (bash + curl + gdal) | `mirror/naturalearth/`         |
 | Natural Earth vector| one-shot | local (bash + gdal + tippecanoe) | `mirror/naturalearth_vector/` |
+| Fonts (glyph PBFs)  | one-shot | local (cargo + node)       | `mirror/fonts/`                |
 
 The split layout exists because the upstreams are fundamentally
 different — Protomaps publishes fresh PMTiles archives every day so
