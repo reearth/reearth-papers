@@ -22,7 +22,13 @@ import { readMirrorPointer } from "./pmtiles.js";
 // way clients should see immediately (new layer, label change, palette
 // edit). Old cache entries become unreachable as soon as the new worker
 // is live.
-const STYLE_VERSION = 3;
+//
+// It also has to travel in the style URL itself (see `styleUrlForCache`
+// in index.ts): the renderer container memoises the style it fetched
+// keyed on that URL — in memory *and* on disk, for the life of the
+// instance — so a warm container would otherwise keep re-rendering from
+// the pre-edit style no matter how many times we invalidate on our side.
+export const STYLE_VERSION = 3;
 
 interface CacheCoords {
   z: number;

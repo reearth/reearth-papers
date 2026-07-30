@@ -39,7 +39,12 @@ import { Container, getContainer } from "@cloudflare/containers";
 // gain — only headroom for concurrent users — and it scatters traffic
 // across more (cold) instances, so don't over-shard.
 const SHARD_COUNT = 32;
-import { lookupCachedTile, storeRenderedTile, tileCacheKey } from "./cache.js";
+import {
+  lookupCachedTile,
+  storeRenderedTile,
+  STYLE_VERSION,
+  tileCacheKey,
+} from "./cache.js";
 import { handleCatalog } from "./catalog.js";
 import { handleSourceFile } from "./source_file.js";
 import { handleStyle, isTheme, type Theme } from "./style.js";
@@ -248,7 +253,15 @@ async function renderRasterTile(
   // Cache key uses the un-tokenised URL so rotating the shared secret
   // doesn't invalidate every cached tile. The token is appended only
   // for the actual fetch the container performs.
-  const styleUrlForCache = `${env.DEFAULT_STYLE_URL}?theme=${theme}`;
+  //
+  // `&v=` carries STYLE_VERSION into the URL, which the container keys
+  // its own style cache on. Without it a warm instance (30 min idle
+  // timeout) keeps rendering from the style it fetched the first time,
+  // so a cartography edit would land in a fresh R2 namespace and then
+  // be filled with pre-edit renders. The mirror worker reads only
+  // `theme` and `minimal`, so the extra param is inert there.
+  const styleUrlForCache =
+    `${env.DEFAULT_STYLE_URL}?theme=${theme}&v=${STYLE_VERSION}`;
 
   // Two-layer cache (Cache API → R2). Key embeds a style hash + the
   // current PMTiles mirror date, so monthly mirror updates and style
