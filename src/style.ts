@@ -100,6 +100,9 @@ export function buildStyle(
   // ?renderer=1 applies the renderer's Tile-mode adjustments
   // (src/tile_mode.ts) — a public, token-free view of what the raster
   // container actually renders, for debugging and gl-js comparison.
+  // Composes with ?cjk (adjustments first, flavor second — the same
+  // order the mirror worker uses), so e.g. ?renderer=1&cjk=tc mirrors
+  // a Taiwan-area tile's exact style.
   let stockLayers = layers(SOURCE_NAME, namedTheme(theme), { lang: "en" });
   if (renderer) stockLayers = tileModeAdjustments(stockLayers);
   return {
