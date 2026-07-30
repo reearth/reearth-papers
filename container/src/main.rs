@@ -94,11 +94,19 @@ async fn render_tile(
 
     let style_path = ensure_style(&state, &style_url).await?;
 
-    let pool = maplibre_native::SingleThreadedRenderPool::global_pool();
-    let image = pool
-        .render_tile(style_path, z_u8, x, y)
-        .await
-        .map_err(|e| AppError::Render(format!("{e:?}")))?;
+    let image = if debug_flags().is_some() {
+        // Local-debugging path (never taken in production): a private
+        // render thread whose ImageRenderer carries MLN_DEBUG's flags —
+        // the crate's global pool doesn't expose set_debug_flags.
+        render_debug(style_path, z_u8, x, y)
+            .await
+            .map_err(AppError::Render)?
+    } else {
+        let pool = maplibre_native::SingleThreadedRenderPool::global_pool();
+        pool.render_tile(style_path, z_u8, x, y)
+            .await
+            .map_err(|e| AppError::Render(format!("{e:?}")))?
+    };
 
     // Serve the render at its native 512×512 (see module docs). The
     // resize is a defensive no-op unless the renderer's viewport ever
@@ -118,6 +126,68 @@ async fn render_tile(
         buf,
     )
         .into_response())
+}
+
+/// Debug visualization bits from `MLN_DEBUG` (comma-separated:
+/// `collision`, `borders`, `overdraw`). Unset (production) → None.
+fn debug_flags() -> Option<u32> {
+    let v = std::env::var("MLN_DEBUG").ok()?;
+    let mut bits = 0u32;
+    for part in v.split(',') {
+        bits |= match part.trim() {
+            "collision" => 1 << 4,
+            "borders" => 1 << 1,
+            "overdraw" => 1 << 5,
+            _ => 0,
+        };
+    }
+    (bits != 0).then_some(bits)
+}
+
+struct DebugRenderRequest {
+    style_path: PathBuf,
+    z: u8,
+    x: u32,
+    y: u32,
+    response: tokio::sync::oneshot::Sender<Result<maplibre_native::Image, String>>,
+}
+
+async fn render_debug(
+    style_path: PathBuf,
+    z: u8,
+    x: u32,
+    y: u32,
+) -> Result<maplibre_native::Image, String> {
+    use std::sync::{OnceLock, mpsc};
+    static TX: OnceLock<mpsc::Sender<DebugRenderRequest>> = OnceLock::new();
+    let tx = TX.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<DebugRenderRequest>();
+        std::thread::spawn(move || {
+            let mut renderer =
+                maplibre_native::ImageRendererBuilder::default().build_tile_renderer();
+            let flags = debug_flags().unwrap_or(0);
+            renderer.set_debug_flags(maplibre_native::MapDebugOptions { repr: flags });
+            let mut current: Option<PathBuf> = None;
+            while let Ok(req) = rx.recv() {
+                if current.as_ref() != Some(&req.style_path) {
+                    if let Err(e) = renderer.load_style_from_path(&req.style_path) {
+                        let _ = req.response.send(Err(format!("style: {e}")));
+                        continue;
+                    }
+                    current = Some(req.style_path.clone());
+                }
+                let result = renderer
+                    .render_tile(req.z, req.x, req.y)
+                    .map_err(|e| format!("{e:?}"));
+                let _ = req.response.send(result);
+            }
+        });
+        tx
+    });
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    tx.send(DebugRenderRequest { style_path, z, x, y, response: response_tx })
+        .map_err(|_| "debug render thread gone".to_string())?;
+    response_rx.await.map_err(|_| "debug render dropped".to_string())?
 }
 
 async fn ensure_style(state: &AppState, url: &str) -> Result<PathBuf, AppError> {

@@ -38,7 +38,9 @@ import { readMirrorPointer } from "./pmtiles.js";
 // half-labeled tiles are baked into the v5 namespace.
 // v7: pois anchors pinned for Tile-mode placement (see the mirror's
 // pinVariableAnchors) — v6 tiles are missing a large share of POIs.
-export const STYLE_VERSION = 7;
+// v8: pois text made optional so icons survive Tile mode's
+// border-priority pass stealing the text's spot.
+export const STYLE_VERSION = 8;
 
 interface CacheCoords {
   z: number;

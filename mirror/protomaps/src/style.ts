@@ -62,12 +62,25 @@ function isTheme(s: string): s is Theme {
 // the anchor restores gl-js-like density: fixed-anchor symbols that
 // cross a border go through Tile mode's border-priority pass and
 // render seam-consistently from the neighbours' tile buffers.
+// Tile mode also runs a border-priority pass gl-js doesn't have:
+// symbols whose boxes cross a tile border — from any layer — place
+// before every mid-tile symbol, so a border-crossing label from a
+// lower layer can preempt a POI that gl-js would show. That's
+// inherent to seam-consistent per-tile rendering, so instead of
+// chasing placement parity, make the pois text optional: when only
+// the text loses its spot the icon still renders, instead of the
+// whole symbol vanishing.
 function pinVariableAnchors<T>(ls: T[]): T[] {
   for (const l of ls) {
-    const layout = (l as { layout?: Record<string, unknown> }).layout;
-    if (layout && layout["text-variable-anchor"]) {
+    const layer = l as { id?: unknown; layout?: Record<string, unknown> };
+    const layout = layer.layout;
+    if (!layout) continue;
+    if (layout["text-variable-anchor"]) {
       delete layout["text-variable-anchor"];
       layout["text-anchor"] = "left";
+    }
+    if (layer.id === "pois") {
+      layout["text-optional"] = true;
     }
   }
   return ls;

@@ -85,8 +85,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # lavapipe (lvp) for headless software rendering, so drop the rest
     # and their ICD manifests.
     && find /usr/share/vulkan/icd.d/ -mindepth 1 ! -name 'lvp_icd.json' -delete \
-    && find /usr/lib/x86_64-linux-gnu/ -maxdepth 1 \
-         -name 'libvulkan_*.so' ! -name 'libvulkan_lvp.so' -delete
+    # arch-neutral glob so the same Dockerfile builds on arm64 for
+    # local debugging (see MLN_DEBUG in src/main.rs)
+    && for d in /usr/lib/*-linux-gnu; do find "$d" -maxdepth 1 \
+         -name 'libvulkan_*.so' ! -name 'libvulkan_lvp.so' -delete; done
 
 COPY --from=builder /app/target/release/papers-tile /app/papers-tile
 
