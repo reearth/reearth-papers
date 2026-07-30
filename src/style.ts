@@ -12,6 +12,7 @@ import { layers, namedTheme } from "protomaps-themes-base";
 
 import { applyCjkFlavor, type CjkFlavor, isCjkFlavor } from "./cjk_flavor.js";
 import { isPapersTheme, papersLayers } from "./papers_layers.js";
+import { tileModeAdjustments } from "./tile_mode.js";
 
 const ASSETS_BASE = "https://protomaps.github.io/basemaps-assets";
 // Source name referenced by the generated layers — must match the
@@ -69,6 +70,7 @@ export function buildStyle(
   theme: Theme,
   origin: string,
   cjk?: CjkFlavor,
+  renderer = false,
 ): Record<string, unknown> {
   const source = {
     type: "vector",
@@ -94,7 +96,12 @@ export function buildStyle(
   // ?cjk=sc|tc swaps the base fontstacks for the region-priority ones
   // (see cjk_flavor.ts) — Han-unified codepoints then render with
   // Simplified / Traditional variants instead of the JP-first default.
-  const stockLayers = layers(SOURCE_NAME, namedTheme(theme), { lang: "en" });
+  //
+  // ?renderer=1 applies the renderer's Tile-mode adjustments
+  // (src/tile_mode.ts) — a public, token-free view of what the raster
+  // container actually renders, for debugging and gl-js comparison.
+  let stockLayers = layers(SOURCE_NAME, namedTheme(theme), { lang: "en" });
+  if (renderer) stockLayers = tileModeAdjustments(stockLayers);
   return {
     version: 8,
     name: `Re:Earth Papers — ${theme}`,
@@ -110,7 +117,8 @@ export function handleStyle(theme: Theme, request: Request): Response {
   const origin = url.origin;
   const cjkParam = url.searchParams.get("cjk") ?? "";
   const cjk = isCjkFlavor(cjkParam) ? cjkParam : undefined;
-  return new Response(JSON.stringify(buildStyle(theme, origin, cjk)), {
+  const renderer = url.searchParams.get("renderer") === "1";
+  return new Response(JSON.stringify(buildStyle(theme, origin, cjk, renderer)), {
     headers: {
       "content-type": "application/json",
       "cache-control": "public, max-age=300",
