@@ -50,6 +50,15 @@ Steps:
    65024-65279 survive. The Italic stack receives upright CJK (CJK has
    no italic; tofu would be worse). Sanity checks assert あ/東/한/ﻫ
    presence and fail the build otherwise.
+5. Per-script PGF stacks (`COPY_STACKS`, e.g.
+   "Noto Sans Devanagari Regular v1") are mirrored byte-for-byte —
+   the layers switch to them per feature via data-driven `text-font`,
+   and their PUA ranges hold the pre-shaped glyphs. Missing one is not
+   cosmetic: maplibre-native aborts the render process on a glyph 404,
+   which crash-loops the container for every tile in that script's
+   region. The worker's /fonts route additionally falls back to
+   upstream (with an R2 backfill) on miss, so a stack added upstream
+   before we re-run this pipeline degrades to a proxy, not a crash.
 
 ## Han unification / flavors
 
