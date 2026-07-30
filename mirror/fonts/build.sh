@@ -29,7 +29,14 @@ OUT=out
 
 NOTO_BASE="https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/SubsetOTF"
 ASSETS_BASE="https://protomaps.github.io/basemaps-assets/fonts"
-UPSTREAM_STACKS=("Noto Sans Regular" "Noto Sans Medium" "Noto Sans Italic")
+# The three stacks the style names directly (CJK-merged below) plus the
+# per-script PGF stacks the layers switch to via data-driven text-font
+# (copied verbatim — see merge.mjs COPY_STACKS). A missing stack is not
+# cosmetic: maplibre-native aborts the whole process on a glyph 404.
+UPSTREAM_STACKS=(
+  "Noto Sans Regular" "Noto Sans Medium" "Noto Sans Italic"
+  "Noto Sans Devanagari Regular v1"
+)
 
 command -v build_pbf_glyphs >/dev/null || {
   echo "build_pbf_glyphs not found — install with: cargo install build_pbf_glyphs" >&2

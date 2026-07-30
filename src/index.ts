@@ -255,10 +255,33 @@ async function handleFont(
   const cached = await cache.match(request);
   if (cached) return cached;
 
-  const obj = await env.R2.get(`mirror/fonts/${stack}/${file}`);
-  if (!obj) return new Response("not found", { status: 404 });
+  const key = `mirror/fonts/${stack}/${file}`;
+  const obj = await env.R2.get(key);
+  let body: ArrayBuffer | ReadableStream;
+  if (obj) {
+    body = obj.body;
+  } else {
+    // Stack or range we haven't mirrored — the styles switch to
+    // per-script PGF stacks via data-driven text-font, so new upstream
+    // stacks can appear under our feet. Falling back matters more
+    // than usual here: maplibre-native aborts the whole render process
+    // on a glyph 404 (a Devanagari tile crash-looped the containers
+    // when this route 404'd the PGF stack). Backfill R2 so the
+    // fallback is one-time per object.
+    const upstream = await fetch(
+      `https://protomaps.github.io/basemaps-assets/fonts/${encodeURIComponent(stack)}/${file}`,
+    );
+    if (!upstream.ok) return new Response("not found", { status: 404 });
+    const bytes = await upstream.arrayBuffer();
+    ctx.waitUntil(
+      env.R2.put(key, bytes, {
+        httpMetadata: { contentType: "application/x-protobuf" },
+      }),
+    );
+    body = bytes;
+  }
 
-  const response = new Response(obj.body, {
+  const response = new Response(body, {
     headers: {
       "content-type": "application/x-protobuf",
       "cache-control": "public, max-age=86400",

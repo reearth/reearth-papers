@@ -52,6 +52,11 @@ const STACKS = [
   { name: "Noto Sans Italic", weight: "Regular" },
 ];
 
+// Per-script PGF stacks referenced by the layers' data-driven
+// text-font. Mirrored byte-for-byte — their PUA ranges hold the
+// pre-shaped glyphs, nothing to merge.
+const COPY_STACKS = ["Noto Sans Devanagari Regular v1"];
+
 // ---- minimal protobuf ----------------------------------------------
 
 function readVarint(buf, pos) {
@@ -190,6 +195,19 @@ for (const { name, weight } of STACKS) {
   console.log(`${outName}: ${merged} ranges merged (+${glyphTotal} CJK-block glyphs), ${copied} copied`);
 }
 
+for (const name of COPY_STACKS) {
+  const outDir = join(OUT, name);
+  mkdirSync(outDir, { recursive: true });
+  const upDir = join(WORK, "upstream", name);
+  let n = 0;
+  for (const f of readdirSync(upDir)) {
+    if (!f.endsWith(".pbf")) continue;
+    writeFileSync(join(outDir, f), readFileSync(join(upDir, f)));
+    n++;
+  }
+  console.log(`${name}: ${n} ranges copied verbatim (PGF stack)`);
+}
+
 // ---- sanity checks --------------------------------------------------
 // A silently glyphless output would only surface as tofu on prod
 // tiles much later — fail here instead.
@@ -209,6 +227,14 @@ for (const [cp, label] of CHECKS) {
   const buf = tryRead(join(OUT, firstStack, `${start}-${start + 255}.pbf`));
   const ok = buf && readGlyphs(buf).some((g) => g.id === cp);
   console.log(`${ok ? "ok " : "MISSING"} U+${cp.toString(16).toUpperCase()} ${label}`);
+  if (!ok) failed = true;
+}
+// The PGF stack's pre-shaped glyphs live in PUA ranges; an empty copy
+// would crash-loop the renderer on every Devanagari tile.
+for (const name of COPY_STACKS) {
+  const buf = tryRead(join(OUT, name, "62976-63231.pbf"));
+  const ok = buf && readGlyphs(buf).length > 0;
+  console.log(`${ok ? "ok " : "MISSING"} ${name} PUA range 62976`);
   if (!ok) failed = true;
 }
 if (failed) {
