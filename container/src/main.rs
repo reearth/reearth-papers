@@ -1,8 +1,14 @@
 //! papers-tile — minimal MapLibre style → raster tile server.
 //!
 //! Designed to run inside a Cloudflare Workers Container. Renders a
-//! 256×256 PNG for an XYZ tile using `maplibre-native` (software GL via
+//! 512×512 PNG for an XYZ tile using `maplibre-native` (software GL via
 //! Xvfb + llvmpipe; see `Dockerfile`).
+//!
+//! Tiles are 512px on purpose: the renderer's camera is fixed at
+//! `zoom = z` over a 512-logical-px viewport (MapLibre zoom is
+//! 512px-tile based), so the render carries text/line sizes exactly as
+//! the vector style specifies. Downscaling to 256 would halve every
+//! label — clients must consume these with `tileSize: 512`.
 
 mod proxy;
 
@@ -94,9 +100,12 @@ async fn render_tile(
         .await
         .map_err(|e| AppError::Render(format!("{e:?}")))?;
 
+    // Serve the render at its native 512×512 (see module docs). The
+    // resize is a defensive no-op unless the renderer's viewport ever
+    // drifts from the expected size.
     let mut rgba = image.as_image().clone();
-    if rgba.width() != 256 || rgba.height() != 256 {
-        rgba = image::imageops::resize(&rgba, 256, 256, image::imageops::FilterType::Lanczos3);
+    if rgba.width() != 512 || rgba.height() != 512 {
+        rgba = image::imageops::resize(&rgba, 512, 512, image::imageops::FilterType::Lanczos3);
     }
 
     let mut buf = Vec::with_capacity(8 * 1024);

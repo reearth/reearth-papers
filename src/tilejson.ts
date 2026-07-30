@@ -35,6 +35,13 @@ export function handleRasterTilejson(request: Request, theme: Theme): Response {
     maxzoom: RENDERED_RASTER_MAXZOOM,
     bounds: BOUNDS,
     center: CENTER,
+    // Not part of TileJSON 3.0, but MapLibre GL picks `tileSize` off a
+    // raster source's TileJSON and it overrides the source's own value
+    // (load_tilejson.ts). The container renders each z tile over a
+    // 512-logical-px viewport at camera zoom z, so the PNGs are true
+    // 512px tiles — consumed as 256 they'd show every label at half
+    // size.
+    tileSize: 512,
   });
 }
 
@@ -67,6 +74,11 @@ export function handleTilesetTilejson(request: Request, def: TilesetDef): Respon
     maxzoom: def.maxzoom,
     bounds: def.bounds ?? BOUNDS,
     center: def.center ?? CENTER,
+    // Data rasters are all 256px (TILE_SIZE in cog.ts; the passthrough
+    // sources too). MapLibre's raster-source default is 512, so leave
+    // clients no room to guess wrong. Same non-standard field the
+    // themed TileJSON carries.
+    ...(def.type === "raster" ? { tileSize: 256 } : {}),
     // Required by TileJSON 3.0 for vector tilesets; lets clients
     // enumerate the MVT layers without parsing a tile first.
     ...(def.vectorLayers

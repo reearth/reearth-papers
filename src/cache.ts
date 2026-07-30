@@ -28,7 +28,10 @@ import { readMirrorPointer } from "./pmtiles.js";
 // keyed on that URL — in memory *and* on disk, for the life of the
 // instance — so a warm container would otherwise keep re-rendering from
 // the pre-edit style no matter how many times we invalidate on our side.
-export const STYLE_VERSION = 3;
+// v4: tiles went 256px → 512px (rendered at native viewport size, no
+// downscale) — mixing sizes within one cache namespace would corrupt
+// client rendering, so the old namespace must be orphaned wholesale.
+export const STYLE_VERSION = 4;
 
 interface CacheCoords {
   z: number;

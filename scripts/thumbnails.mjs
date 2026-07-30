@@ -59,7 +59,13 @@ async function fetchTile(url) {
   if (res.status === 204) return null; // empty tile
   if (!res.ok) throw new Error(`${res.status} ${url}`);
   const buf = Buffer.from(await res.arrayBuffer());
-  return buf.length ? buf : null;
+  if (!buf.length) return null;
+  // Tilesets mix tile sizes (themed styles serve 512px, data rasters
+  // 256px); the mosaic grid is laid out in TILE-px cells, so normalise
+  // every tile to TILE before compositing.
+  const { width } = await sharp(buf).metadata();
+  if (width === TILE) return buf;
+  return sharp(buf).resize(TILE, TILE).png().toBuffer();
 }
 
 function fillTemplate(tmpl, z, x, y) {
