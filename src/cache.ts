@@ -22,7 +22,7 @@ import { readMirrorPointer } from "./pmtiles.js";
 // way clients should see immediately (new layer, label change, palette
 // edit). Old cache entries become unreachable as soon as the new worker
 // is live.
-const STYLE_VERSION = 2;
+const STYLE_VERSION = 3;
 
 interface CacheCoords {
   z: number;

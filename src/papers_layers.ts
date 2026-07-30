@@ -96,8 +96,17 @@ type Expr = unknown;
 type Layer = Record<string, unknown>;
 
 /** Zoom at which the ground-constant rendering takes over from the
- *  screen-constant overview rendering. GSI splits at the same place. */
-const DETAIL_MINZOOM = 11;
+ *  screen-constant overview rendering.
+ *
+ *  GSI splits at z11 and so did we, until measuring the tiles: Protomaps
+ *  only starts emitting `is_tunnel` / `is_bridge` at z12 (checked over
+ *  Tokyo Bay — z8–z11 carry neither attribute at all). Below z12 an
+ *  undersea tunnel is therefore indistinguishable from a surface road,
+ *  and the surface pass — which draws above the water fill — would paint
+ *  it across the sea. So the detail rendering starts where the flags do,
+ *  and everything below it goes through the overview layers under the
+ *  water fill. */
+const DETAIL_MINZOOM = 12;
 /** Below this, railways are a single hairline rather than a ladder. */
 const RAIL_LADDER_MINZOOM = 15;
 
@@ -179,8 +188,9 @@ function groundWidth(w: Expr, casing = 0): Expr {
 }
 
 /**
- * The overview counterpart: `w` px at z11, shrinking exponentially to
- * z4 so the road network fades rather than clutters the world view.
+ * The overview counterpart: `w` px where the detail rendering takes
+ * over, shrinking exponentially down to z4 so the road network fades
+ * rather than clutters the world view.
  */
 function overviewWidth(w: Expr): Expr {
   return [
@@ -189,7 +199,7 @@ function overviewWidth(w: Expr): Expr {
     ["zoom"],
     4,
     ["*", w, 0.0078125], // 2^-7
-    11,
+    DETAIL_MINZOOM,
     w,
   ];
 }
