@@ -55,7 +55,7 @@
       color: var(--ink-soft);
     }
 
-    /* -- tabs (Raster / MVT) ----------------------------------------- */
+    /* -- tabs (Raster / Vector) --------------------------------------- */
     #tabs {
       display: flex;
       gap: 4px;
@@ -241,6 +241,57 @@
       #actions { padding: 8px 12px; border-top: none; }
     }
 
+    /* -- attribution modal -------------------------------------------- */
+    #attr-modal {
+      width: min(440px, calc(100vw - 32px));
+      padding: 0;
+      border: 1px solid var(--paper-edge);
+      border-radius: 10px;
+      background: var(--card);
+      color: var(--ink);
+      box-shadow: 0 8px 32px rgba(31,28,23,.25);
+    }
+    #attr-modal::backdrop { background: rgba(31,28,23,.35); }
+    #attr-modal .inner { padding: 16px 18px; }
+    #attr-modal h2 {
+      margin: 0 0 6px;
+      font: 600 15px/1.25 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+    }
+    #attr-modal p {
+      margin: 0 0 10px;
+      font-size: 12px;
+      color: var(--ink-soft);
+    }
+    #attr-modal .credit {
+      padding: 10px 12px;
+      border: 1px dashed #c9c2b2;
+      border-radius: 6px;
+      background: var(--paper);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    #attr-modal .credit a { color: var(--accent); }
+    #attr-modal .btns {
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+      margin-top: 12px;
+    }
+    #attr-modal .btns button {
+      font: inherit;
+      font-size: 12px;
+      padding: 4px 10px;
+      border: 1px solid #c9c2b2;
+      background: var(--card);
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #attr-modal .btns button:hover { background: #f3efe6; }
+    #attr-modal .btns .primary {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
     /* -- vector inspector (layer panel + attribute popup) ------------- */
     #layers {
       position: absolute;
@@ -317,7 +368,7 @@
       <p class="sub">tileset preview</p>
       <div id="tabs" role="tablist" aria-label="Tileset type">
         <button type="button" class="tab" role="tab" data-tab="raster" aria-selected="true">Raster</button>
-        <button type="button" class="tab" role="tab" data-tab="vector" aria-selected="false">MVT</button>
+        <button type="button" class="tab" role="tab" data-tab="vector" aria-selected="false">Vector</button>
       </div>
     </header>
     <nav id="gallery" aria-label="Tilesets">
@@ -329,6 +380,24 @@
     </div>
   </aside>
   <div id="map"></div>
+  <!-- Shown after copying a raw XYZ URL: unlike TileJSON, it carries no
+       attribution metadata, so the consumer has to display the credit
+       themselves. -->
+  <dialog id="attr-modal">
+    <div class="inner">
+      <h2>Please display this attribution</h2>
+      <p>
+        The XYZ URL is copied — but unlike a TileJSON URL, it carries no
+        attribution metadata, so map clients can't show the credit
+        automatically. Please display it on your map:
+      </p>
+      <div class="credit" id="attr-credit"></div>
+      <div class="btns">
+        <button type="button" id="attr-copy" class="primary">Copy attribution HTML</button>
+        <button type="button" id="attr-close">Close</button>
+      </div>
+    </div>
+  </dialog>
   <script src="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"></script>
   <script>
     // Build the preview's tileset gallery from /catalog.json so adding
@@ -384,8 +453,8 @@
         card.type = 'button';
         card.className = 'card';
         card.dataset.id = t.id;
-        // Which tab this card belongs to: MVT tab holds vector tilesets,
-        // Raster tab holds everything else.
+        // Which tab this card belongs to: Vector tab holds vector
+        // tilesets, Raster tab holds everything else.
         card.dataset.tab = t.type === 'vector' ? 'vector' : 'raster';
 
         const thumb = document.createElement('span');
@@ -643,7 +712,7 @@
         }
       };
 
-      // -- tabs (Raster / MVT) --------------------------------------
+      // -- tabs (Raster / Vector) -----------------------------------
       // The gallery holds every card; the active tab just filters which
       // are visible. Switching tabs never changes the map selection.
       const tabBtns = document.querySelectorAll('#tabs .tab');
@@ -729,6 +798,22 @@
         flashCopied(copyTilejson);
       });
 
+      // A raw XYZ URL strips the attribution the TileJSON would have
+      // carried, so a successful copy opens a reminder modal with the
+      // tileset's credit ready to paste.
+      const attrModal = document.getElementById('attr-modal');
+      const attrCredit = document.getElementById('attr-credit');
+      const attrCopy = document.getElementById('attr-copy');
+      document.getElementById('attr-close')
+        .addEventListener('click', () => attrModal.close());
+      attrModal.addEventListener('click', (e) => {
+        if (e.target === attrModal) attrModal.close(); // backdrop click
+      });
+      attrCopy.addEventListener('click', async () => {
+        await navigator.clipboard.writeText(attrCredit.innerHTML.trim());
+        flashCopied(attrCopy);
+      });
+
       copyXyz.addEventListener('click', async () => {
         if (!selected) return;
         copyXyz.disabled = true;
@@ -738,6 +823,12 @@
           if (!xyz) throw new Error('no tiles[] in TileJSON');
           await navigator.clipboard.writeText(xyz);
           flashCopied(copyXyz);
+          const credit = tj.attribution || '';
+          if (credit) {
+            // Our own API's attribution HTML (anchor tags intended).
+            attrCredit.innerHTML = credit;
+            attrModal.showModal();
+          }
         } catch (e) {
           copyXyz.textContent = 'Failed';
           setTimeout(() => { copyXyz.textContent = 'Copy XYZ URL'; }, 1500);
