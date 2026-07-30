@@ -14,7 +14,9 @@ import { layers, namedTheme } from "protomaps-themes-base";
 // Reaches across into the main worker's source on purpose: the house
 // cartography is ~300 lines and both workers must render it
 // identically, so it lives in exactly one file. The two projects
-// deploy separately but always from the same checkout.
+// deploy separately but always from the same checkout. Same deal for
+// the CJK flavor logic.
+import { applyCjkFlavor, isCjkFlavor } from "../../../src/cjk_flavor.js";
 import { isPapersTheme, papersLayers } from "../../../src/papers_layers.js";
 
 const ASSETS_BASE = "https://protomaps.github.io/basemaps-assets";
@@ -71,12 +73,21 @@ export function handleStyle(url: URL, env: Env): Response {
   const tileUrl =
     `https://reearth-papers-mirror.reearth.workers.dev/protomaps/{z}/{x}/{y}.mvt?token=${token}`;
 
+  // ?cjk=sc|tc swaps the base fontstacks for the region-priority ones
+  // (see src/cjk_flavor.ts). The renderer worker appends it per tile
+  // based on the tile's location.
+  const cjkParam = url.searchParams.get("cjk") ?? "";
+  const cjk = isCjkFlavor(cjkParam) ? cjkParam : undefined;
+
   // The house styles carry no symbol layers, so `?minimal=1` is a
   // no-op for them and they never need glyphs or a sprite.
   const papers = isPapersTheme(theme);
+  const stockLayers = layers(SOURCE_NAME, namedTheme(theme), { lang: "en" });
   const allLayers: { type?: unknown }[] = papers
     ? papersLayers(SOURCE_NAME, theme)
-    : layers(SOURCE_NAME, namedTheme(theme), { lang: "en" });
+    : cjk
+      ? applyCjkFlavor(stockLayers, cjk)
+      : stockLayers;
   const keptLayers = minimal
     ? allLayers.filter((l) => l.type !== "symbol")
     : allLayers;

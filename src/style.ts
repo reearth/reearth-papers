@@ -10,6 +10,7 @@
 
 import { layers, namedTheme } from "protomaps-themes-base";
 
+import { applyCjkFlavor, type CjkFlavor, isCjkFlavor } from "./cjk_flavor.js";
 import { isPapersTheme, papersLayers } from "./papers_layers.js";
 
 const ASSETS_BASE = "https://protomaps.github.io/basemaps-assets";
@@ -64,7 +65,11 @@ export function isTheme(s: string): s is Theme {
   return (THEMES as readonly string[]).includes(s);
 }
 
-export function buildStyle(theme: Theme, origin: string): Record<string, unknown> {
+export function buildStyle(
+  theme: Theme,
+  origin: string,
+  cjk?: CjkFlavor,
+): Record<string, unknown> {
   const source = {
     type: "vector",
     tiles: [`${origin}/protomaps/{z}/{x}/{y}.mvt`],
@@ -86,19 +91,26 @@ export function buildStyle(theme: Theme, origin: string): Record<string, unknown
     };
   }
 
+  // ?cjk=sc|tc swaps the base fontstacks for the region-priority ones
+  // (see cjk_flavor.ts) — Han-unified codepoints then render with
+  // Simplified / Traditional variants instead of the JP-first default.
+  const stockLayers = layers(SOURCE_NAME, namedTheme(theme), { lang: "en" });
   return {
     version: 8,
     name: `Re:Earth Papers — ${theme}`,
     sources: { [SOURCE_NAME]: source },
     glyphs: `${origin}/fonts/{fontstack}/{range}.pbf`,
     sprite: `${ASSETS_BASE}/sprites/v4/${theme}`,
-    layers: layers(SOURCE_NAME, namedTheme(theme), { lang: "en" }),
+    layers: cjk ? applyCjkFlavor(stockLayers, cjk) : stockLayers,
   };
 }
 
 export function handleStyle(theme: Theme, request: Request): Response {
-  const origin = new URL(request.url).origin;
-  return new Response(JSON.stringify(buildStyle(theme, origin)), {
+  const url = new URL(request.url);
+  const origin = url.origin;
+  const cjkParam = url.searchParams.get("cjk") ?? "";
+  const cjk = isCjkFlavor(cjkParam) ? cjkParam : undefined;
+  return new Response(JSON.stringify(buildStyle(theme, origin, cjk)), {
     headers: {
       "content-type": "application/json",
       "cache-control": "public, max-age=300",

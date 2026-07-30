@@ -64,14 +64,27 @@ Steps:
 
 One stack holds one glyph per codepoint, so the default JP-first merge
 shows Japanese variants everywhere, including Chinese and Korean place
-names. For region-priority stacks later (e.g. zh-Hans maps), generate
-a flavor and reference it from the style's `text-font`:
+names. Region-priority flavors fix that; the two in production are:
 
 ```
-PRIORITY=SC,TC,JP,KR SUFFIX=" SC" bash build.sh
+PRIORITY=SC,TC,JP,KR SUFFIX=" SC" bash build.sh   # Simplified-first
+PRIORITY=TC,SC,JP,KR SUFFIX=" TC" bash build.sh   # Traditional-first
 ```
 
-which emits `Noto Sans Regular SC` etc. alongside the defaults.
+which emit `Noto Sans Regular SC` / `… TC` etc. alongside the
+defaults. The styles select a flavor via `?cjk=sc|tc` (fontstack names
+rewritten by `src/cjk_flavor.ts`), and the tile route picks it per
+tile from coarse region boxes, so labels follow the Han letterform
+convention customary where the tile sits: Traditional forms where
+Traditional Chinese is the prevailing script, Simplified forms where
+Simplified Chinese is, and the Japanese-form default elsewhere. The
+boxes encode typographic convention only — which glyph variant of a
+shared codepoint looks "right" to local readers — and carry no
+statement about territory or status.
+
+Upload flavors *before* deploying styles that reference them: they
+don't exist upstream, so the /fonts fallback can't save a missing
+flavor stack and the renderer dies on the 404.
 
 ## Serving (worker side)
 

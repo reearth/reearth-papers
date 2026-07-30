@@ -45,6 +45,7 @@ import {
   STYLE_VERSION,
   tileCacheKey,
 } from "./cache.js";
+import { tileCjkFlavor } from "./cjk_flavor.js";
 import { handleCatalog } from "./catalog.js";
 import { handleSourceFile } from "./source_file.js";
 import { handleStyle, isTheme, type Theme } from "./style.js";
@@ -325,10 +326,16 @@ async function renderRasterTile(
   // its own style cache on. Without it a warm instance (30 min idle
   // timeout) keeps rendering from the style it fetched the first time,
   // so a cartography edit would land in a fresh R2 namespace and then
-  // be filled with pre-edit renders. The mirror worker reads only
-  // `theme` and `minimal`, so the extra param is inert there.
+  // be filled with pre-edit renders.
+  //
+  // `&cjk=` selects the region-priority Han glyph flavor for tiles
+  // over Chinese-script regions (see cjk_flavor.ts). Being part of the
+  // style URL, it namespaces both the container's style cache and the
+  // rendered-tile cache key for exactly the affected tiles.
+  const cjk = tileCjkFlavor(coords);
   const styleUrlForCache =
-    `${env.DEFAULT_STYLE_URL}?theme=${theme}&v=${STYLE_VERSION}`;
+    `${env.DEFAULT_STYLE_URL}?theme=${theme}&v=${STYLE_VERSION}` +
+    (cjk ? `&cjk=${cjk}` : "");
 
   // Two-layer cache (Cache API → R2). Key embeds a style hash + the
   // current PMTiles mirror date, so monthly mirror updates and style
