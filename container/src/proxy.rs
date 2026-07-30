@@ -17,7 +17,7 @@
 // crash); the proxy uses reqwest to fetch the real `https://...`
 // upstream and pipes the bytes back.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::LazyLock, time::Duration};
 
 use axum::{
     Router,
@@ -29,6 +29,42 @@ use axum::{
 };
 
 pub const PROXY_PORT: u16 = 9000;
+
+// One shared client for every proxied fetch. A CJK-dense tile makes
+// maplibre request dozens of glyph ranges at once; a per-request
+// client meant a fresh TLS handshake for each, and enough of that
+// concurrent storm failed that rendered tiles were missing random
+// glyph ranges (labels with only some of their characters). A shared
+// pool reuses connections across the burst.
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("reqwest client")
+});
+
+/// GET with retries: transient network errors and upstream 5xx get up
+/// to two more attempts with a short backoff. Anything else (2xx, 404
+/// for a genuinely absent asset) is returned as-is.
+async fn fetch_with_retry(url: &str) -> Result<reqwest::Response, reqwest::Error> {
+    let mut last_err = None;
+    for attempt in 1..=3u32 {
+        if attempt > 1 {
+            tokio::time::sleep(Duration::from_millis(200 * u64::from(attempt - 1))).await;
+        }
+        match CLIENT.get(url).send().await {
+            Ok(res) if res.status().is_server_error() && attempt < 3 => {
+                tracing::warn!("loopback proxy {url}: upstream {} (attempt {attempt})", res.status());
+            }
+            Ok(res) => return Ok(res),
+            Err(e) => {
+                tracing::warn!("loopback proxy {url}: {e} (attempt {attempt})");
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.expect("loop exits early unless an error was stored"))
+}
 
 /// Spawn the loopback HTTP proxy on a background tokio task. Errors
 /// from binding are surfaced; runtime errors are logged but don't kill
@@ -55,18 +91,7 @@ async fn handle(
     let query = uri.query().map(|q| format!("?{q}")).unwrap_or_default();
     let url = format!("{scheme}://{host}/{path}{query}");
 
-    let upstream = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("loopback proxy: client build failed: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, format!("client: {e}")).into_response();
-        }
-    };
-
-    match upstream.get(&url).send().await {
+    match fetch_with_retry(&url).await {
         Ok(res) => {
             let status = res.status();
             // Forward only the headers maplibre/libcurl actually needs;

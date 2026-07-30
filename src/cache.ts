@@ -33,7 +33,10 @@ import { readMirrorPointer } from "./pmtiles.js";
 // client rendering, so the old namespace must be orphaned wholesale.
 // v5: self-hosted glyphs with CJK (mirror/fonts/) — cached tiles
 // rendered before the switch have no kanji/kana/hangul baked in.
-export const STYLE_VERSION = 5;
+// v6: v5 renders went out with randomly missing glyph ranges (the
+// container proxy's per-request TLS storm, fixed in proxy.rs) — those
+// half-labeled tiles are baked into the v5 namespace.
+export const STYLE_VERSION = 6;
 
 interface CacheCoords {
   z: number;
