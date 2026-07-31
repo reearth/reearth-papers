@@ -83,16 +83,21 @@ export function handleStyle(url: URL, env: Env): Response {
   // The house styles carry no symbol layers, so `?minimal=1` is a
   // no-op for them and they never need glyphs or a sprite.
   const papers = isPapersTheme(theme);
-  // Tile-mode adjustments (src/tile_mode.ts): pinned anchors + optional
-  // pois text, matching what the renderer needs from this style.
-  const stockLayers = tileModeAdjustments(
-    layers(SOURCE_NAME, namedTheme(theme), { lang: "en" }),
-  );
-  const allLayers: { type?: unknown }[] = papers
-    ? papersLayers(SOURCE_NAME, theme)
-    : cjk
-      ? applyCjkFlavor(stockLayers, cjk)
-      : stockLayers;
+  let allLayers: { type?: unknown }[];
+  if (papers) {
+    // Must not touch namedTheme() here: the papers themes aren't stock
+    // Protomaps themes and namedTheme throws "Theme not found" — an
+    // eager call broke every papers-light/dark render (502s) once the
+    // tile cache namespace moved past the pre-refactor renders.
+    allLayers = papersLayers(SOURCE_NAME, theme);
+  } else {
+    // Tile-mode adjustments (src/tile_mode.ts): pinned anchors +
+    // optional pois text, matching what the renderer needs.
+    const stockLayers = tileModeAdjustments(
+      layers(SOURCE_NAME, namedTheme(theme), { lang: "en" }),
+    );
+    allLayers = cjk ? applyCjkFlavor(stockLayers, cjk) : stockLayers;
+  }
   const keptLayers = minimal
     ? allLayers.filter((l) => l.type !== "symbol")
     : allLayers;
