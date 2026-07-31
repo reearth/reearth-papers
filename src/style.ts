@@ -27,23 +27,50 @@ const ATTRIBUTION =
 export type Theme =
   | "papers-light"
   | "papers-dark"
-  | "light"
-  | "dark"
-  | "white"
-  | "black"
-  | "grayscale";
+  | "protomaps-light"
+  | "protomaps-dark"
+  | "protomaps-white"
+  | "protomaps-black"
+  | "protomaps-grayscale";
 
 // Order matters: this drives the catalog, and the catalog drives the
 // viewer's gallery. The house styles lead.
 export const THEMES: readonly Theme[] = [
   "papers-light",
   "papers-dark",
-  "light",
-  "dark",
-  "white",
-  "black",
-  "grayscale",
+  "protomaps-light",
+  "protomaps-dark",
+  "protomaps-white",
+  "protomaps-black",
+  "protomaps-grayscale",
 ];
+
+// The stock themes used to live at unprefixed ids (`/styles/light/…`);
+// the public rename to `protomaps-*` keeps them reachable through a
+// 301 (see the dispatch in index.ts).
+export const LEGACY_THEMES: Record<string, Theme> = {
+  light: "protomaps-light",
+  dark: "protomaps-dark",
+  white: "protomaps-white",
+  black: "protomaps-black",
+  grayscale: "protomaps-grayscale",
+};
+
+/** The protomaps-themes-base theme name for a stock theme (the part
+ *  after the prefix), or null for the papers house styles. Also what
+ *  the mirror worker's `?theme=` still speaks for stock themes — that
+ *  keeps the style URL, and with it every tile cache key and the
+ *  container's style cache, stable across the public rename. */
+export function stockTheme(theme: Theme): string | null {
+  return theme.startsWith("protomaps-")
+    ? theme.slice("protomaps-".length)
+    : null;
+}
+
+/** Theme id as the mirror worker's `?theme=` expects it. */
+export function mirrorTheme(theme: Theme): string {
+  return stockTheme(theme) ?? theme;
+}
 
 /** Display name for the catalog. Themes without an entry fall back to
  *  `Protomaps Basemap (<theme>)` — they *are* stock Protomaps themes. */
@@ -53,13 +80,13 @@ export const THEME_NAMES: Partial<Record<Theme, string>> = {
 };
 
 export function themeName(theme: Theme): string {
-  return THEME_NAMES[theme] ?? `Protomaps Basemap (${theme})`;
+  return THEME_NAMES[theme] ?? `Protomaps Basemap (${stockTheme(theme)})`;
 }
 
-/** Catalog id. The stock themes keep their `protomaps-` prefix; the
- *  house styles are already namespaced by their `papers-` one. */
+/** Catalog id — identical to the theme id since the stock themes
+ *  gained their `protomaps-` prefix. Kept as a named seam. */
 export function themeCatalogId(theme: Theme): string {
-  return isPapersTheme(theme) ? theme : `protomaps-${theme}`;
+  return theme;
 }
 
 export function isTheme(s: string): s is Theme {
@@ -103,14 +130,15 @@ export function buildStyle(
   // Composes with ?cjk (adjustments first, flavor second — the same
   // order the mirror worker uses), so e.g. ?renderer=1&cjk=tc mirrors
   // a Taiwan-area tile's exact style.
-  let stockLayers = layers(SOURCE_NAME, namedTheme(theme), { lang: "en" });
+  const stock = stockTheme(theme)!;
+  let stockLayers = layers(SOURCE_NAME, namedTheme(stock), { lang: "en" });
   if (renderer) stockLayers = tileModeAdjustments(stockLayers);
   return {
     version: 8,
     name: `Re:Earth Papers — ${theme}`,
     sources: { [SOURCE_NAME]: source },
     glyphs: `${origin}/fonts/{fontstack}/{range}.pbf`,
-    sprite: `${ASSETS_BASE}/sprites/v4/${theme}`,
+    sprite: `${ASSETS_BASE}/sprites/v4/${stock}`,
     layers: cjk ? applyCjkFlavor(stockLayers, cjk) : stockLayers,
   };
 }

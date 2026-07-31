@@ -52,7 +52,13 @@ import { EZU_MAXZOOM, EZU_RECIPE_VERSION, EZU_THEMES, renderEzuTile } from "./ez
 import { handleFont } from "./fonts.js";
 import { serveRenderedTile } from "./render_cache.js";
 import { handleSourceFile } from "./source_file.js";
-import { handleStyle, isTheme, type Theme } from "./style.js";
+import {
+  handleStyle,
+  isTheme,
+  LEGACY_THEMES,
+  mirrorTheme,
+  type Theme,
+} from "./style.js";
 import {
   handleRasterTilejson,
   handleTilesetTilejson,
@@ -213,6 +219,16 @@ async function dispatch(
     return handleFont(request, env, ctx, font[1], font[2]);
   }
 
+  // The stock themes used to live unprefixed (`/styles/light/…`);
+  // permanent-redirect those to the `protomaps-*` ids so existing
+  // TileJSON consumers and bookmarks keep working.
+  const legacy = url.pathname.match(/^\/styles\/([a-z]+)(\/.*)$/);
+  if (legacy && LEGACY_THEMES[legacy[1]]) {
+    const to = new URL(url);
+    to.pathname = `/styles/${LEGACY_THEMES[legacy[1]]}${legacy[2]}`;
+    return Response.redirect(to.toString(), 301);
+  }
+
   // Themed routes. We validate the theme once at parse time and pass
   // the narrowed type into the handlers.
   const styleJson = url.pathname.match(STYLE_STYLE_RE);
@@ -322,9 +338,12 @@ async function renderRasterTile(
   // over Chinese-script regions (see cjk_flavor.ts). Being part of the
   // style URL, it namespaces both the container's style cache and the
   // rendered-tile cache key for exactly the affected tiles.
+  // `mirrorTheme` speaks the mirror's pre-rename ids for the stock
+  // themes — keeping this URL unchanged preserves every existing tile
+  // cache key across the public `protomaps-*` rename.
   const cjk = tileCjkFlavor(coords);
   const styleUrlForCache =
-    `${env.DEFAULT_STYLE_URL}?theme=${theme}&v=${STYLE_VERSION}` +
+    `${env.DEFAULT_STYLE_URL}?theme=${mirrorTheme(theme)}&v=${STYLE_VERSION}` +
     (cjk ? `&cjk=${cjk}` : "");
 
   // Two-layer cache (Cache API → R2). Key embeds a style hash + the

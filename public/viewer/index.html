@@ -463,7 +463,13 @@
     // comparison spot is shareable as a URL.
     const compareEzu =
       new URLSearchParams(location.search).get('compare') === 'ezu';
-    const EZU_COMPARE_THEMES = ['light', 'dark', 'papers-light', 'papers-dark'];
+    // Every themed raster has an ezu recipe now; the theme ids match
+    // the catalog entries' `theme` field.
+    const EZU_COMPARE_THEMES = [
+      'papers-light', 'papers-dark',
+      'protomaps-light', 'protomaps-dark',
+      'protomaps-white', 'protomaps-black', 'protomaps-grayscale',
+    ];
     let map2 = null;
 
     function ezuStyle(theme) {
@@ -874,7 +880,7 @@
           setupInspector();
         } else {
           teardownInspector();
-          ensureMap(t.style || '/styles/light/style.json');
+          ensureMap(t.style || '/styles/protomaps-light/style.json');
         }
         updateCompare(t);
       };
