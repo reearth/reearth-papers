@@ -1,5 +1,21 @@
 # scripts
 
+## smoke.mjs
+
+Post-deploy smoke test over the public API, run by the Deploy workflow
+after every rollout (and runnable by hand). Checks every tileset in
+`/catalog.json`, every themed style (`style.json` plus `?renderer=1`),
+and the fonts route. Themed rasters are fetched twice: a fixed Tokyo
+tile (serving path) and a random z14 tile with a cache-buster — the
+tile-cache key embeds the coordinates, so the random tile is never
+cached and forces the full mirror-style → container → fonts render
+path on every run. Exits non-zero on any failure so the deploy goes
+red; passthrough tilesets (third-party origins) only warn.
+
+```
+node scripts/smoke.mjs [--base=https://papers.reearth.land]
+```
+
 ## thumbnails.mjs
 
 Generates a thumbnail PNG for every raster tileset listed in the

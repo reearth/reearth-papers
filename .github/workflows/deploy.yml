@@ -171,3 +171,25 @@ jobs:
       # rollout doesn't show as a green deploy.
       - name: Deploy
         run: npm run deploy
+
+  # Exercise the whole public surface against the fresh deploy: every
+  # catalog tileset, every themed style (papers AND stock — different
+  # code paths), fonts, and — critically — a never-cached random deep
+  # tile per theme that forces a full mirror-style → container → fonts
+  # render. Cached tiles once masked a broken style pipeline for days;
+  # the fresh-render leg fails the deploy the moment rendering breaks.
+  # No rollback automation (containers make that hairy) — a red deploy
+  # plus `git revert` is the recovery path.
+  smoke:
+    name: Post-deploy smoke test
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Smoke-test production
+        run: node scripts/smoke.mjs
