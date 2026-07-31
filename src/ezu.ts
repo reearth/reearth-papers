@@ -19,7 +19,9 @@
 // the glyph ranges `neededGlyphRanges()` reports. Glyphs and the
 // sprite land in a persistent bank on the renderer, so warm isolates
 // skip those fetches entirely.
-import { Renderer } from "@reearth/ezu";
+// The /simd variant: workerd supports WASM SIMD128, and the scalar
+// build leaves a 1.5-3x pixel-loop speedup on the table.
+import { Renderer, simdEnabled } from "@reearth/ezu/simd";
 
 import darkRecipe from "./ezu_recipes/dark.json";
 import lightRecipe from "./ezu_recipes/light.json";
@@ -66,6 +68,7 @@ function ensureState(theme: string): EzuState {
   if (st) return st;
   const recipe = RECIPES[theme];
   if (!recipe) throw new Error(`no ezu recipe for theme ${theme}`);
+  console.log(`ezu: init ${theme} (simd: ${simdEnabled()})`);
   const renderer = new Renderer(JSON.stringify(recipe));
   const sources =
     (recipe as { sources?: Record<string, Record<string, unknown>> }).sources ?? {};
