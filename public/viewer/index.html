@@ -403,14 +403,14 @@
     // Build the preview's tileset gallery from /catalog.json so adding
     // a new theme or raster source on the server side shows up here
     // without any HTML edit. Each card carries a live tile thumbnail
-    // (a fixed z2 tile over Japan / East Asia) fetched through the
-    // tileset's own TileJSON.
+    // (the z0 whole-world tile, so no region gets top billing) fetched
+    // through the tileset's own TileJSON.
     //
     // Rendering mode is implicit: vector PMTiles tilesets (and only
     // those) are rendered client-side from a MapLibre style; raster
     // tilesets always show their served tiles.
 
-    const THUMB = { z: 2, x: 3, y: 1 };
+    const THUMB = { z: 0, x: 0, y: 0 };
 
     function rasterStyle(tilejsonUrl) {
       return {
@@ -700,8 +700,10 @@
           map = new maplibregl.Map({
             container: 'map',
             style,
-            center: [139.7, 35.7],
-            zoom: 4,
+            // Whole-world start so the preview doesn't foreground any
+            // one region; `hash: true` still restores shared links.
+            center: [0, 20],
+            zoom: 0,
             hash: true,
           });
           map.addControl(new maplibregl.NavigationControl());
