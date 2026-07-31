@@ -31,6 +31,13 @@ workers_dev = true
 pattern = "papers.reearth.land"
 custom_domain = true
 
+# The ezu shadow renderer (src/ezu.ts) runs whole-tile CPU rendering
+# in-worker; a dense z14 tile can take tens of seconds of WASM CPU.
+# Raising the ceiling only affects requests that actually use it —
+# ordinary routes finish in milliseconds regardless.
+[limits]
+cpu_ms = 120000
+
 # Static assets (preview page, etc.) served from ./public. Assets are
 # matched before the worker handler runs, so `/` and `/preview.html`
 # fall through to public/index.html automatically without any code in

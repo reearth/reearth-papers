@@ -3,6 +3,7 @@
  *
  * Public routes:
  *   /styles/{theme}/tile/{z}/{x}/{y}.png — rendered raster tile
+ *   /styles/{theme}/ezu/{z}/{x}/{y}.png  — ezu shadow render (src/ezu.ts)
  *   /styles/{theme}/tilejson.json        — TileJSON for the above
  *   /styles/{theme}/style.json           — MapLibre style with that theme
  *   /{id}/{z}/{x}/{y}.{ext}              — tiles for every registered tileset
@@ -47,6 +48,9 @@ import {
 } from "./cache.js";
 import { tileCjkFlavor } from "./cjk_flavor.js";
 import { handleCatalog } from "./catalog.js";
+import { EZU_MAXZOOM, EZU_RECIPE_VERSION, EZU_THEMES, renderEzuTile } from "./ezu.js";
+import { handleFont } from "./fonts.js";
+import { serveRenderedTile } from "./render_cache.js";
 import { handleSourceFile } from "./source_file.js";
 import { handleStyle, isTheme, type Theme } from "./style.js";
 import {
@@ -54,7 +58,11 @@ import {
   handleTilesetTilejson,
   RENDERED_RASTER_MAXZOOM,
 } from "./tilejson.js";
-import { TILESETS_BY_ID, type TileFormat } from "./tilesets.js";
+import {
+  PROTOMAPS_ATTRIBUTION,
+  TILESETS_BY_ID,
+  type TileFormat,
+} from "./tilesets.js";
 
 export class TileRenderer extends Container<Env> {
   defaultPort = 8080;
@@ -68,6 +76,9 @@ export class TileRenderer extends Container<Env> {
 // The theme capture allows hyphens (`papers-light`); `requireTheme`
 // narrows it to an actual member of THEMES right after the match.
 const STYLE_TILE_RE = /^\/styles\/([a-z-]+)\/tile\/(\d+)\/(\d+)\/(\d+)\.png$/;
+// ezu shadow rendering (src/ezu.ts) — same cartography, rendered
+// in-worker for side-by-side comparison against the container path.
+const STYLE_EZU_RE = /^\/styles\/([a-z-]+)\/ezu\/(\d+)\/(\d+)\/(\d+)\.png$/;
 const STYLE_TILEJSON_RE = /^\/styles\/([a-z-]+)\/tilejson\.json$/;
 const STYLE_STYLE_RE = /^\/styles\/([a-z-]+)\/style\.json$/;
 // Tile + TileJSON + source-archive shapes for every registered
@@ -214,6 +225,14 @@ async function dispatch(
     const theme = requireTheme(tilejson[1]);
     return theme instanceof Response ? theme : handleRasterTilejson(request, theme);
   }
+  const ezu = url.pathname.match(STYLE_EZU_RE);
+  if (ezu) {
+    return handleEzu(request, env, ctx, ezu[1], {
+      z: Number(ezu[2]),
+      x: Number(ezu[3]),
+      y: Number(ezu[4]),
+    });
+  }
   const tile = url.pathname.match(STYLE_TILE_RE);
   if (tile) {
     const theme = requireTheme(tile[1]);
@@ -235,62 +254,33 @@ async function dispatch(
   return new Response("not found", { status: 404 });
 }
 
-async function handleFont(
+// ezu shadow route: in-worker WASM rendering of the same cartography,
+// cached in its own namespace so it can never mix with container
+// renders. Serves only the themes with committed recipes and only
+// through the vector source's native zoom (no overzoom in the shadow).
+async function handleEzu(
   request: Request,
   env: Env,
   ctx: ExecutionContext,
-  stackEnc: string,
-  file: string,
+  theme: string,
+  coords: { z: number; x: number; y: number },
 ): Promise<Response> {
-  // Fontstack names carry spaces ("Noto Sans Regular") so the path
-  // segment arrives percent-encoded; decode before the R2 lookup and
-  // reject anything that would escape the prefix.
-  const stack = decodeURIComponent(stackEnc);
-  if (stack.includes("/") || stack.includes("..")) {
-    return new Response("not found", { status: 404 });
+  if (!EZU_THEMES.has(theme)) {
+    return new Response(`no ezu recipe for theme: ${theme}`, { status: 404 });
   }
-
-  // Glyph ranges are hot during a container cold start (a CJK-dense
-  // style load touches dozens of them) — front R2 with the edge cache.
-  const cache = caches.default;
-  const cached = await cache.match(request);
-  if (cached) return cached;
-
-  const key = `mirror/fonts/${stack}/${file}`;
-  const obj = await env.R2.get(key);
-  let body: ArrayBuffer | ReadableStream;
-  if (obj) {
-    body = obj.body;
-  } else {
-    // Stack or range we haven't mirrored — the styles switch to
-    // per-script PGF stacks via data-driven text-font, so new upstream
-    // stacks can appear under our feet. Falling back matters more
-    // than usual here: maplibre-native aborts the whole render process
-    // on a glyph 404 (a Devanagari tile crash-looped the containers
-    // when this route 404'd the PGF stack). Backfill R2 so the
-    // fallback is one-time per object.
-    const upstream = await fetch(
-      `https://protomaps.github.io/basemaps-assets/fonts/${encodeURIComponent(stack)}/${file}`,
-    );
-    if (!upstream.ok) return new Response("not found", { status: 404 });
-    const bytes = await upstream.arrayBuffer();
-    ctx.waitUntil(
-      env.R2.put(key, bytes, {
-        httpMetadata: { contentType: "application/x-protobuf" },
-      }),
-    );
-    body = bytes;
+  if (coords.z > EZU_MAXZOOM) {
+    return new Response("zoom above ezu range", { status: 404 });
   }
-
-  const response = new Response(body, {
-    headers: {
-      "content-type": "application/x-protobuf",
-      "cache-control": "public, max-age=86400",
-      "access-control-allow-origin": "*",
-    },
+  const version = STYLE_VERSION * 1000 + EZU_RECIPE_VERSION;
+  return serveRenderedTile(request, env, ctx, {
+    cacheKey:
+      `cache/ezu/${version}/${theme}/${coords.z}/${coords.x}/${coords.y}.png`,
+    cacheVersion: version,
+    contentType: "image/png",
+    attribution: PROTOMAPS_ATTRIBUTION,
+    persist: true,
+    render: () => renderEzuTile(request, env, ctx, theme, coords),
   });
-  ctx.waitUntil(cache.put(request, response.clone()));
-  return response;
 }
 
 function tileShard(coords: { z: number; x: number; y: number }): number {

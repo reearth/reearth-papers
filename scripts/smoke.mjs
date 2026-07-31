@@ -182,6 +182,32 @@ for (const t of tilesets) {
   );
 }
 
+// ---- ezu shadow renders (warning-only) ------------------------------
+// The ezu route is a comparison shadow, not the serving path — a
+// broken shadow shouldn't block a deploy, but we want to see it go
+// yellow. Fresh random tile per theme, same reasoning as above.
+
+for (const theme of ["light", "dark"]) {
+  jobs.push(
+    (async () => {
+      const r = randomRenderTile();
+      const label = `ezu ${theme} (fresh render ${r.z}/${r.x}/${r.y})`;
+      try {
+        const res = await get(
+          `${BASE}/styles/${theme}/ezu/${r.z}/${r.x}/${r.y}.png?${RUN}`,
+          { timeoutMs: 120_000 },
+        );
+        if (res.status !== 200) return warn(label, `HTTP ${res.status}`);
+        const size = pngSize(await res.arrayBuffer());
+        if (!size || size.width !== 512) return warn(label, "bad PNG");
+        ok(label);
+      } catch (e) {
+        warn(label, e.message);
+      }
+    })(),
+  );
+}
+
 // ---- fonts ----------------------------------------------------------
 
 jobs.push(

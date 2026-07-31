@@ -25,6 +25,27 @@
     }
     #map { height: 100%; }
 
+    /* -- hidden ezu comparison (?compare=ezu) ------------------------- */
+    body.compare { grid-template-columns: 248px 1fr 1fr; }
+    body.compare #map { border-right: 2px solid var(--accent); }
+    #map2 { height: 100%; position: relative; }
+    #map2[hidden] { display: none; }
+    .engine-badge {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 3;
+      font: 600 10px/1 ui-monospace, Menlo, monospace;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--card);
+      border: 1px solid var(--accent);
+      border-radius: 5px;
+      padding: 4px 7px;
+      pointer-events: none;
+    }
+
     /* -- panel ------------------------------------------------------- */
     #panel {
       display: flex;
@@ -380,6 +401,12 @@
     </div>
   </aside>
   <div id="map"></div>
+  <!-- Hidden comparison mode (?compare=ezu): the selected theme's
+       container-rendered rasters on the left, the ezu shadow renders
+       on the right, views synced. No UI affordance on purpose. -->
+  <div id="map2" hidden>
+    <span class="engine-badge">ezu</span>
+  </div>
   <!-- Shown after copying a raw XYZ URL: unlike TileJSON, it carries no
        attribution metadata, so the consumer has to display the credit
        themselves. -->
@@ -428,6 +455,83 @@
     }
 
     let map = null;
+
+    // -- hidden ezu comparison (?compare=ezu) -----------------------
+    // Side-by-side against the ezu shadow renders (src/ezu.ts) for the
+    // themes with committed recipes. No UI affordance on purpose — the
+    // query param is the switch, and hash links keep working, so a
+    // comparison spot is shareable as a URL.
+    const compareEzu =
+      new URLSearchParams(location.search).get('compare') === 'ezu';
+    const EZU_COMPARE_THEMES = ['light', 'dark'];
+    let map2 = null;
+
+    function ezuStyle(theme) {
+      return {
+        version: 8,
+        sources: {
+          raster: {
+            type: 'raster',
+            tiles: [location.origin + '/styles/' + theme + '/ezu/{z}/{x}/{y}.png'],
+            tileSize: 512,
+            maxzoom: 15,
+            attribution: 'ezu shadow render',
+          },
+        },
+        layers: [{ id: 'raster', type: 'raster', source: 'raster' }],
+      };
+    }
+
+    function syncMaps(a, b) {
+      let syncing = false;
+      const follow = (src, dst) => () => {
+        if (syncing) return;
+        syncing = true;
+        dst.jumpTo({
+          center: src.getCenter(),
+          zoom: src.getZoom(),
+          bearing: src.getBearing(),
+          pitch: src.getPitch(),
+        });
+        syncing = false;
+      };
+      a.on('move', follow(a, b));
+      b.on('move', follow(b, a));
+    }
+
+    function updateCompare(t) {
+      if (!compareEzu || !map) return;
+      const ok =
+        t && t.type !== 'vector' && EZU_COMPARE_THEMES.includes(t.theme);
+      document.body.classList.toggle('compare', ok);
+      document.getElementById('map2').hidden = !ok;
+      if (ok) {
+        if (!map2) {
+          map2 = new maplibregl.Map({
+            container: 'map2',
+            style: ezuStyle(t.theme),
+            center: map.getCenter(),
+            zoom: map.getZoom(),
+          });
+          syncMaps(map, map2);
+        } else {
+          map2.setStyle(ezuStyle(t.theme));
+        }
+      }
+      map.resize(); // the grid column count just changed
+      if (ok) {
+        // Re-align after both containers settle at their new widths —
+        // resizes keep each map's own centre, which drifts the pair
+        // apart on the first toggle.
+        map2.resize();
+        map2.jumpTo({
+          center: map.getCenter(),
+          zoom: map.getZoom(),
+          bearing: map.getBearing(),
+          pitch: map.getPitch(),
+        });
+      }
+    }
 
     async function init() {
       const gallery = document.getElementById('gallery');
@@ -754,6 +858,7 @@
         if (t.type !== 'vector') {
           teardownInspector();
           ensureMap(rasterStyle(t.tilejson));
+          updateCompare(t);
           return;
         }
 
@@ -771,6 +876,7 @@
           teardownInspector();
           ensureMap(t.style || '/styles/light/style.json');
         }
+        updateCompare(t);
       };
 
       const params = new URLSearchParams(location.search);
