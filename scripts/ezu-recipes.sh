@@ -19,9 +19,11 @@ command -v "$EZU" >/dev/null || {
 }
 
 mkdir -p src/ezu_recipes
-# Shadow scope: light + dark only for now. Widen (papers themes, cjk
-# flavors) when the comparison graduates toward a cutover.
-for theme in light dark; do
+# Shadow scope: the stock light/dark pair plus the papers house styles
+# (label-free, so their recipes carry no glyph/sprite sources at all).
+# Widen further (remaining stock themes, cjk flavors) when the
+# comparison graduates toward a cutover.
+for theme in light dark papers-light papers-dark; do
   echo "translate: $theme"
   "$EZU" translate "$BASE/styles/$theme/style.json?renderer=1" \
     --out "src/ezu_recipes/$theme.json"

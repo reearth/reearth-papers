@@ -25,12 +25,18 @@ import { Renderer, simdEnabled } from "@reearth/ezu/simd";
 
 import darkRecipe from "./ezu_recipes/dark.json";
 import lightRecipe from "./ezu_recipes/light.json";
+import papersDarkRecipe from "./ezu_recipes/papers-dark.json";
+import papersLightRecipe from "./ezu_recipes/papers-light.json";
 import { handleFont } from "./fonts.js";
 import { handleVectorTile } from "./pmtiles.js";
 
 const RECIPES: Record<string, unknown> = {
   light: lightRecipe,
   dark: darkRecipe,
+  // The papers house styles are label-free: their recipes carry no
+  // glyph or sprite sources, so their renders skip every asset fetch.
+  "papers-light": papersLightRecipe,
+  "papers-dark": papersDarkRecipe,
 };
 
 /** Themes the shadow route serves. Widen alongside scripts/ezu-recipes.sh. */

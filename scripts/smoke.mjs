@@ -187,7 +187,7 @@ for (const t of tilesets) {
 // broken shadow shouldn't block a deploy, but we want to see it go
 // yellow. Fresh random tile per theme, same reasoning as above.
 
-for (const theme of ["light", "dark"]) {
+for (const theme of ["light", "dark", "papers-light", "papers-dark"]) {
   jobs.push(
     (async () => {
       const r = randomRenderTile();
