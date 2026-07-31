@@ -125,13 +125,23 @@ const fill = (tpl, t) => tpl.replace("{z}", t.z).replace("{x}", t.x).replace("{y
 
 // ---- catalog --------------------------------------------------------
 
-const catalog = await checkJson("catalog.json", `${BASE}/catalog.json`);
-const tilesets = catalog?.tilesets ?? [];
-if (!tilesets.length) fail("catalog.json", "no tilesets");
+// The whole suite lives in a function so it can run twice: right
+// after a deploy, requests race the global rollout — the catalog can
+// come from a new-code isolate while some tile fetches still hit
+// old-code ones (this exact race painted a healthy deploy red once).
+// On failures, wait for the rollout to settle and re-run everything;
+// only a second consecutive failure is real.
+async function runSuite() {
+  failures.length = 0;
+  warnings.length = 0;
 
-// ---- per-tileset checks (all concurrent) ----------------------------
+  const catalog = await checkJson("catalog.json", `${BASE}/catalog.json`);
+  const tilesets = catalog?.tilesets ?? [];
+  if (!tilesets.length) fail("catalog.json", "no tilesets");
 
-const jobs = [];
+  // ---- per-tileset checks (all concurrent) --------------------------
+
+  const jobs = [];
 for (const t of tilesets) {
   const themed = Boolean(t.theme);
   jobs.push(
@@ -243,7 +253,18 @@ jobs.push(
   })(),
 );
 
-await Promise.all(jobs);
+  await Promise.all(jobs);
+}
+
+await runSuite();
+if (failures.length) {
+  console.log(
+    `\n${failures.length} check(s) failed — waiting 60s for the ` +
+      `rollout to settle, then retrying the whole suite once`,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 60_000));
+  await runSuite();
+}
 
 console.log(
   `\nsmoke: ${failures.length} failed, ${warnings.length} warnings ` +
