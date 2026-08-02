@@ -86,6 +86,27 @@ interface EzuState {
 const states = new Map<string, EzuState>();
 let useCounter = 0;
 
+// Diagnostics for the isolate-spread question: `renderTile` is synchronous,
+// so tiles sharing an isolate can only render one after another. Whether a
+// viewport's tiles land on one isolate or several is not something the
+// platform documents or we can set, so measure it — the ezu route stamps
+// these onto every response (see `handleEzu`) and a burst of requests shows
+// how many distinct isolates answered.
+let isolateId: string | null = null;
+let rendersServed = 0;
+
+/** Stable per-isolate label. Generated lazily: a module-scope RNG call runs
+ *  outside any request's I/O context. */
+export function ezuIsolateId(): string {
+  isolateId ??= Math.random().toString(36).slice(2, 10);
+  return isolateId;
+}
+
+/** Renders this isolate has completed, and renders running right now. */
+export function ezuRenderStats(): { served: number; inFlight: number } {
+  return { served: rendersServed, inFlight: activePermits };
+}
+
 // Renderer instances are retained per theme so warm isolates keep their
 // glyph bank, but WASM linear memory never shrinks and the bank alone
 // reaches ~38MB on a CJK-dense theme. Seven themes' worth of that in one
@@ -327,6 +348,7 @@ export async function renderEzuTile(
   try {
     return await renderEzuTileInner(request, env, ctx, theme, coords);
   } finally {
+    rendersServed++;
     releaseRenderPermit();
   }
 }

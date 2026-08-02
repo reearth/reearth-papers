@@ -48,7 +48,14 @@ import {
 } from "./cache.js";
 import { tileCjkFlavor } from "./cjk_flavor.js";
 import { handleCatalog } from "./catalog.js";
-import { EZU_MAXZOOM, EZU_RECIPE_VERSION, EZU_THEMES, renderEzuTile } from "./ezu.js";
+import {
+  ezuIsolateId,
+  ezuRenderStats,
+  EZU_MAXZOOM,
+  EZU_RECIPE_VERSION,
+  EZU_THEMES,
+  renderEzuTile,
+} from "./ezu.js";
 import { handleFont } from "./fonts.js";
 import { serveRenderedTile } from "./render_cache.js";
 import { handleSourceFile } from "./source_file.js";
@@ -288,7 +295,7 @@ async function handleEzu(
     return new Response("zoom above ezu range", { status: 404 });
   }
   const version = STYLE_VERSION * 1000 + EZU_RECIPE_VERSION;
-  return serveRenderedTile(request, env, ctx, {
+  const served = await serveRenderedTile(request, env, ctx, {
     cacheKey:
       `cache/ezu/${version}/${theme}/${coords.z}/${coords.x}/${coords.y}.png`,
     cacheVersion: version,
@@ -297,6 +304,14 @@ async function handleEzu(
     persist: true,
     render: () => renderEzuTile(request, env, ctx, theme, coords),
   });
+  // Which isolate answered, and what it was doing. Stamped on cache hits
+  // too — the value describes this isolate right now, not the cached tile.
+  const stats = ezuRenderStats();
+  const out = new Response(served.body, served);
+  out.headers.set("x-ezu-isolate", ezuIsolateId());
+  out.headers.set("x-ezu-renders", String(stats.served));
+  out.headers.set("x-ezu-inflight", String(stats.inFlight));
+  return out;
 }
 
 function tileShard(coords: { z: number; x: number; y: number }): number {
