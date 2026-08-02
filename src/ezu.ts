@@ -71,13 +71,86 @@ interface EzuState {
    *  awaits mid-sequence, and a concurrent request clearing sources on
    *  the shared renderer there would corrupt the render. */
   lock: Promise<void>;
+  /** Renders currently using this state. A state with work in flight
+   *  must never be evicted — `free()` under an active render would
+   *  pull the renderer out from under it. */
+  inFlight: number;
+  /** Monotonic stamp for LRU eviction (a counter, not a clock: Workers
+   *  freezes `Date.now()` between I/O so it can't order same-tick uses). */
+  lastUsed: number;
+  /** Evicted from `states`, but still referenced by renders that were
+   *  already running. The last one out calls `free()`. */
+  disposed: boolean;
 }
 
 const states = new Map<string, EzuState>();
+let useCounter = 0;
+
+// Renderer instances are retained per theme so warm isolates keep their
+// glyph bank, but WASM linear memory never shrinks and the bank alone
+// reaches ~38MB on a CJK-dense theme. Seven themes' worth of that in one
+// isolate does not fit under the 128MB isolate ceiling, so cap how many
+// live at once and evict the least recently used.
+const MAX_STATES = 3;
+
+// Cap concurrent renders per isolate. `renderTile` is a synchronous WASM
+// call, so extra concurrency buys no render parallelism — it only overlaps
+// the surrounding I/O while every in-flight request keeps its MVT buffers,
+// glyph PBFs, and PNG output alive. Past ~6 concurrent renders that extra
+// resident memory pushes the isolate into the ceiling and the renderer
+// starts returning bogus (ptr, len) pairs, which surface as
+// `RangeError: Invalid array buffer length` from the wasm-bindgen glue
+// (HTTP 500 → MapLibre falls back to the parent zoom → serial retry waves).
+const MAX_CONCURRENT_RENDERS = 4;
+
+/** Give up waiting and render anyway rather than sit here forever — a
+ *  slow tile is recoverable, a request that never answers is not. */
+const PERMIT_WAIT_BUDGET_MS = 20_000;
+const PERMIT_POLL_MS = 10;
+
+let activePermits = 0;
+
+async function acquireRenderPermit(): Promise<void> {
+  // Polling, not a queue of resolvers: a promise that only another
+  // request's execution context can settle is not something workerd
+  // lets us await. It sees a request with no pending I/O of its own and
+  // cancels it ("your Worker's code had hung and would never generate a
+  // response"). `setTimeout` is real I/O, so the waiter stays alive.
+  const deadline = Date.now() + PERMIT_WAIT_BUDGET_MS;
+  while (activePermits >= MAX_CONCURRENT_RENDERS && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, PERMIT_POLL_MS));
+  }
+  // No `await` between the check above and the increment, so the pair is
+  // atomic on this single-threaded isolate — waiters can't overshoot.
+  activePermits++;
+}
+
+function releaseRenderPermit(): void {
+  activePermits--;
+}
+
+/** Evict least-recently-used renderer states until at most `MAX_STATES`
+ *  remain. Skips anything with a render in flight and the theme being
+ *  served right now. */
+function evictStates(keep: string): void {
+  while (states.size > MAX_STATES) {
+    let victim: [string, EzuState] | null = null;
+    for (const entry of states) {
+      if (entry[0] === keep || entry[1].inFlight > 0) continue;
+      if (!victim || entry[1].lastUsed < victim[1].lastUsed) victim = entry;
+    }
+    if (!victim) return; // everything else is busy — try again next tile
+    console.log(`ezu: evict ${victim[0]} (states=${states.size})`);
+    dropState(victim[0], victim[1]);
+  }
+}
 
 function ensureState(theme: string): EzuState {
   let st = states.get(theme);
-  if (st) return st;
+  if (st) {
+    st.lastUsed = ++useCounter;
+    return st;
+  }
   const recipe = RECIPES[theme];
   if (!recipe) throw new Error(`no ezu recipe for theme ${theme}`);
   console.log(`ezu: init ${theme} (simd: ${simdEnabled()})`);
@@ -108,15 +181,43 @@ function ensureState(theme: string): EzuState {
     spriteReady: null,
     boundRanges: new Set(),
     lock: Promise.resolve(),
+    inFlight: 0,
+    lastUsed: ++useCounter,
+    disposed: false,
   };
   states.set(theme, st);
+  evictStates(theme);
   return st;
 }
 
-/** An OutOfMemory renderer instance can't be reused — drop the whole
- *  state so the next request rebuilds from scratch. */
+/** Errors that mean the renderer instance itself can't be trusted again.
+ *
+ *  `OutOfMemory` is ezu's own clean signal. The other two are what a
+ *  failed heap growth actually looks like from here: the WASM allocator
+ *  gives up without raising `OutOfMemory`, so the caller sees either a
+ *  trap (`WebAssembly.RuntimeError`) or the wasm-bindgen glue choking on
+ *  the out-of-range `(ptr, len)` it was handed (`RangeError`). Leaving
+ *  the state cached after either one keeps a suspect renderer — and its
+ *  whole glyph bank — resident for every later tile on this isolate. */
+function isRendererFatal(e: unknown): boolean {
+  const name = (e as { name?: string } | null)?.name;
+  return name === "OutOfMemory" || name === "RangeError" || name === "RuntimeError";
+}
+
+/** A poisoned renderer instance can't be reused — drop the whole state
+ *  so the next request rebuilds from scratch.
+ *
+ *  Eviction from `states` is immediate; `free()` waits until the last
+ *  render holding this state finishes. Freeing under a concurrent render
+ *  would pull the WASM instance out from under a `bindSource` that is
+ *  still to come after its `await`. */
 function dropState(theme: string, st: EzuState): void {
-  states.delete(theme);
+  if (states.get(theme) === st) states.delete(theme);
+  st.disposed = true;
+  if (st.inFlight === 0) freeState(st);
+}
+
+function freeState(st: EzuState): void {
   try {
     st.renderer.free();
   } catch {
@@ -219,7 +320,42 @@ export async function renderEzuTile(
   theme: string,
   coords: { z: number; x: number; y: number },
 ): Promise<Uint8Array | null> {
+  // Taken before the first buffer is allocated, not just around the WASM
+  // call: what has to stay bounded is how much tile data is resident at
+  // once, and a request queued here holds nothing.
+  await acquireRenderPermit();
+  try {
+    return await renderEzuTileInner(request, env, ctx, theme, coords);
+  } finally {
+    releaseRenderPermit();
+  }
+}
+
+async function renderEzuTileInner(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  theme: string,
+  coords: { z: number; x: number; y: number },
+): Promise<Uint8Array | null> {
   const st = ensureState(theme);
+  st.inFlight++;
+  try {
+    return await renderWithState(request, env, ctx, theme, st, coords);
+  } finally {
+    st.inFlight--;
+    if (st.disposed && st.inFlight === 0) freeState(st);
+  }
+}
+
+async function renderWithState(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  theme: string,
+  st: EzuState,
+  coords: { z: number; x: number; y: number },
+): Promise<Uint8Array | null> {
   await ensureSprite(st);
 
   const offsets: [number, number][] = [[0, 0], ...st.neighborOffsets];
@@ -251,7 +387,8 @@ export async function renderEzuTile(
   try {
     return await run;
   } catch (e) {
-    if ((e as { name?: string }).name === "OutOfMemory") {
+    if (isRendererFatal(e)) {
+      console.warn(`ezu: dropping ${theme} after ${String(e)}`);
       dropState(theme, st);
     }
     throw e;
