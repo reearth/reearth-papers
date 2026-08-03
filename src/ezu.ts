@@ -33,7 +33,14 @@ import protomapsGrayscaleRecipe from "./ezu_recipes/protomaps-grayscale.json";
 import protomapsLightRecipe from "./ezu_recipes/protomaps-light.json";
 import protomapsWhiteRecipe from "./ezu_recipes/protomaps-white.json";
 import { handleFont } from "./fonts.js";
-import { buildSubsetPbf, glyphStoreStats, hasGlyph, ingestGlyphPbf } from "./glyphs.js";
+import {
+  buildSubsetPbf,
+  glyphStoreStats,
+  hasGlyph,
+  ingestGlyphPbf,
+  loadStoreSeed,
+  serializeStore,
+} from "./glyphs.js";
 import { handleVectorTile } from "./pmtiles.js";
 
 const RECIPES: Record<string, unknown> = {
@@ -94,29 +101,15 @@ interface EzuState {
 const states = new Map<string, EzuState>();
 let useCounter = 0;
 
-// Diagnostics for the isolate-spread question: `renderTile` is synchronous,
-// so tiles sharing an isolate can only render one after another. Whether a
-// viewport's tiles land on one isolate or several is not something the
-// platform documents or we can set, so measure it — the ezu route stamps
-// these onto every response (see `handleEzu`) and a burst of requests shows
-// how many distinct isolates answered.
-let isolateId: string | null = null;
-let rendersServed = 0;
+// Memory is the one thing about this route that has bitten us and the one
+// unexplained failure it produced (a `RangeError` out of the wasm-bindgen
+// glue under load) is not reproducible — so the ezu route stamps what the
+// renderer is holding onto every response. If it recurs, these say whether
+// the subset path stopped bounding the bank.
 let lastHeapBytes = 0;
 let lastGlyphBytes = 0;
 
-/** Stable per-isolate label. Generated lazily: a module-scope RNG call runs
- *  outside any request's I/O context. */
-export function ezuIsolateId(): string {
-  isolateId ??= Math.random().toString(36).slice(2, 10);
-  return isolateId;
-}
-
-/** Renders this isolate has completed, renders running right now, and what
- *  the renderer reported holding after the last one (`memoryUsage()`). */
 export function ezuRenderStats(): {
-  served: number;
-  inFlight: number;
   heapBytes: number;
   glyphBytes: number;
   storeBytes: number;
@@ -124,8 +117,6 @@ export function ezuRenderStats(): {
 } {
   const store = glyphStoreStats();
   return {
-    served: rendersServed,
-    inFlight: activePermits,
     heapBytes: lastHeapBytes,
     glyphBytes: lastGlyphBytes,
     storeBytes: store.bytes,
@@ -133,33 +124,98 @@ export function ezuRenderStats(): {
   };
 }
 
-// One. `memoryUsage().heapBytes` on a CJK-dense theme, measured after a
-// Tokyo z14 render, is what forces this:
+// Renderers retained per isolate. This was 1 while a resident CJK theme
+// cost 82MB and a second put the isolate past its 128MB ceiling; binding
+// per-codepoint subsets (src/glyphs.ts) took the glyph bank out of that
+// number, and `memoryUsage().heapBytes` after a Tokyo z14 render now reads
 //
-//     1 theme resident   82MB   (36MB of it the glyph bank)
-//     2 themes          136MB   ← already past the 128MB isolate ceiling
-//     3 themes          182MB
+//     1 theme   45MB      4 themes   79MB
+//     2 themes  59MB      5 themes   91MB
+//     3 themes  67MB
 //
-// and wasm linear memory is a high-water mark — evicting a state lets the
-// allocator reuse the space but never returns it, so a second theme can
-// only be prevented, not recovered from. Retaining one renderer still
-// keeps the warm-isolate win that matters (its glyph bank); the cost of
-// this cap is a rebuild when a single isolate is asked to serve two
-// themes, which only the side-by-side comparison view does.
-const MAX_STATES = 1;
+// ~12MB per additional theme, because the worker-side glyph store is
+// shared across them — the protomaps recipes name the same glyph sources,
+// so a second theme adds a renderer, not another copy of the glyphs.
+//
+// Three leaves ~60MB of headroom and, unlike one, does not throw away a
+// warm renderer every time an isolate is asked for a second theme. Wasm
+// linear memory is still a high-water mark, so this is a ceiling to stay
+// under rather than something eviction can walk back.
+const MAX_STATES = 3;
 
 // Cap concurrent renders per isolate. `renderTile` is a synchronous WASM
-// call, so extra concurrency buys no render parallelism — it only overlaps
-// the surrounding I/O while every in-flight request keeps its MVT buffers,
-// glyph PBFs, and PNG output alive. Past ~6 concurrent renders that extra
-// resident memory pushes the isolate into the ceiling and the renderer
-// starts returning bogus (ptr, len) pairs, which surface as
-// `RangeError: Invalid array buffer length` from the wasm-bindgen glue
-// (HTTP 500 → MapLibre falls back to the parent zoom → serial retry waves).
-const MAX_CONCURRENT_RENDERS = 4;
+// call, so this never buys render parallelism — it bounds how much tile
+// data is resident at once while their fetches overlap. Four was set when
+// that resident cost was the thing tipping isolates over; measured now,
+// twelve concurrent renders of a single theme peak at 28MB of heap, so the
+// bound can sit above a viewport's tile count instead of splitting one
+// into two waves of fetches.
+const MAX_CONCURRENT_RENDERS = 8;
 
 /** Per-fontstack ceiling ezu trims the glyph bank to after each render. */
 const GLYPH_BUDGET_BYTES = 4 * 1024 * 1024;
+
+// Cold start is the one thing per-codepoint binding did not fix: the first
+// tile over an unseen area still pulls whole 256-codepoint blocks, because
+// blocks are all `/fonts` can serve. So carry the store across isolates —
+// one R2 object holding what previous isolates learned to need, which for
+// this traffic converges on a few thousand glyphs. Reading it is one GET
+// of ~1MB against up to 38MB of blocks.
+//
+// It is a cache in every sense: concurrent isolates overwrite each other
+// (last write wins, and they are writing near-identical sets), a miss just
+// means the blocks get fetched as before, and the key is versioned so a
+// format change orphans the old object instead of misreading it.
+const GLYPH_SEED_KEY = `cache/ezu-glyphs/v${EZU_RECIPE_VERSION}.pbf`;
+/** Don't rewrite the seed for every handful of new glyphs. */
+const GLYPH_SEED_REWRITE_RATIO = 1.25;
+/** Ceiling on the seed object. Every cold isolate reads it, so it is held
+ *  well under the store's own 8MB budget. */
+const GLYPH_SEED_MAX_BYTES = 3 * 1024 * 1024;
+
+let seedLoaded: Promise<void> | null = null;
+let seedGlyphsAtLastWrite = 0;
+let seedWriteInFlight = false;
+
+/** Read the shared seed once per isolate. Failure is not an error: the
+ *  block path behind it produces the same glyphs, only slower. */
+function ensureGlyphSeed(env: Env): Promise<void> {
+  seedLoaded ??= (async () => {
+    try {
+      const obj = await env.R2.get(GLYPH_SEED_KEY);
+      if (!obj) return;
+      const loaded = loadStoreSeed(new Uint8Array(await obj.arrayBuffer()));
+      seedGlyphsAtLastWrite = glyphStoreStats().entries;
+      console.log(`ezu: glyph seed loaded (${loaded} glyphs)`);
+    } catch (e) {
+      console.warn(`ezu: glyph seed load: ${String(e)}`);
+    }
+  })();
+  return seedLoaded;
+}
+
+/** Write the store back once it has grown meaningfully past what the seed
+ *  held, so the next cold isolate starts where this one got to. */
+function maybeWriteGlyphSeed(env: Env, ctx: ExecutionContext): void {
+  const { entries } = glyphStoreStats();
+  if (seedWriteInFlight || entries < 64) return;
+  if (entries < seedGlyphsAtLastWrite * GLYPH_SEED_REWRITE_RATIO) return;
+  seedGlyphsAtLastWrite = entries;
+  const bytes = serializeStore(GLYPH_SEED_MAX_BYTES);
+  if (!bytes) return;
+  // One at a time: a burst of concurrent renders over a new area crosses
+  // the growth threshold repeatedly, and each write is the whole store.
+  seedWriteInFlight = true;
+  ctx.waitUntil(
+    env.R2.put(GLYPH_SEED_KEY, bytes, {
+      httpMetadata: { contentType: "application/x-protobuf" },
+    })
+      .catch((e) => console.warn(`ezu: glyph seed write: ${String(e)}`))
+      .finally(() => {
+        seedWriteInFlight = false;
+      }),
+  );
+}
 
 /** Give up waiting and render anyway rather than sit here forever — a
  *  slow tile is recoverable, a request that never answers is not. */
@@ -350,6 +406,7 @@ async function ensureGlyphs(
   st: EzuState,
 ): Promise<void> {
   const needed = st.renderer.neededCodepoints() as Record<string, number[]>;
+  if (Object.keys(needed).length) await ensureGlyphSeed(env);
 
   // Which blocks have to be fetched before the subset can be assembled.
   const blocks: { source: string; stackEnc: string; start: number }[] = [];
@@ -396,6 +453,7 @@ async function ensureGlyphs(
         if (!hasGlyph(source, cp)) st.absentGlyphs.add(`${source}:${cp}`);
       }
     }
+    maybeWriteGlyphSeed(env, ctx);
   }
 
   for (const [source, cps] of Object.entries(needed)) {
@@ -433,7 +491,6 @@ export async function renderEzuTile(
   try {
     return await renderEzuTileInner(request, env, ctx, theme, coords, format);
   } finally {
-    rendersServed++;
     releaseRenderPermit();
   }
 }

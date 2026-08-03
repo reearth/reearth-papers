@@ -187,6 +187,68 @@ export function ingestGlyphPbf(
   return kept;
 }
 
+/** Serialise the whole store as one glyphs message — one `fontstack` per
+ *  glyph source, its `name` carrying the source name so a reader can put
+ *  the glyphs back where they came from.
+ *
+ *  This is the seed written to R2. The store is what an isolate learned
+ *  from real traffic, so handing it to the next isolate is what stops
+ *  every cold start from re-deriving it a 220KB block at a time. */
+export function serializeStore(maxBytes: number): Uint8Array | null {
+  // Newest first, so a store larger than the cap contributes the entries
+  // most likely to be wanted again rather than whatever happens to be at
+  // the front. Every cold isolate pays for this object, so it is bounded
+  // well below the store's own budget.
+  const entries = [...store].reverse();
+  const bySource = new Map<string, Uint8Array[]>();
+  let budget = maxBytes;
+  for (const [key, raw] of entries) {
+    budget -= raw.length;
+    if (budget < 0) break;
+    const at = key.lastIndexOf(":");
+    const source = key.slice(0, at);
+    const list = bySource.get(source);
+    if (list) list.push(raw);
+    else bySource.set(source, [raw]);
+  }
+  if (!bySource.size) return null;
+  const stacks: Uint8Array[] = [];
+  for (const [source, glyphs] of bySource) {
+    const parts: Uint8Array[] = [
+      ...field(1, new TextEncoder().encode(source)),
+      ...field(2, new TextEncoder().encode("0-65535")),
+    ];
+    for (const raw of glyphs) parts.push(...field(3, raw));
+    stacks.push(...field(1, concat(parts)));
+  }
+  return concat(stacks);
+}
+
+/** Load a seed written by `serializeStore`. Unlike `ingestGlyphPbf` this
+ *  keeps everything it is given — the seed is already only wanted
+ *  glyphs — and skips codepoints the store has, so a live isolate's own
+ *  entries stay at the fresh end of the LRU. */
+export function loadStoreSeed(bytes: Uint8Array): number {
+  let loaded = 0;
+  walk(bytes, (topField, stack) => {
+    if (topField !== 1) return;
+    let source: string | null = null;
+    const pending: Uint8Array[] = [];
+    walk(stack, (stackField, payload) => {
+      if (stackField === 1) source = new TextDecoder().decode(payload);
+      else if (stackField === 3) pending.push(payload);
+    });
+    if (!source) return;
+    for (const raw of pending) {
+      const id = glyphId(raw);
+      if (id === null || store.has(`${source}:${id}`)) continue;
+      put(source, id, raw);
+      loaded++;
+    }
+  });
+  return loaded;
+}
+
 /** Assemble a glyph PBF holding exactly `codepoints` (those the store
  *  has). `range` is free-form — ezu keys off each glyph's own id. */
 export function buildSubsetPbf(

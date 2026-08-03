@@ -50,7 +50,6 @@ import {
 import { tileCjkFlavor } from "./cjk_flavor.js";
 import { handleCatalog } from "./catalog.js";
 import {
-  ezuIsolateId,
   ezuRenderStats,
   type EzuFormat,
   EZU_MAXZOOM,
@@ -316,13 +315,10 @@ async function handleEzu(
     persist: true,
     render: () => renderEzuTile(request, env, ctx, theme, coords, format),
   });
-  // Which isolate answered, and what it was doing. Stamped on cache hits
-  // too — the value describes this isolate right now, not the cached tile.
+  // What this isolate's renderer is holding. Stamped on cache hits too —
+  // the value describes the isolate right now, not the cached tile.
   const stats = ezuRenderStats();
   const out = new Response(served.body, served);
-  out.headers.set("x-ezu-isolate", ezuIsolateId());
-  out.headers.set("x-ezu-renders", String(stats.served));
-  out.headers.set("x-ezu-inflight", String(stats.inFlight));
   out.headers.set("x-ezu-heap", String(stats.heapBytes));
   out.headers.set("x-ezu-glyph", String(stats.glyphBytes));
   out.headers.set("x-ezu-store", `${stats.storeGlyphs}/${stats.storeBytes}`);
