@@ -500,10 +500,26 @@ async function renderWithState(
   try {
     return await run;
   } catch (e) {
-    if (isRendererFatal(e)) {
-      console.warn(`ezu: dropping ${theme} after ${String(e)}`);
-      dropState(theme, st);
+    // Everything a post-mortem needs, in one line. ezu raises a named
+    // `OutOfMemory` carrying `requestedBytes` when the wasm heap cannot
+    // grow, so an error that is *not* that one did not come from a failed
+    // allocation — which is exactly the distinction the `RangeError` seen
+    // under load in August left unresolved. Pair the name with what the
+    // renderer was holding at the time so the next occurrence is decidable
+    // instead of inferred.
+    const err = e as { name?: string; message?: string; requestedBytes?: number };
+    let usage = "unavailable";
+    try {
+      usage = JSON.stringify(st.renderer.memoryUsage());
+    } catch {
+      // A poisoned instance may not answer; the name alone is still useful.
     }
+    console.warn(
+      `ezu: render failed ${theme}/${coords.z}/${coords.x}/${coords.y} ` +
+        `name=${err.name ?? "?"} requestedBytes=${err.requestedBytes ?? "-"} ` +
+        `inFlight=${activePermits} usage=${usage} msg=${err.message ?? String(e)}`,
+    );
+    if (isRendererFatal(e)) dropState(theme, st);
     throw e;
   }
 }
