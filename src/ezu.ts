@@ -67,8 +67,10 @@ export const EZU_THEMES = new Set(Object.keys(RECIPES));
  *  the old renders sit in the cache next to the new ones. */
 export const EZU_RECIPE_VERSION = 4;
 
-/** The protomaps vector source carries data through z15; the shadow
- *  route doesn't overzoom (comparison happens within range). */
+/** The protomaps vector source carries data through z15. Deeper tiles are
+ *  rendered by reprojecting that z15 ancestor (ezu >= 0.6.0's
+ *  `sourceZoom`), the same overzoom maplibre-native does internally, so
+ *  the route serves the full raster range rather than stopping here. */
 export const EZU_MAXZOOM = 15;
 
 interface EzuState {
@@ -380,6 +382,18 @@ function freeState(st: EzuState): void {
   }
 }
 
+/** The tile at the vector source's maxzoom that contains `(z, x, y)` —
+ *  itself when the source goes that deep. */
+function ancestorOf(
+  z: number,
+  x: number,
+  y: number,
+): { z: number; x: number; y: number } {
+  if (z <= EZU_MAXZOOM) return { z, x, y };
+  const shift = z - EZU_MAXZOOM;
+  return { z: EZU_MAXZOOM, x: x >> shift, y: y >> shift };
+}
+
 async function fetchMvt(
   env: Env,
   z: number,
@@ -597,24 +611,49 @@ async function renderWithState(
 ): Promise<Uint8Array | null> {
   await ensureSprite(request, env, ctx, st);
 
+  // Past the vector source's own maxzoom there is no tile to fetch, so
+  // each position resolves to its ancestor there and ezu reprojects it
+  // into the rendered frame (`sourceZoom`). Below that the ancestor *is*
+  // the tile, and the declared zoom has to follow — it is the zoom of
+  // the bytes, not a constant. It also needs deduplication: at z18 the
+  // whole 3x3 window collapses onto one or two ancestors, and fetching
+  // each nine times would undo the point of overzooming.
   const offsets: [number, number][] = [[0, 0], ...st.neighborOffsets];
-  const mvts = await Promise.all(
-    offsets.map(async ([dx, dy]) => ({
-      dx,
-      dy,
-      bytes: await fetchMvt(env, coords.z, coords.x + dx, coords.y + dy),
-    })),
+  const wanted = offsets.map(([dx, dy]) => ({
+    dx,
+    dy,
+    at: ancestorOf(coords.z, coords.x + dx, coords.y + dy),
+  }));
+  const fetches = new Map<string, Promise<Uint8Array | null>>();
+  for (const w of wanted) {
+    const key = `${w.at.z}/${w.at.x}/${w.at.y}`;
+    if (!fetches.has(key)) fetches.set(key, fetchMvt(env, w.at.z, w.at.x, w.at.y));
+  }
+  const byAncestor = new Map<string, Uint8Array | null>();
+  await Promise.all(
+    [...fetches].map(async ([key, p]) => {
+      byAncestor.set(key, await p);
+    }),
   );
+  const mvts = wanted.map((w) => ({
+    dx: w.dx,
+    dy: w.dy,
+    sourceZoom: w.at.z,
+    bytes: byAncestor.get(`${w.at.z}/${w.at.x}/${w.at.y}`) ?? null,
+  }));
 
   const run = st.lock.then(async () => {
     st.renderer.clearSources();
     for (const m of mvts) {
       if (!m.bytes) continue;
-      st.renderer.bindSource(
-        st.mvtSource,
-        m.bytes,
-        m.dx || m.dy ? { coord: [m.dx, m.dy] } : undefined,
-      );
+      st.renderer.bindSource(st.mvtSource, m.bytes, {
+        ...(m.dx || m.dy ? { coord: [m.dx, m.dy] } : {}),
+        // The zoom of the tile we actually fetched, not the source's
+        // maxzoom: below it the ancestor *is* the tile, and declaring a
+        // `sourceZoom` deeper than the one being rendered is rejected
+        // ("overzoom only reprojects downwards").
+        sourceZoom: m.sourceZoom,
+      });
     }
     await ensureGlyphs(request, env, ctx, st);
     const encoded = st.renderer.renderTile(coords.z, coords.x, coords.y, { format });

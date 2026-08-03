@@ -401,11 +401,11 @@
     </div>
   </aside>
   <div id="map"></div>
-  <!-- Hidden comparison mode (?compare=ezu): the selected theme's
-       container-rendered rasters on the left, the ezu shadow renders
-       on the right, views synced. No UI affordance on purpose. -->
+  <!-- Hidden comparison mode (?compare=ezu): the tiles everyone gets on
+       the left, maplibre-native's take on the same view on the right,
+       synced. No UI affordance on purpose. -->
   <div id="map2" hidden>
-    <span class="engine-badge">ezu</span>
+    <span class="engine-badge">maplibre-native</span>
   </div>
   <!-- Shown after copying a raw XYZ URL: unlike TileJSON, it carries no
        attribution metadata, so the consumer has to display the credit
@@ -456,14 +456,14 @@
 
     let map = null;
 
-    // -- hidden ezu comparison (?compare=ezu) -----------------------
-    // Side-by-side against the ezu shadow renders (src/ezu.ts) for the
-    // themes with committed recipes. No UI affordance on purpose — the
-    // query param is the switch, and hash links keep working, so a
-    // comparison spot is shareable as a URL.
+    // -- hidden renderer comparison (?compare=ezu) -------------------
+    // The left map is the ordinary raster route, which ezu renders. This
+    // puts maplibre-native's render of the same view beside it. No UI
+    // affordance on purpose — the query param is the switch, and hash
+    // links keep working, so a comparison spot is shareable as a URL.
     const compareEzu =
       new URLSearchParams(location.search).get('compare') === 'ezu';
-    // Every themed raster has an ezu recipe now; the theme ids match
+    // Every themed raster is renderable both ways; the theme ids match
     // the catalog entries' `theme` field.
     const EZU_COMPARE_THEMES = [
       'papers-light', 'papers-dark',
@@ -472,16 +472,18 @@
     ];
     let map2 = null;
 
+    // maplibre-native, the comparison side. Its route is deliberately
+    // uncached in R2 — nothing but this map asks for it.
     function ezuStyle(theme) {
       return {
         version: 8,
         sources: {
           raster: {
             type: 'raster',
-            tiles: [location.origin + '/styles/' + theme + '/ezu/{z}/{x}/{y}.webp'],
+            tiles: [location.origin + '/styles/' + theme + '/native/{z}/{x}/{y}.png'],
             tileSize: 512,
-            maxzoom: 15,
-            attribution: 'ezu shadow render',
+            maxzoom: 22,
+            attribution: 'maplibre-native render',
           },
         },
         layers: [{ id: 'raster', type: 'raster', source: 'raster' }],

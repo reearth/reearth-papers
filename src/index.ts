@@ -2,9 +2,12 @@
  * papers-tile worker
  *
  * Public routes:
- *   /styles/{theme}/tile/{z}/{x}/{y}.png — rendered raster tile
- *   /styles/{theme}/ezu/{z}/{x}/{y}.{webp,png}
- *                                        — ezu shadow render (src/ezu.ts)
+ *   /styles/{theme}/tile/{z}/{x}/{y}.{png,webp}
+ *                                        — rendered raster tile (ezu)
+ *   /styles/{theme}/ezu/{z}/{x}/{y}.{png,webp}
+ *                                        — same render, pre-cutover path
+ *   /styles/{theme}/native/{z}/{x}/{y}.png
+ *                                        — maplibre-native, comparison only
  *   /styles/{theme}/tilejson.json        — TileJSON for the above
  *   /styles/{theme}/style.json           — MapLibre style with that theme
  *   /{id}/{z}/{x}/{y}.{ext}              — tiles for every registered tileset
@@ -43,18 +46,12 @@ import { Container, getContainer } from "@cloudflare/containers";
 // gain — only headroom for concurrent users — and it scatters traffic
 // across more (cold) instances, so don't over-shard.
 const SHARD_COUNT = 32;
-import {
-  lookupCachedTile,
-  storeRenderedTile,
-  STYLE_VERSION,
-  tileCacheKey,
-} from "./cache.js";
+import { STYLE_VERSION } from "./cache.js";
 import { tileCjkFlavor } from "./cjk_flavor.js";
 import { handleCatalog } from "./catalog.js";
 import {
   ezuRenderStats,
   type EzuFormat,
-  EZU_MAXZOOM,
   EZU_RECIPE_VERSION,
   EZU_THEMES,
   renderEzuTile,
@@ -92,14 +89,22 @@ export class TileRenderer extends Container<Env> {
 
 // The theme capture allows hyphens (`papers-light`); `requireTheme`
 // narrows it to an actual member of THEMES right after the match.
-const STYLE_TILE_RE = /^\/styles\/([a-z-]+)\/tile\/(\d+)\/(\d+)\/(\d+)\.png$/;
-// ezu shadow rendering (src/ezu.ts) — same cartography, rendered
-// in-worker for side-by-side comparison against the container path.
-// `.webp` is what the viewer asks for — same encode cost as an
-// uncompressed render where PNG's deflate adds 30-48ms, ~17% smaller on
-// the wire, and quicker to decode client-side. `.png` stays served for
-// anything already pointed at it.
-const STYLE_EZU_RE = /^\/styles\/([a-z-]+)\/ezu\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
+//
+// `/tile/` is the public raster route and renders with ezu (src/ezu.ts).
+// `/ezu/` is the same render under the name the comparison used before
+// the cutover, kept so existing links keep working; both share one cache
+// namespace, so neither re-renders what the other already has.
+//
+// `.webp` costs the same to encode as an uncompressed render where PNG's
+// deflate adds 30-48ms, is ~17% smaller on the wire, and decodes quicker
+// client-side. The TileJSON still advertises `.png` — that is a public
+// contract with clients we don't control — so `.webp` is opt-in by URL.
+const STYLE_TILE_RE =
+  /^\/styles\/([a-z-]+)\/(?:tile|ezu)\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
+// maplibre-native, via the renderer container. Comparison only since the
+// cutover: nothing links here but the viewer's right-hand map, so its
+// renders are not worth a global R2 layer (see `renderNativeTile`).
+const STYLE_NATIVE_RE = /^\/styles\/([a-z-]+)\/native\/(\d+)\/(\d+)\/(\d+)\.png$/;
 const STYLE_TILEJSON_RE = /^\/styles\/([a-z-]+)\/tilejson\.json$/;
 const STYLE_STYLE_RE = /^\/styles\/([a-z-]+)\/style\.json$/;
 // Tile + TileJSON + source-archive shapes for every registered
@@ -265,7 +270,7 @@ async function dispatch(
     const theme = requireTheme(tilejson[1]);
     return theme instanceof Response ? theme : handleRasterTilejson(request, theme);
   }
-  const ezu = url.pathname.match(STYLE_EZU_RE);
+  const ezu = url.pathname.match(STYLE_TILE_RE);
   if (ezu) {
     return handleEzu(
       request,
@@ -276,31 +281,27 @@ async function dispatch(
       ezu[5] as EzuFormat,
     );
   }
-  const tile = url.pathname.match(STYLE_TILE_RE);
-  if (tile) {
-    const theme = requireTheme(tile[1]);
+  const native = url.pathname.match(STYLE_NATIVE_RE);
+  if (native) {
+    const theme = requireTheme(native[1]);
     if (theme instanceof Response) return theme;
-    const z = Number(tile[2]);
-    // Bound render cost: the tilejson only advertises tiles through
-    // RENDERED_RASTER_MAXZOOM, so a request past it is a direct hit — no
-    // point spinning the container up to overzoom the z15 vector further.
+    const z = Number(native[2]);
     if (z > RENDERED_RASTER_MAXZOOM) {
       return new Response("zoom above available range", { status: 404 });
     }
-    return renderRasterTile(request, env, ctx, theme, {
+    return renderNativeTile(request, env, ctx, theme, {
       z,
-      x: Number(tile[3]),
-      y: Number(tile[4]),
+      x: Number(native[3]),
+      y: Number(native[4]),
     });
   }
 
   return new Response("not found", { status: 404 });
 }
 
-// ezu shadow route: in-worker WASM rendering of the same cartography,
-// cached in its own namespace so it can never mix with container
-// renders. Serves only the themes with committed recipes and only
-// through the vector source's native zoom (no overzoom in the shadow).
+// The public raster route: in-worker WASM rendering (src/ezu.ts), served
+// for both `/tile/` and the older `/ezu/` path. Cached in its own
+// namespace, which the comparison renders never share.
 async function handleEzu(
   request: Request,
   env: Env,
@@ -312,8 +313,10 @@ async function handleEzu(
   if (!EZU_THEMES.has(theme)) {
     return new Response(`no ezu recipe for theme: ${theme}`, { status: 404 });
   }
-  if (coords.z > EZU_MAXZOOM) {
-    return new Response("zoom above ezu range", { status: 404 });
+  // Past the vector source's maxzoom ezu reprojects the z15 ancestor, so
+  // the ceiling is the advertised raster range, not the source's depth.
+  if (coords.z > RENDERED_RASTER_MAXZOOM) {
+    return new Response("zoom above available range", { status: 404 });
   }
   const version = STYLE_VERSION * 1000 + EZU_RECIPE_VERSION;
   // Han variant selection, picked the same way the container path picks it
@@ -357,7 +360,7 @@ function requireTheme(raw: string | undefined): Theme | Response {
   return new Response(`unknown theme: ${raw ?? ""}`, { status: 404 });
 }
 
-async function renderRasterTile(
+async function renderNativeTile(
   request: Request,
   env: Env,
   ctx: ExecutionContext,
@@ -390,12 +393,15 @@ async function renderRasterTile(
     `${env.DEFAULT_STYLE_URL}?theme=${mirrorTheme(theme)}&v=${STYLE_VERSION}` +
     (cjk ? `&cjk=${cjk}` : "");
 
-  // Two-layer cache (Cache API → R2). Key embeds a style hash + the
-  // current PMTiles mirror date, so monthly mirror updates and style
-  // edits invalidate exactly the tiles they should.
-  const key = await tileCacheKey(env, coords, styleUrlForCache);
-  const cached = await lookupCachedTile(request, env, key);
-  if (cached) return cached;
+  // Edge cache only. Since the cutover this path exists to be compared
+  // against, not to be served: the R2 layer bought a global, permanent
+  // copy of renders nothing routinely asks for, and every write kept the
+  // container's output alive long after the comparison that produced it.
+  // A per-PoP cache still spares the container a repeat of whatever a
+  // reviewer is looking at right now.
+  const cache = caches.default;
+  const edge = await cache.match(request);
+  if (edge) return edge;
 
   // Cache miss → render via container. We pin each tile to a shard
   // derived from its (z,x,y) so the same tile always hits the same
@@ -416,5 +422,15 @@ async function renderRasterTile(
     return upstream;
   }
   const body = await upstream.arrayBuffer();
-  return storeRenderedTile(request, env, key, body, ctx);
+  const response = new Response(body, {
+    headers: {
+      "content-type": "image/png",
+      "cache-control": "public, max-age=31536000, immutable",
+      "x-cache": "miss",
+      "x-renderer": "maplibre-native",
+      "x-attribution": PROTOMAPS_ATTRIBUTION,
+    },
+  });
+  ctx.waitUntil(cache.put(request, response.clone()));
+  return response;
 }
