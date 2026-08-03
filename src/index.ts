@@ -13,6 +13,8 @@
  *   /{id}.{tif,pmtiles}                  — underlying single-file archive
  *                                          (HTTP Range supported; GDAL /vsicurl/
  *                                          and the pmtiles protocol read these)
+ *   /fonts/{fontstack}/{range}.pbf       — mirrored glyph PBFs
+ *   /sprites/{version}/{name}.{png,json} — mirrored Protomaps sprites
  *   /catalog.json                        — index of all tilesets
  *   /viewer                              — preview page (public/viewer/index.html)
  *   /                                    — temporary 302 → /viewer (LP TBD)
@@ -59,6 +61,7 @@ import {
 } from "./ezu.js";
 import { handleFont } from "./fonts.js";
 import { serveRenderedTile } from "./render_cache.js";
+import { handleSprite } from "./sprites.js";
 import { handleSourceFile } from "./source_file.js";
 import {
   handleStyle,
@@ -109,6 +112,10 @@ const TILESET_SOURCE_RE = /^\/([a-z0-9_]+)\.(tif|pmtiles)$/;
 // the CJK gap filled. Referenced by the styles' `glyphs` template and
 // fetched by both browsers and the renderer container.
 const FONT_RE = /^\/fonts\/([^/]+)\/(\d+-\d+\.pbf)$/;
+// Mirrored Protomaps sprite sheets (src/sprites.ts). Same arrangement as
+// the fonts: public here, and the ezu renderer calls the handler directly
+// so a cold isolate never waits on GitHub Pages.
+const SPRITE_RE = /^\/sprites\/(.+)$/;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -229,6 +236,11 @@ async function dispatch(
   const font = url.pathname.match(FONT_RE);
   if (font) {
     return handleFont(request, env, ctx, font[1], font[2]);
+  }
+
+  const sprite = url.pathname.match(SPRITE_RE);
+  if (sprite) {
+    return handleSprite(request, env, ctx, sprite[1]);
   }
 
   // The stock themes used to live unprefixed (`/styles/light/…`);

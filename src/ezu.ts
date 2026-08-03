@@ -42,6 +42,7 @@ import {
   serializeStore,
 } from "./glyphs.js";
 import { handleVectorTile } from "./pmtiles.js";
+import { handleSprite, upstreamSpritePath } from "./sprites.js";
 
 const RECIPES: Record<string, unknown> = {
   // The papers house styles are label-free: their recipes carry no
@@ -365,15 +366,38 @@ async function fetchMvt(
   return buf.length ? buf : null;
 }
 
-async function ensureSprite(st: EzuState): Promise<void> {
+/** Fetch a sprite asset through our own mirror where the recipe points at
+ *  Protomaps', so a cold isolate does not wait on GitHub Pages. Anything
+ *  we don't mirror is fetched as written. */
+async function fetchSpriteAsset(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  url: string,
+): Promise<Response> {
+  const path = upstreamSpritePath(url);
+  if (!path) return fetch(url);
+  // Internal call, not a self-fetch: a worker fetching its own route
+  // trips Cloudflare's recursion guard.
+  const origin = new URL(request.url).origin;
+  const synth = new Request(`${origin}/sprites/${path}`);
+  return handleSprite(synth, env, ctx, path);
+}
+
+async function ensureSprite(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  st: EzuState,
+): Promise<void> {
   if (!st.sprite) return;
   st.spriteReady ??= (async () => {
     const [atlas, index] = await Promise.all([
-      fetch(st.sprite!.image).then((r) => {
+      fetchSpriteAsset(request, env, ctx, st.sprite!.image).then((r) => {
         if (!r.ok) throw new Error(`sprite atlas: HTTP ${r.status}`);
         return r.arrayBuffer();
       }),
-      fetch(st.sprite!.index).then((r) => {
+      fetchSpriteAsset(request, env, ctx, st.sprite!.index).then((r) => {
         if (!r.ok) throw new Error(`sprite index: HTTP ${r.status}`);
         return r.text();
       }),
@@ -438,19 +462,29 @@ async function ensureGlyphs(
         return { ...b, bytes: new Uint8Array(await res.arrayBuffer()) };
       }),
     );
+    // Only blocks that actually arrived and parsed can tell us a glyph is
+    // missing. Marking a codepoint absent because its fetch failed would
+    // stop this isolate ever asking for it again — the label would render
+    // short for the isolate's whole life, and the wrong tile would be
+    // cached. A failed block is simply retried by the next tile.
+    const settled = new Set<string>();
     for (const f of fetched) {
       if (!f.bytes) continue;
       try {
         ingestGlyphPbf(f.source, f.bytes, wantedBySource.get(f.source) ?? new Set());
+        settled.add(`${f.source}:${f.start}`);
       } catch (e) {
         console.warn(`ezu: glyph parse ${f.source} ${f.start}: ${String(e)}`);
       }
     }
-    // A codepoint the mirror has no glyph for would otherwise refetch its
-    // block on every tile that mentions it.
+    // A codepoint the mirror genuinely has no glyph for would otherwise
+    // refetch its block on every tile that mentions it.
     for (const [source, cps] of Object.entries(needed)) {
       for (const cp of cps) {
-        if (!hasGlyph(source, cp)) st.absentGlyphs.add(`${source}:${cp}`);
+        const block = `${source}:${Math.floor(cp / 256) * 256}`;
+        if (settled.has(block) && !hasGlyph(source, cp)) {
+          st.absentGlyphs.add(`${source}:${cp}`);
+        }
       }
     }
     maybeWriteGlyphSeed(env, ctx);
@@ -522,7 +556,7 @@ async function renderWithState(
   coords: { z: number; x: number; y: number },
   format: EzuFormat,
 ): Promise<Uint8Array | null> {
-  await ensureSprite(st);
+  await ensureSprite(request, env, ctx, st);
 
   const offsets: [number, number][] = [[0, 0], ...st.neighborOffsets];
   const mvts = await Promise.all(
