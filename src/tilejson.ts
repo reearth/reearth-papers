@@ -11,17 +11,29 @@ const BOUNDS = [-180, -85.0511, 180, 85.0511];
 const CENTER = [0, 20, 2];
 
 // Max zoom advertised for (and served by) the rendered raster route.
-// The Protomaps vector source only carries data through z15, but the
-// container's maplibre-native overzooms that vector internally, so it
-// renders crisp raster past z15 — no bitmap upscaling. We advertise a
-// bounded max (rather than the source's z15) so clients keep requesting
-// freshly-rendered deep tiles instead of stretching the z15 PNG, while
-// still capping the 4×-per-level render cost somewhere sane.
+// The Protomaps vector source only carries data through z15, but ezu
+// reprojects that z15 ancestor into deeper frames (`sourceZoom`), so the
+// route renders crisp raster past z15 — no bitmap upscaling. We advertise
+// a bounded max (rather than the source's z15) so clients keep requesting
+// freshly-rendered deep tiles instead of stretching the z15 image, while
+// still capping the 4x-per-level render cost somewhere sane.
 export const RENDERED_RASTER_MAXZOOM = 22;
 
+/** Encodings the themed raster route serves, best first. WebP costs the
+ *  same to encode as an uncompressed render where PNG's deflate adds
+ *  30-48ms per tile, is 13-20% smaller on the wire, and decodes quicker,
+ *  so it is what clients get unless they ask otherwise. */
+const RASTER_FORMATS = ["webp", "png"] as const;
+
 // Themed OSM rasters — outside the tileset registry (see tilesets.ts).
+// `?format=` picks the encoding, matching the registered tilesets.
 export function handleRasterTilejson(request: Request, theme: Theme): Response {
-  const origin = new URL(request.url).origin;
+  const url = new URL(request.url);
+  const origin = url.origin;
+  const q = url.searchParams.get("format");
+  const fmt = (RASTER_FORMATS as readonly string[]).includes(q ?? "")
+    ? q
+    : RASTER_FORMATS[0];
   return json({
     tilejson: "3.0.0",
     name: `Re:Earth Papers — ${themeName(theme)}`,
@@ -30,7 +42,7 @@ export function handleRasterTilejson(request: Request, theme: Theme): Response {
       "across a curated set of styles.",
     attribution: PROTOMAPS_ATTRIBUTION,
     scheme: "xyz",
-    tiles: [`${origin}/styles/${theme}/tile/{z}/{x}/{y}.png`],
+    tiles: [`${origin}/styles/${theme}/tile/{z}/{x}/{y}.${fmt}`],
     minzoom: 0,
     maxzoom: RENDERED_RASTER_MAXZOOM,
     bounds: BOUNDS,
