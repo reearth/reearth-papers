@@ -83,14 +83,46 @@ async function get(url, { timeoutMs = 90_000, tries = 2 } = {}) {
   throw lastErr;
 }
 
-function pngSize(buf) {
+// The themed rasters are advertised as WebP and served as either, so the
+// dimension check reads both container formats rather than assuming PNG.
+function rasterSize(buf) {
   const b = new Uint8Array(buf);
-  if (b.length < 24 || b[0] !== 0x89 || b[1] !== 0x50) return null;
   const dv = new DataView(buf);
-  return { width: dv.getUint32(16), height: dv.getUint32(20) };
+  if (b.length >= 24 && b[0] === 0x89 && b[1] === 0x50) {
+    return { format: "png", width: dv.getUint32(16), height: dv.getUint32(20) };
+  }
+  // RIFF....WEBP; VP8L and lossless VP8 carry the size differently, so
+  // read whichever chunk this is.
+  const tag = (at, s) => String.fromCharCode(...b.subarray(at, at + s.length)) === s;
+  if (b.length >= 30 && tag(0, "RIFF") && tag(8, "WEBP")) {
+    if (tag(12, "VP8X")) {
+      const w = 1 + (b[24] | (b[25] << 8) | (b[26] << 16));
+      const h = 1 + (b[27] | (b[28] << 8) | (b[29] << 16));
+      return { format: "webp", width: w, height: h };
+    }
+    if (tag(12, "VP8L")) {
+      const bits = dv.getUint32(21, true);
+      return {
+        format: "webp",
+        width: 1 + (bits & 0x3fff),
+        height: 1 + ((bits >> 14) & 0x3fff),
+      };
+    }
+    if (tag(12, "VP8 ")) {
+      return {
+        format: "webp",
+        width: dv.getUint16(26, true) & 0x3fff,
+        height: dv.getUint16(28, true) & 0x3fff,
+      };
+    }
+    return { format: "webp", width: null, height: null };
+  }
+  return null;
 }
 
 async function checkTile(label, url, { expectPng = false, allowEmpty = false } = {}) {
+  // `expectPng` predates the WebP default; it means "an image tile whose
+  // dimensions we can check", either encoding.
   try {
     const res = await get(url);
     if (res.status === 204 && allowEmpty) return ok(`${label} (204 empty)`);
@@ -98,9 +130,11 @@ async function checkTile(label, url, { expectPng = false, allowEmpty = false } =
     const body = await res.arrayBuffer();
     if (body.byteLength === 0 && !allowEmpty) return fail(label, "empty body");
     if (expectPng) {
-      const size = pngSize(body);
-      if (!size) return fail(label, "not a PNG");
-      if (size.width !== 512) return fail(label, `width ${size.width}, expected 512`);
+      const size = rasterSize(body);
+      if (!size) return fail(label, "not a PNG or WebP");
+      if (size.width !== null && size.width !== 512) {
+        return fail(label, `width ${size.width}, expected 512`);
+      }
     }
     ok(label);
   } catch (e) {
@@ -216,8 +250,10 @@ for (const theme of [
           { timeoutMs: 120_000 },
         );
         if (res.status !== 200) return warn(label, `HTTP ${res.status}`);
-        const size = pngSize(await res.arrayBuffer());
-        if (!size || size.width !== 512) return warn(label, "bad PNG");
+        const size = rasterSize(await res.arrayBuffer());
+        if (!size || (size.width !== null && size.width !== 512)) {
+          return warn(label, "bad image");
+        }
         ok(label);
       } catch (e) {
         warn(label, e.message);
