@@ -311,6 +311,8 @@ async function handleEzu(
   out.headers.set("x-ezu-isolate", ezuIsolateId());
   out.headers.set("x-ezu-renders", String(stats.served));
   out.headers.set("x-ezu-inflight", String(stats.inFlight));
+  out.headers.set("x-ezu-heap", String(stats.heapBytes));
+  out.headers.set("x-ezu-glyph", String(stats.glyphBytes));
   return out;
 }
 

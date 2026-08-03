@@ -94,6 +94,8 @@ let useCounter = 0;
 // how many distinct isolates answered.
 let isolateId: string | null = null;
 let rendersServed = 0;
+let lastHeapBytes = 0;
+let lastGlyphBytes = 0;
 
 /** Stable per-isolate label. Generated lazily: a module-scope RNG call runs
  *  outside any request's I/O context. */
@@ -102,17 +104,36 @@ export function ezuIsolateId(): string {
   return isolateId;
 }
 
-/** Renders this isolate has completed, and renders running right now. */
-export function ezuRenderStats(): { served: number; inFlight: number } {
-  return { served: rendersServed, inFlight: activePermits };
+/** Renders this isolate has completed, renders running right now, and what
+ *  the renderer reported holding after the last one (`memoryUsage()`). */
+export function ezuRenderStats(): {
+  served: number;
+  inFlight: number;
+  heapBytes: number;
+  glyphBytes: number;
+} {
+  return {
+    served: rendersServed,
+    inFlight: activePermits,
+    heapBytes: lastHeapBytes,
+    glyphBytes: lastGlyphBytes,
+  };
 }
 
-// Renderer instances are retained per theme so warm isolates keep their
-// glyph bank, but WASM linear memory never shrinks and the bank alone
-// reaches ~38MB on a CJK-dense theme. Seven themes' worth of that in one
-// isolate does not fit under the 128MB isolate ceiling, so cap how many
-// live at once and evict the least recently used.
-const MAX_STATES = 3;
+// One. `memoryUsage().heapBytes` on a CJK-dense theme, measured after a
+// Tokyo z14 render, is what forces this:
+//
+//     1 theme resident   82MB   (36MB of it the glyph bank)
+//     2 themes          136MB   ← already past the 128MB isolate ceiling
+//     3 themes          182MB
+//
+// and wasm linear memory is a high-water mark — evicting a state lets the
+// allocator reuse the space but never returns it, so a second theme can
+// only be prevented, not recovered from. Retaining one renderer still
+// keeps the warm-isolate win that matters (its glyph bank); the cost of
+// this cap is a rebuild when a single isolate is asked to serve two
+// themes, which only the side-by-side comparison view does.
+const MAX_STATES = 1;
 
 // Cap concurrent renders per isolate. `renderTile` is a synchronous WASM
 // call, so extra concurrency buys no render parallelism — it only overlaps
@@ -400,7 +421,11 @@ async function renderWithState(
       );
     }
     await ensureGlyphs(request, env, ctx, st);
-    return st.renderer.renderTile(coords.z, coords.x, coords.y, { format: "png" });
+    const png = st.renderer.renderTile(coords.z, coords.x, coords.y, { format: "png" });
+    const mu = st.renderer.memoryUsage() as { heapBytes?: number; glyphBytes?: number };
+    lastHeapBytes = mu.heapBytes ?? 0;
+    lastGlyphBytes = mu.glyphBytes ?? 0;
+    return png;
   });
   st.lock = run.then(
     () => undefined,
