@@ -57,6 +57,7 @@ import {
   renderEzuTile,
 } from "./ezu.js";
 import { handleFont } from "./fonts.js";
+import { readMirrorPointer } from "./pmtiles.js";
 import { serveRenderedTile } from "./render_cache.js";
 import { handleSprite } from "./sprites.js";
 import { handleSourceFile } from "./source_file.js";
@@ -322,15 +323,22 @@ async function handleEzu(
   // Han variant selection, picked the same way the container path picks it
   // (src/cjk_flavor.ts) so the two renderers agree over the same ground.
   const cjk = tileCjkFlavor(coords) ?? null;
+  // The snapshot the tile was rendered from. A render is only valid for
+  // the data behind it, and these go out `immutable, max-age=1y`, so
+  // without the date in the key a fresh mirror would never reach anyone —
+  // the tiles it should have replaced keep being served until a version
+  // constant moves. Reading the pointer costs one R2 get per isolate per
+  // hour (memoised in pmtiles.ts), and the render path already needs it.
+  const { date } = await readMirrorPointer(env);
   const served = await serveRenderedTile(request, env, ctx, {
     // The extension is part of the key, so the two encodings cache side by
     // side instead of one serving the other's bytes. The flavor is derived
     // from the coordinates, so it is already implied by the key — spell it
     // out anyway, so redrawing the flavor boxes is a visible cache change.
     cacheKey:
-      `cache/ezu/${version}/${theme}${cjk ? `-${cjk}` : ""}` +
+      `cache/ezu/${version}/${date}/${theme}${cjk ? `-${cjk}` : ""}` +
       `/${coords.z}/${coords.x}/${coords.y}.${format}`,
-    cacheVersion: version,
+    cacheVersion: `${version}-${date}`,
     contentType: format === "webp" ? "image/webp" : "image/png",
     attribution: PROTOMAPS_ATTRIBUTION,
     persist: true,

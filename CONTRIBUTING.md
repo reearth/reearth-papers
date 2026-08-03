@@ -114,28 +114,34 @@ Rendered raster tiles are cached in two layers (`src/render_cache.ts`):
    a Cache API miss we promote the R2 entry back into the edge cache.
 
 The key is
-`cache/ezu/{STYLE_VERSION*1000+EZU_RECIPE_VERSION}/{theme}[-{cjk}]/{z}/{x}/{y}.{ext}`:
+`cache/ezu/{STYLE_VERSION*1000+EZU_RECIPE_VERSION}/{mirrorDate}/{theme}[-{cjk}]/{z}/{x}/{y}.{ext}`:
 
 - **`STYLE_VERSION`** (`src/cache.ts`) — cartography. Bump it and every
   tile re-renders.
 - **`EZU_RECIPE_VERSION`** (`src/ezu.ts`) — the committed recipes, and
   equally any renderer upgrade that moves pixels.
+- **PMTiles mirror date**, from `mirror/protomaps/latest.json`. A render
+  is only valid for the data behind it, so a fresh monthly snapshot
+  rotates the whole namespace and the map actually updates.
 - **CJK flavor**, derived from the coordinates (`src/cjk_flavor.ts`), so
   Han variants can't be served across regions.
 - **Extension**, so the WebP and PNG encodings coexist rather than one
   serving the other's bytes.
 
-> **Known gap.** Unlike the container path it replaced, this key does
-> *not* embed the PMTiles mirror date, so a fresh monthly snapshot does
-> not invalidate anything — rendered tiles keep serving the data they
-> were rendered from until a version constant moves. Either add the
-> mirror date to the key (and accept a full re-render each snapshot) or
-> bump `STYLE_VERSION` as part of the mirror runbook.
+Every one of those also has to reach the **edge** layer, which keys on
+the request URL plus `?__v=` (`edgeCacheRequest` in
+`src/render_cache.ts`). Tiles go out `immutable, max-age=1y`: an edge
+entry that `__v` can't reach is an entry nothing can dislodge. If you add
+a dimension to the R2 key, add it to `cacheVersion` in the same edit.
 
-Old cache entries are not actively cleaned — they're simply
-unreachable. `cache/tile/...` is the orphaned namespace from the
-container era (~4.9 GB, 78k objects at the time of the cutover); it is
-dwarfed by `mirror/` and can be dropped whenever convenient.
+Old cache entries are not actively cleaned — they're simply unreachable,
+so each snapshot leaves the previous month's renders behind. Two dead
+namespaces to know about: `cache/tile/...` from the container era (~4.9
+GB / 78k objects at the cutover) and whatever `cache/ezu/` generations
+have rotated out. Both are dwarfed by `mirror/` — 596 of the bucket's
+646 GB when last measured — so this is a tidiness question, not a cost
+one. A lifecycle rule on `cache/` is the obvious answer if it ever
+matters.
 
 The mirror duplicates `/style.json` (and `/protomaps`) on purpose. The
 renderer container has to source those from somewhere; routing it

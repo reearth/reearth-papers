@@ -17,8 +17,11 @@ export interface RenderedTileOptions {
   /** Stamped onto the edge-cache URL (`?__v=`) so version bumps rotate
    *  the edge cache alongside R2 — the raw client URL doesn't change
    *  when a version bumps, so without this the edge would keep serving
-   *  an old tile forever after we orphan its R2 sibling. */
-  cacheVersion: number;
+   *  an old tile forever after we orphan its R2 sibling. Must carry
+   *  *everything* the R2 key does, or the two layers disagree: tiles go
+   *  out `immutable, max-age=1y`, so an edge entry the version can't
+   *  reach is an edge entry nothing can dislodge. */
+  cacheVersion: string | number;
   contentType: string;
   attribution: string;
   /** Persist rendered tiles to R2 (global cache layer) in addition to
@@ -95,7 +98,7 @@ export async function serveRenderedTile(
   return response;
 }
 
-function edgeCacheRequest(request: Request, version: number): Request {
+function edgeCacheRequest(request: Request, version: string | number): Request {
   const url = new URL(request.url);
   url.searchParams.set("__v", String(version));
   return new Request(url.toString(), request);
