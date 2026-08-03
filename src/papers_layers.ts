@@ -12,9 +12,12 @@
 //   - roads drawn casing-then-fill at a *ground-constant* width past
 //     z10 (they widen with zoom like real carriageways) and at a
 //     screen-constant width below it,
-//   - railways as a dark line with tie ticks at mid zoom, turning into
-//     the classic light-filled "ladder" once the ground width is wide
-//     enough to read.
+//   - the casing withheld from the fine street classes until z13, which
+//     is what keeps arterials reading as ribbons over a faint
+//     residential texture instead of flattening into one grey tone,
+//   - railways as a light bed under a dark centreline with tie ticks,
+//     the centreline freezing at z14 so the bed opens out into the
+//     classic "ladder" above it.
 //
 // What had to be reinterpreted, because the schemas don't line up:
 //   - GSI stacks features by `vt_lvorder` 0..4 (five identical layer
@@ -23,9 +26,23 @@
 //   - GSI carries a real carriageway width per feature (`vt_width` /
 //     `vt_rnkwidth`). Protomaps has no width attribute, so widths are
 //     derived from `kind`, keeping the original's unit scale (the value
-//     is the line width in px at z23, halving per zoom level down).
+//     is the line width in px at z23, halving per zoom level down), and
+//     per-feature `min_zoom` stands in for GSI simply not carrying a
+//     farm track in its mid-zoom tiles.
 //   - There is no coastline layer upstream; the water polygon's
 //     `fill-outline-color` stands in for GSI's `Cstline`.
+//   - GSI's tiles are 256px, ours 512px, so every zoom threshold and
+//     every screen-space width upstream states needs converting — see
+//     SCREEN_SCALE and `gsiZoom`.
+//
+// Calibrated against PLATEAU's own rendered tiles
+// (tile.plateauview.mlit.go.jp/tiles/{light,dark}-map), matching the
+// share of inked pixels over Tokyo, Osaka and rural Nagano at z6–z16.
+// Two knowing departures, both because our data is the whole planet:
+// municipal boundaries start at z10 rather than being drawn at every
+// zoom (GSI's 地方界 layer shows them solid below z8, which over Europe
+// is thousands of commune edges), and the overview road network is
+// thinner at z8–z9 simply because Protomaps carries fewer roads there.
 //
 // Shared verbatim by the public style (src/style.ts) and the one the
 // renderer container fetches (mirror/protomaps/src/style.ts) — the two
@@ -95,20 +112,50 @@ const PALETTES: Record<PapersTheme, Palette> = {
 type Expr = unknown;
 type Layer = Record<string, unknown>;
 
-/** Zoom at which the ground-constant rendering takes over from the
- *  screen-constant overview rendering.
+/** Screen-space widths — casings, boundary hairlines, stream lines — are
+ *  half of the number GSI writes in its style, and this is why.
  *
- *  GSI splits at z11 and so did we, until measuring the tiles: Protomaps
- *  only starts emitting `is_tunnel` / `is_bridge` at z12 (checked over
- *  Tokyo Bay — z8–z11 carry neither attribute at all). Below z12 an
- *  undersea tunnel is therefore indistinguishable from a surface road,
- *  and the surface pass — which draws above the water fill — would paint
- *  it across the sea. So the detail rendering starts where the flags do,
- *  and everything below it goes through the overview layers under the
- *  water fill. */
+ *  GSI's widths are authored against a 256px tile: the PLATEAU tile
+ *  server hands MapLibre a `tileSize: 256` raster, so at map zoom N it
+ *  paints the z(N+1) tile — the style evaluated one level in, at half
+ *  scale. Ours is a `tileSize: 512` raster, evaluated at the map zoom
+ *  itself. Ground-constant widths come out identical either way (one
+ *  level shallower cancels the doubled scale), but a constant screen
+ *  width does not: GSI's 3px road casing lands as 1.5px on screen, and
+ *  taking the 3 literally is what made the road network read as a grey
+ *  mush at z12 — every lane sub-pixel, every casing 3px wide.
+ *
+ *  Multiply any width GSI states in screen px by this. */
+const SCREEN_SCALE = 0.5;
+
+/** The zoom counterpart of SCREEN_SCALE: a threshold GSI states in its
+ *  own tile zooms is one level in from the map zoom we evaluate at. */
+const gsiZoom = (z: number): number => z - 1;
+
+/** GSI's `outlineWidth` — the halo a road casing adds around the
+ *  carriageway, in its screen px. */
+const ROAD_CASING_PX = 3 * SCREEN_SCALE;
+
+/** Zoom at which the ground-constant rendering takes over from the
+ *  screen-constant overview rendering. GSI hands over at its z11, i.e.
+ *  z10 here, but Protomaps only starts emitting `is_tunnel` /
+ *  `is_bridge` at z12 (checked over Tokyo Bay — z8–z11 carry neither
+ *  attribute at all), and a zoom's worth of roads all drawn as if they
+ *  were on the surface costs more than handing over a level late. */
 const DETAIL_MINZOOM = 12;
-/** Below this, railways are a single hairline rather than a ladder. */
-const RAIL_LADDER_MINZOOM = 15;
+/** Belt and braces on top of the overview layers' `maxzoom` — see the
+ *  comment there. */
+const IS_OVERVIEW_ZOOM: Expr = ["<", ["zoom"], DETAIL_MINZOOM];
+
+/** GSI shows 市区町村界 from its z11 (and, through its 地方界 layer, at
+ *  every zoom below z8 as well — which we skip: outside Japan that is
+ *  every French commune edge at once). */
+const MUNICIPAL_BOUNDARY_MINZOOM = gsiZoom(11);
+
+/** Where the railway centreline stops widening and the light bed starts
+ *  showing from under it. Below it a track is a solid dark line with
+ *  ties; above it, the ladder. */
+const RAIL_LADDER_MINZOOM = gsiZoom(15);
 
 /** The `roads` source layer also carries `rail`, `ferry` and `aeroway`
  *  features. Only these five are roads — the rest get their own
@@ -188,25 +235,82 @@ function groundWidth(w: Expr, casing = 0): Expr {
 }
 
 /**
- * The overview counterpart: `w` px where the detail rendering takes
- * over, shrinking exponentially down to z4 so the road network fades
- * rather than clutters the world view.
+ * `groundWidth`, but it stops widening at RAIL_LADDER_MINZOOM — the
+ * railway centreline and its ties freeze there so the bed underneath can
+ * grow out from behind them.
+ */
+function cappedGroundWidth(w: Expr): Expr {
+  return [
+    "interpolate",
+    ["exponential", 2],
+    ["zoom"],
+    10,
+    ["*", w, 0.0001220703125], // 2^-13
+    RAIL_LADDER_MINZOOM,
+    ["*", w, 2 ** (RAIL_LADDER_MINZOOM - 23)],
+  ];
+}
+
+/**
+ * The overview counterpart: `w` px at z10, shrinking exponentially down
+ * to z3 so the road network fades rather than clutters the world view,
+ * and held flat from z10 up to where the detail pass takes over.
+ *
+ * The stops are GSI's (z4→z11 on a 256px tile, so z3→z10 here); topping
+ * out at DETAIL_MINZOOM instead left z10 at a quarter width, and the
+ * overview network all but vanished two zooms before it hands over.
  */
 function overviewWidth(w: Expr): Expr {
   return [
     "interpolate",
     ["exponential", 2],
     ["zoom"],
-    4,
-    ["*", w, 0.0078125], // 2^-7
-    DETAIL_MINZOOM,
-    w,
+    3,
+    ["*", w, 0.0078125 * SCREEN_SCALE], // 2^-7
+    10,
+    ["*", w, SCREEN_SCALE],
   ];
 }
 
+/** Protomaps tags every road with the zoom it is meant to appear at —
+ *  and then ships it a level or two early so overzoomed tiles have
+ *  something to draw. Honouring it is what keeps a forest track or a
+ *  farm road out of a z12 view of the Japanese Alps; GSI gets the same
+ *  effect by simply not carrying those features in its mid-zoom tiles.
+ *  Features without the attribute are kept. */
+const AT_OWN_MINZOOM: Expr = [
+  "any",
+  ["!", ["has", "min_zoom"]],
+  ["<=", ["get", "min_zoom"], ["zoom"]],
+];
+
+/** Until this zoom the fine street classes are drawn as a bare
+ *  centreline — no casing. GSI does this explicitly (its casing layers
+ *  filter out 市区町村道等/その他/不明 narrower than 5.5 m until its z14)
+ *  and it is what gives the mid-zoom map its hierarchy: arterials read
+ *  as ribbons while the residential grid stays a faint texture
+ *  underneath. Casing every class instead flattens a whole ward into one
+ *  grey tone, because at z12 the 1.5px halo is three times the
+ *  carriageway it wraps. */
+const CASING_ALL_KINDS_MINZOOM = gsiZoom(14);
+const CASING_KINDS_BELOW = ["highway", "major_road"];
+const HAS_CASING: Expr = [
+  "any",
+  [">=", ["zoom"], CASING_ALL_KINDS_MINZOOM],
+  ["in", ["get", "kind"], ["literal", CASING_KINDS_BELOW]],
+];
+
 /** Casing + fill pair for one road pass (tunnel / ground / bridge).
- *  `opacity` is 0.5 for the subsurface pass. */
-function roadPass(id: string, filter: Expr, p: Palette, opacity = 1): Layer[] {
+ *  `opacity` is 0.5 for the subsurface pass, which also drops its casing
+ *  — GSI's casing layers exclude every トンネル / 地下 road code, so an
+ *  underground road is a bare centreline there and reads as one crossing
+ *  Tokyo Bay rather than as a full-weight ribbon. */
+function roadPass(
+  id: string,
+  filter: Expr,
+  p: Palette,
+  { opacity = 1, casing = true }: { opacity?: number; casing?: boolean } = {},
+): Layer[] {
   const color = (motorway: string, other: string): Expr => [
     "case",
     IS_MOTORWAY,
@@ -218,21 +322,26 @@ function roadPass(id: string, filter: Expr, p: Palette, opacity = 1): Layer[] {
     "line-cap": "butt",
     "line-round-limit": 1.57,
   };
+  const casingLayer: Layer[] = casing
+    ? [
+        {
+          id: `roads_${id}_casing`,
+          type: "line",
+          source: "@@source",
+          "source-layer": "roads",
+          minzoom: DETAIL_MINZOOM,
+          filter: ["all", filter, HAS_CASING],
+          layout,
+          paint: {
+            "line-color": color(p.motorwayCasing, p.roadCasing),
+            "line-opacity": opacity,
+            "line-width": groundWidth(ROAD_GROUND_WIDTH, ROAD_CASING_PX),
+          },
+        },
+      ]
+    : [];
   return [
-    {
-      id: `roads_${id}_casing`,
-      type: "line",
-      source: "@@source",
-      "source-layer": "roads",
-      minzoom: DETAIL_MINZOOM,
-      filter,
-      layout,
-      paint: {
-        "line-color": color(p.motorwayCasing, p.roadCasing),
-        "line-opacity": opacity,
-        "line-width": groundWidth(ROAD_GROUND_WIDTH, 3),
-      },
-    },
+    ...casingLayer,
     {
       id: `roads_${id}`,
       type: "line",
@@ -263,6 +372,7 @@ export function papersLayers(source: string, theme: PapersTheme): Layer[] {
   const road = (extra: Expr): Expr => [
     "all",
     ["in", ["get", "kind"], ["literal", ROAD_KINDS]],
+    AT_OWN_MINZOOM,
     extra,
   ];
 
@@ -293,72 +403,70 @@ export function papersLayers(source: string, theme: PapersTheme): Layer[] {
       paint: { "fill-color": p.earth },
     },
 
-    // -- subsurface pass, drawn *under* the water fill on purpose. An
-    // undersea tunnel (Tokyo Bay Aqua-Line, the Channel Tunnel) is then
-    // masked by the sea it runs beneath, while a tunnel on land still
-    // shows through at half opacity the way GSI draws its 地下 features.
-    // No attribute tells us "this tunnel is under water", so the draw
-    // order does the work instead.
-    ...roadPass("tunnel", road(IS_SUBSURFACE), p, SUBSURFACE_OPACITY),
+    // -- boundaries, drawn *under* the water fill on purpose.
+    //
+    // GSI's `AdmBdry` stops at the coastline, so PLATEAU's basemap shows
+    // no administrative edges out at sea. OSM's do run offshore — every
+    // bay ward carries its slice of Tokyo Bay — and Protomaps' tiles
+    // carry no maritime flag to filter them by. Letting the sea paint
+    // over them reproduces the upstream look: dashes on land, clean
+    // water. It also clips a boundary that follows a river or a lake
+    // shore, which is how GSI reads too.
+    //
+    // Dashed at GSI's 1px, exactly as upstream: the long/short pattern
+    // reads as an administrative edge without competing with the road
+    // network for contrast.
+    //
+    // `kind_detail` is the OSM admin level (2 country, 4 region/state,
+    // 6+ county/municipality). The three tiers mirror GSI's: prefecture
+    // borders throughout, municipal borders only from z11 — below that
+    // a country like France contributes thousands of commune edges and
+    // the map turns to hatching.
     {
-      id: "railway_tunnel",
+      id: "boundaries_municipal",
       type: "line",
       source: "@@source",
-      "source-layer": "roads",
-      minzoom: DETAIL_MINZOOM,
-      filter: ["all", isRail, IS_SUBSURFACE],
+      "source-layer": "boundaries",
+      minzoom: MUNICIPAL_BOUNDARY_MINZOOM,
+      filter: [">", ["get", "kind_detail"], 4],
+      layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-color": p.railway,
-        "line-opacity": SUBSURFACE_OPACITY,
-        // A plain line, not the ladder — matching GSI, which excludes
-        // トンネル/地下 from its ladder rendering entirely.
-        "line-width": groundWidth(RAIL_GROUND_WIDTH),
+        "line-color": p.boundary,
+        "line-width": SCREEN_SCALE,
+        "line-dasharray": [2, 2, 0.01, 2],
       },
     },
-
-    // -- overview network (z4–11). Screen-constant widths: at this
-    // scale a ground-constant road would be sub-pixel everywhere.
-    //
-    // Also under the water fill, for a different reason: Protomaps drops
-    // `is_tunnel` at overview zooms, so an undersea crossing can't be
-    // filtered out here — letting the sea paint over it is the only way.
-    // The trade is that a long bridge (the Aqua-Line's span, Øresund)
-    // disappears too, which at 1px on a z9 map costs nothing.
     {
-      id: "roads_overview",
+      id: "boundaries_region",
       type: "line",
       source: "@@source",
-      "source-layer": "roads",
-      maxzoom: DETAIL_MINZOOM,
+      "source-layer": "boundaries",
+      minzoom: 4,
       filter: [
-        "in",
-        ["get", "kind"],
-        ["literal", ["highway", "major_road", "minor_road"]],
+        "all",
+        [">", ["get", "kind_detail"], 2],
+        ["<=", ["get", "kind_detail"], 4],
       ],
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-color": ["case", IS_MOTORWAY, p.motorway, p.road],
-        "line-width": overviewWidth([
-          "match",
-          ["get", "kind"],
-          "highway",
-          2,
-          "major_road",
-          1.5,
-          1,
-        ]),
+        "line-color": p.boundary,
+        "line-width": SCREEN_SCALE,
+        // Fades in the way GSI's 地方界 does at overview zooms.
+        "line-opacity": ["step", ["zoom"], 0.5, 8, 1],
+        "line-dasharray": [2, 2, 0.01, 2],
       },
     },
     {
-      id: "railway_overview",
+      id: "boundaries_country",
       type: "line",
       source: "@@source",
-      "source-layer": "roads",
-      maxzoom: DETAIL_MINZOOM,
-      filter: isRail,
+      "source-layer": "boundaries",
+      filter: ["<=", ["get", "kind_detail"], 2],
+      layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-color": p.railway,
-        "line-width": overviewWidth(2),
+        "line-color": p.boundary,
+        "line-width": SCREEN_SCALE,
+        "line-dasharray": [2, 2, 0.01, 2],
       },
     },
 
@@ -380,7 +488,17 @@ export function papersLayers(source: string, theme: PapersTheme): Layer[] {
       filter: ["==", ["get", "kind"], "river"],
       paint: {
         "line-color": p.waterline,
-        "line-width": ["interpolate", ["exponential", 1.6], ["zoom"], 9, 0, 9.5, 1, 18, 12],
+        "line-width": [
+          "interpolate",
+          ["exponential", 1.6],
+          ["zoom"],
+          9,
+          0,
+          9.5,
+          SCREEN_SCALE,
+          18,
+          12 * SCREEN_SCALE,
+        ],
       },
     },
     {
@@ -390,67 +508,93 @@ export function papersLayers(source: string, theme: PapersTheme): Layer[] {
       "source-layer": "water",
       minzoom: 14,
       filter: ["==", ["get", "kind"], "stream"],
-      paint: { "line-color": p.waterline, "line-width": 1 },
+      paint: { "line-color": p.waterline, "line-width": SCREEN_SCALE },
     },
 
-    // -- boundaries. Dashed at 1px, exactly as upstream: the long/short
-    // pattern reads as an administrative edge without competing with
-    // the road network for contrast.
+    // -- subsurface pass: tunnels and subways, at half opacity, the way
+    // GSI draws its 地下 features.
     //
-    // `kind_detail` is the OSM admin level (2 country, 4 region/state,
-    // 6+ county/municipality). The three tiers mirror GSI's: prefecture
-    // borders throughout, municipal borders only from z11 — below that
-    // a country like France contributes thousands of commune edges and
-    // the map turns to hatching.
+    // Above the water fill, which means an undersea crossing paints
+    // across the sea it runs beneath — the Aqua-Line's tunnel half
+    // reaching Kawasaki, the Seikan tunnel across the Tsugaru Strait.
+    // That is what PLATEAU shows, checked tile by tile over Tokyo Bay,
+    // and hiding them under the sea instead left the crossing snapped in
+    // half mid-water with no hint that it continues.
+    ...roadPass("tunnel", road(IS_SUBSURFACE), p, {
+      opacity: SUBSURFACE_OPACITY,
+      casing: false,
+    }),
     {
-      id: "boundaries_municipal",
+      id: "railway_tunnel",
       type: "line",
       source: "@@source",
-      "source-layer": "boundaries",
-      minzoom: 11,
-      filter: [">", ["get", "kind_detail"], 4],
-      layout: { "line-cap": "round", "line-join": "round" },
+      "source-layer": "roads",
+      minzoom: DETAIL_MINZOOM,
+      filter: ["all", isRail, IS_SUBSURFACE],
       paint: {
-        "line-color": p.boundary,
-        "line-width": 1,
-        "line-dasharray": [2, 2, 0.01, 2],
+        "line-color": p.railway,
+        "line-opacity": SUBSURFACE_OPACITY,
+        // A plain line, not the ladder — matching GSI, which excludes
+        // トンネル/地下 from its ladder rendering entirely.
+        "line-width": groundWidth(RAIL_GROUND_WIDTH),
       },
     },
+
+    // -- overview network (z4–11). Screen-constant widths: at this
+    // scale a ground-constant road would be sub-pixel everywhere.
+    // Protomaps drops `is_tunnel` / `is_bridge` below z12, so this one
+    // pass carries surface, bridge and tunnel alike — including the sea
+    // crossings, at full strength, as upstream.
+    //
+    // The handover is spelled out in the filter as well as in `maxzoom`
+    // because `maxzoom` alone once painted the overview network and the
+    // detail network on top of each other at exactly z12 — the single
+    // biggest reason the mid-zoom map came out heavier than PLATEAU's.
+    // gl-js stops drawing a layer *at* its maxzoom; `ezu translate`
+    // below 0.6.1 copied that number into a bound ezu treats as
+    // inclusive, so the raster tiles drew one zoom too far
+    // (reearth/ezu#90, fixed in 0.6.1). The recipes are regenerated
+    // artifacts, so keep the filter: it holds the handover at one zoom
+    // whichever CLI version bakes them.
     {
-      id: "boundaries_region",
+      id: "roads_overview",
       type: "line",
       source: "@@source",
-      "source-layer": "boundaries",
-      minzoom: 4,
+      "source-layer": "roads",
+      maxzoom: DETAIL_MINZOOM,
       filter: [
         "all",
-        [">", ["get", "kind_detail"], 2],
-        ["<=", ["get", "kind_detail"], 4],
+        IS_OVERVIEW_ZOOM,
+        ["in", ["get", "kind"], ["literal", ["highway", "major_road", "minor_road"]]],
       ],
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-color": p.boundary,
-        "line-width": 1,
-        // Fades in the way GSI's 地方界 does at overview zooms.
-        "line-opacity": ["step", ["zoom"], 0.5, 8, 1],
-        "line-dasharray": [2, 2, 0.01, 2],
+        "line-color": ["case", IS_MOTORWAY, p.motorway, p.road],
+        "line-width": overviewWidth([
+          "match",
+          ["get", "kind"],
+          "highway",
+          2,
+          "major_road",
+          1.5,
+          1,
+        ]),
       },
     },
     {
-      id: "boundaries_country",
+      id: "railway_overview",
       type: "line",
       source: "@@source",
-      "source-layer": "boundaries",
-      filter: ["<=", ["get", "kind_detail"], 2],
-      layout: { "line-cap": "round", "line-join": "round" },
+      "source-layer": "roads",
+      maxzoom: DETAIL_MINZOOM,
+      filter: ["all", IS_OVERVIEW_ZOOM, isRail],
       paint: {
-        "line-color": p.boundary,
-        "line-width": 1,
-        "line-dasharray": [2, 2, 0.01, 2],
+        "line-color": p.railway,
+        "line-width": overviewWidth(2),
       },
     },
 
-    // -- surface network (z11+). Bridges come after the railways below,
+    // -- surface network (z12+). Bridges come after the railways below,
     // so a deck covers what it crosses.
     ...roadPass(
       "ground",
@@ -459,12 +603,35 @@ export function papersLayers(source: string, theme: PapersTheme): Layer[] {
     ),
   ];
 
-  // -- railways at detail zoom. Below the ladder threshold: a solid
-  // line with a heavy dashed overlay, which renders as ties across the
-  // track. Above it: dark casing with a light infill. Tunnels are
-  // handled by the subsurface pass above and excluded here.
+  // -- railways at detail zoom, three passes deep, as GSI stacks them:
+  // a light bed at the full ground width, a dark centreline over it, and
+  // dark ties at twice the centreline's width so they read as ticks
+  // sticking out either side.
+  //
+  // The trick is that only the bed keeps growing. Centreline and ties
+  // stop widening at RAIL_LADDER_MINZOOM, so up to there the dark line
+  // covers the bed exactly — a solid dark track with ties — and past it
+  // the bed opens out from under the line into the classic light-ballast
+  // ladder. Sizing the dark line as a fixed multiple of the bed instead
+  // (which is what we did before, reading GSI's 3× station casing as if
+  // it applied to every track) leaves the ties buried inside the line at
+  // every zoom, and the track reads as a plain grey ribbon.
+  //
+  // Tunnels are handled by the subsurface pass above and excluded here.
   const surfaceRail: Expr = ["all", isRail, IS_SURFACE];
   layers.push(
+    {
+      id: "railway_fill",
+      type: "line",
+      source: "@@source",
+      "source-layer": "roads",
+      minzoom: DETAIL_MINZOOM,
+      filter: surfaceRail,
+      paint: {
+        "line-color": p.railwayFill,
+        "line-width": groundWidth(RAIL_GROUND_WIDTH),
+      },
+    },
     {
       id: "railway_casing",
       type: "line",
@@ -474,10 +641,7 @@ export function papersLayers(source: string, theme: PapersTheme): Layer[] {
       filter: surfaceRail,
       paint: {
         "line-color": p.railway,
-        // Proportional, not a fixed halo — GSI sizes its rail casing as
-        // a multiple of the track width, so the ladder keeps reading at
-        // every zoom instead of collapsing once the track gets wide.
-        "line-width": groundWidth(["*", RAIL_GROUND_WIDTH, 1.6]),
+        "line-width": cappedGroundWidth(RAIL_GROUND_WIDTH),
       },
     },
     {
@@ -486,24 +650,11 @@ export function papersLayers(source: string, theme: PapersTheme): Layer[] {
       source: "@@source",
       "source-layer": "roads",
       minzoom: DETAIL_MINZOOM,
-      maxzoom: RAIL_LADDER_MINZOOM,
       filter: surfaceRail,
       paint: {
         "line-color": p.railway,
-        "line-width": groundWidth(["*", RAIL_GROUND_WIDTH, 2]),
+        "line-width": cappedGroundWidth(["*", RAIL_GROUND_WIDTH, 2]),
         "line-dasharray": [0.2, 2],
-      },
-    },
-    {
-      id: "railway_fill",
-      type: "line",
-      source: "@@source",
-      "source-layer": "roads",
-      minzoom: RAIL_LADDER_MINZOOM,
-      filter: surfaceRail,
-      paint: {
-        "line-color": p.railwayFill,
-        "line-width": groundWidth(RAIL_GROUND_WIDTH),
       },
     },
   );
