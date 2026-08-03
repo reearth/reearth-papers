@@ -3,7 +3,8 @@
  *
  * Public routes:
  *   /styles/{theme}/tile/{z}/{x}/{y}.png — rendered raster tile
- *   /styles/{theme}/ezu/{z}/{x}/{y}.png  — ezu shadow render (src/ezu.ts)
+ *   /styles/{theme}/ezu/{z}/{x}/{y}.{webp,png}
+ *                                        — ezu shadow render (src/ezu.ts)
  *   /styles/{theme}/tilejson.json        — TileJSON for the above
  *   /styles/{theme}/style.json           — MapLibre style with that theme
  *   /{id}/{z}/{x}/{y}.{ext}              — tiles for every registered tileset
@@ -51,6 +52,7 @@ import { handleCatalog } from "./catalog.js";
 import {
   ezuIsolateId,
   ezuRenderStats,
+  type EzuFormat,
   EZU_MAXZOOM,
   EZU_RECIPE_VERSION,
   EZU_THEMES,
@@ -91,7 +93,11 @@ export class TileRenderer extends Container<Env> {
 const STYLE_TILE_RE = /^\/styles\/([a-z-]+)\/tile\/(\d+)\/(\d+)\/(\d+)\.png$/;
 // ezu shadow rendering (src/ezu.ts) — same cartography, rendered
 // in-worker for side-by-side comparison against the container path.
-const STYLE_EZU_RE = /^\/styles\/([a-z-]+)\/ezu\/(\d+)\/(\d+)\/(\d+)\.png$/;
+// `.webp` is what the viewer asks for — same encode cost as an
+// uncompressed render where PNG's deflate adds 30-48ms, ~17% smaller on
+// the wire, and quicker to decode client-side. `.png` stays served for
+// anything already pointed at it.
+const STYLE_EZU_RE = /^\/styles\/([a-z-]+)\/ezu\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
 const STYLE_TILEJSON_RE = /^\/styles\/([a-z-]+)\/tilejson\.json$/;
 const STYLE_STYLE_RE = /^\/styles\/([a-z-]+)\/style\.json$/;
 // Tile + TileJSON + source-archive shapes for every registered
@@ -250,11 +256,14 @@ async function dispatch(
   }
   const ezu = url.pathname.match(STYLE_EZU_RE);
   if (ezu) {
-    return handleEzu(request, env, ctx, ezu[1], {
-      z: Number(ezu[2]),
-      x: Number(ezu[3]),
-      y: Number(ezu[4]),
-    });
+    return handleEzu(
+      request,
+      env,
+      ctx,
+      ezu[1],
+      { z: Number(ezu[2]), x: Number(ezu[3]), y: Number(ezu[4]) },
+      ezu[5] as EzuFormat,
+    );
   }
   const tile = url.pathname.match(STYLE_TILE_RE);
   if (tile) {
@@ -287,6 +296,7 @@ async function handleEzu(
   ctx: ExecutionContext,
   theme: string,
   coords: { z: number; x: number; y: number },
+  format: EzuFormat,
 ): Promise<Response> {
   if (!EZU_THEMES.has(theme)) {
     return new Response(`no ezu recipe for theme: ${theme}`, { status: 404 });
@@ -296,13 +306,15 @@ async function handleEzu(
   }
   const version = STYLE_VERSION * 1000 + EZU_RECIPE_VERSION;
   const served = await serveRenderedTile(request, env, ctx, {
+    // The extension is part of the key, so the two encodings cache side by
+    // side instead of one serving the other's bytes.
     cacheKey:
-      `cache/ezu/${version}/${theme}/${coords.z}/${coords.x}/${coords.y}.png`,
+      `cache/ezu/${version}/${theme}/${coords.z}/${coords.x}/${coords.y}.${format}`,
     cacheVersion: version,
-    contentType: "image/png",
+    contentType: format === "webp" ? "image/webp" : "image/png",
     attribution: PROTOMAPS_ATTRIBUTION,
     persist: true,
-    render: () => renderEzuTile(request, env, ctx, theme, coords),
+    render: () => renderEzuTile(request, env, ctx, theme, coords, format),
   });
   // Which isolate answered, and what it was doing. Stamped on cache hits
   // too — the value describes this isolate right now, not the cached tile.

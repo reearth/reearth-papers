@@ -354,20 +354,27 @@ async function ensureGlyphs(
   }
 }
 
-/** Render one tile with ezu. Returns encoded PNG bytes. */
+/** Output encodings the ezu route serves. WebP is the default: measured
+ *  against the same tile, its encode is free next to an uncompressed
+ *  `rgba` render (179ms vs 190ms) where the default PNG deflate costs
+ *  30-48ms, and it is ~17% smaller on the wire than that PNG. */
+export type EzuFormat = "png" | "webp";
+
+/** Render one tile with ezu. Returns the encoded image bytes. */
 export async function renderEzuTile(
   request: Request,
   env: Env,
   ctx: ExecutionContext,
   theme: string,
   coords: { z: number; x: number; y: number },
+  format: EzuFormat,
 ): Promise<Uint8Array | null> {
   // Taken before the first buffer is allocated, not just around the WASM
   // call: what has to stay bounded is how much tile data is resident at
   // once, and a request queued here holds nothing.
   await acquireRenderPermit();
   try {
-    return await renderEzuTileInner(request, env, ctx, theme, coords);
+    return await renderEzuTileInner(request, env, ctx, theme, coords, format);
   } finally {
     rendersServed++;
     releaseRenderPermit();
@@ -380,11 +387,12 @@ async function renderEzuTileInner(
   ctx: ExecutionContext,
   theme: string,
   coords: { z: number; x: number; y: number },
+  format: EzuFormat,
 ): Promise<Uint8Array | null> {
   const st = ensureState(theme);
   st.inFlight++;
   try {
-    return await renderWithState(request, env, ctx, theme, st, coords);
+    return await renderWithState(request, env, ctx, theme, st, coords, format);
   } finally {
     st.inFlight--;
     if (st.disposed && st.inFlight === 0) freeState(st);
@@ -398,6 +406,7 @@ async function renderWithState(
   theme: string,
   st: EzuState,
   coords: { z: number; x: number; y: number },
+  format: EzuFormat,
 ): Promise<Uint8Array | null> {
   await ensureSprite(st);
 
@@ -421,11 +430,11 @@ async function renderWithState(
       );
     }
     await ensureGlyphs(request, env, ctx, st);
-    const png = st.renderer.renderTile(coords.z, coords.x, coords.y, { format: "png" });
+    const encoded = st.renderer.renderTile(coords.z, coords.x, coords.y, { format });
     const mu = st.renderer.memoryUsage() as { heapBytes?: number; glyphBytes?: number };
     lastHeapBytes = mu.heapBytes ?? 0;
     lastGlyphBytes = mu.glyphBytes ?? 0;
-    return png;
+    return encoded;
   });
   st.lock = run.then(
     () => undefined,
