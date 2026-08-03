@@ -325,6 +325,7 @@ async function handleEzu(
   out.headers.set("x-ezu-inflight", String(stats.inFlight));
   out.headers.set("x-ezu-heap", String(stats.heapBytes));
   out.headers.set("x-ezu-glyph", String(stats.glyphBytes));
+  out.headers.set("x-ezu-store", `${stats.storeGlyphs}/${stats.storeBytes}`);
   return out;
 }
 

@@ -1,7 +1,7 @@
 // ezu shadow renderer — the same themed cartography as the
 // maplibre-native container, rendered entirely inside this worker
 // (pure-CPU WASM, no container round-trip). Served at
-// /styles/{theme}/ezu/{z}/{x}/{y}.png for side-by-side comparison
+// /styles/{theme}/ezu/{z}/{x}/{y}.{webp,png} for side-by-side comparison
 // (viewer `?compare=ezu`); the container path stays authoritative
 // until the comparison graduates to a cutover.
 //
@@ -15,10 +15,12 @@
 // The WASM renderer owns no I/O: this module fetches the MVTs (centre
 // + the neighbours the recipe asks for — ezu's label collision is
 // world-space deterministic and reads neighbour tiles, which is what
-// keeps labels from splitting at tile seams), the sprite, and exactly
-// the glyph ranges `neededGlyphRanges()` reports. Glyphs and the
-// sprite land in a persistent bank on the renderer, so warm isolates
-// skip those fetches entirely.
+// keeps labels from splitting at tile seams), the sprite, and the
+// glyphs. Glyphs go through src/glyphs.ts: `neededCodepoints()` names
+// them individually, and only those are kept and re-bound as a subset
+// message, so the renderer's bank holds a tile's worth rather than the
+// ~38MB of 256-codepoint blocks the same labels used to drag in. The
+// sprite lands in a persistent bank, so warm isolates skip that fetch.
 // The /simd variant: workerd supports WASM SIMD128, and the scalar
 // build leaves a 1.5-3x pixel-loop speedup on the table.
 import { Renderer, simdEnabled } from "@reearth/ezu/simd";
@@ -31,6 +33,7 @@ import protomapsGrayscaleRecipe from "./ezu_recipes/protomaps-grayscale.json";
 import protomapsLightRecipe from "./ezu_recipes/protomaps-light.json";
 import protomapsWhiteRecipe from "./ezu_recipes/protomaps-white.json";
 import { handleFont } from "./fonts.js";
+import { buildSubsetPbf, glyphStoreStats, hasGlyph, ingestGlyphPbf } from "./glyphs.js";
 import { handleVectorTile } from "./pmtiles.js";
 
 const RECIPES: Record<string, unknown> = {
@@ -48,9 +51,11 @@ const RECIPES: Record<string, unknown> = {
 /** Themes the shadow route serves. Widen alongside scripts/ezu-recipes.sh. */
 export const EZU_THEMES = new Set(Object.keys(RECIPES));
 
-/** Bump when the committed recipes are regenerated — namespaces the
- *  ezu tile cache alongside STYLE_VERSION. */
-export const EZU_RECIPE_VERSION = 2;
+/** Namespaces the ezu tile cache alongside STYLE_VERSION. Bump when the
+ *  committed recipes are regenerated, and equally when a renderer upgrade
+ *  changes the pixels — 3 is the ezu 0.5.0 paint fix, which otherwise
+ *  leaves pre-upgrade renders sitting in the cache next to new ones. */
+export const EZU_RECIPE_VERSION = 3;
 
 /** The protomaps vector source carries data through z15; the shadow
  *  route doesn't overzoom (comparison happens within range). */
@@ -65,8 +70,11 @@ interface EzuState {
   glyphStacks: Map<string, string>;
   sprite: { name: string; image: string; index: string } | null;
   spriteReady: Promise<void> | null;
-  /** `${source}:${rangeStart}` already in the renderer's glyph bank. */
-  boundRanges: Set<string>;
+  /** glyphs source name → the fontstack name to stamp on subset PBFs. */
+  glyphFontstacks: Map<string, string>;
+  /** `${source}:${codepoint}` the mirror turned out to have no glyph for.
+   *  Without this every tile mentioning one refetches its whole block. */
+  absentGlyphs: Set<string>;
   /** Serialises bind → glyph-fetch → render sequences: the glyph fetch
    *  awaits mid-sequence, and a concurrent request clearing sources on
    *  the shared renderer there would corrupt the render. */
@@ -111,12 +119,17 @@ export function ezuRenderStats(): {
   inFlight: number;
   heapBytes: number;
   glyphBytes: number;
+  storeBytes: number;
+  storeGlyphs: number;
 } {
+  const store = glyphStoreStats();
   return {
     served: rendersServed,
     inFlight: activePermits,
     heapBytes: lastHeapBytes,
     glyphBytes: lastGlyphBytes,
+    storeBytes: store.bytes,
+    storeGlyphs: store.entries,
   };
 }
 
@@ -144,6 +157,9 @@ const MAX_STATES = 1;
 // `RangeError: Invalid array buffer length` from the wasm-bindgen glue
 // (HTTP 500 → MapLibre falls back to the parent zoom → serial retry waves).
 const MAX_CONCURRENT_RENDERS = 4;
+
+/** Per-fontstack ceiling ezu trims the glyph bank to after each render. */
+const GLYPH_BUDGET_BYTES = 4 * 1024 * 1024;
 
 /** Give up waiting and render anyway rather than sit here forever — a
  *  slow tile is recoverable, a request that never answers is not. */
@@ -197,15 +213,24 @@ function ensureState(theme: string): EzuState {
   if (!recipe) throw new Error(`no ezu recipe for theme ${theme}`);
   console.log(`ezu: init ${theme} (simd: ${simdEnabled()})`);
   const renderer = new Renderer(JSON.stringify(recipe));
+  // Per-fontstack ceiling on the glyph bank. Safe to set low only because
+  // `ensureGlyphs` re-binds the tile's subset every render out of the
+  // worker-side store — anything ezu trims costs a rebuild, not a refetch.
+  // Comfortably above one tile's worth (~1.2MB across all three stacks),
+  // so consecutive tiles over the same city still reuse what is loaded.
+  renderer.setGlyphBudget(GLYPH_BUDGET_BYTES);
   const sources =
     (recipe as { sources?: Record<string, Record<string, unknown>> }).sources ?? {};
   let mvtSource = "";
   const glyphStacks = new Map<string, string>();
+  const glyphFontstacks = new Map<string, string>();
   let sprite: EzuState["sprite"] = null;
   for (const [name, decl] of Object.entries(sources)) {
     if (decl.type === "mvt") mvtSource = name;
     else if (decl.type === "glyphs") {
-      glyphStacks.set(name, encodeURIComponent(String(decl.fontstack ?? "")));
+      const fontstack = String(decl.fontstack ?? "");
+      glyphStacks.set(name, encodeURIComponent(fontstack));
+      glyphFontstacks.set(name, fontstack);
     } else if (decl.type === "sprite") {
       sprite = { name, image: String(decl.image), index: String(decl.index) };
     }
@@ -221,7 +246,8 @@ function ensureState(theme: string): EzuState {
     glyphStacks,
     sprite,
     spriteReady: null,
-    boundRanges: new Set(),
+    glyphFontstacks,
+    absentGlyphs: new Set(),
     lock: Promise.resolve(),
     inFlight: 0,
     lastUsed: ++useCounter,
@@ -306,51 +332,82 @@ async function ensureSprite(st: EzuState): Promise<void> {
   }
 }
 
-/** Fetch + bind every glyph range `neededGlyphRanges()` reports that
- *  isn't in the bank yet. Runs inside the state lock (awaits mid-
- *  sequence while tile sources are bound). */
+/** Put exactly the glyphs this tile draws in front of the renderer.
+ *
+ *  `neededCodepoints()` names them one by one. Anything the store is
+ *  missing is fetched as the 256-codepoint block that contains it —
+ *  blocks are all `/fonts` can serve — but only the wanted glyphs are
+ *  kept; the rest of the block is dropped on the floor. The subset is
+ *  then rebuilt and bound on every tile rather than accumulating in the
+ *  renderer, which is what lets `setGlyphBudget` hold the bank down.
+ *
+ *  Runs inside the state lock (awaits mid-sequence while tile sources
+ *  are bound). */
 async function ensureGlyphs(
   request: Request,
   env: Env,
   ctx: ExecutionContext,
   st: EzuState,
 ): Promise<void> {
-  const needed = st.renderer.neededGlyphRanges() as Record<string, number[]>;
-  const wanted: { source: string; stackEnc: string; start: number }[] = [];
-  for (const [source, starts] of Object.entries(needed)) {
+  const needed = st.renderer.neededCodepoints() as Record<string, number[]>;
+
+  // Which blocks have to be fetched before the subset can be assembled.
+  const blocks: { source: string; stackEnc: string; start: number }[] = [];
+  for (const [source, cps] of Object.entries(needed)) {
     const stackEnc = st.glyphStacks.get(source);
     if (!stackEnc) continue;
-    for (const start of starts) {
-      if (!st.boundRanges.has(`${source}:${start}`)) {
-        wanted.push({ source, stackEnc, start });
+    const starts = new Set<number>();
+    for (const cp of cps) {
+      if (hasGlyph(source, cp) || st.absentGlyphs.has(`${source}:${cp}`)) continue;
+      starts.add(Math.floor(cp / 256) * 256);
+    }
+    for (const start of starts) blocks.push({ source, stackEnc, start });
+  }
+
+  if (blocks.length) {
+    const origin = new URL(request.url).origin;
+    const wantedBySource = new Map<string, Set<number>>();
+    for (const [source, cps] of Object.entries(needed)) {
+      wantedBySource.set(source, new Set(cps));
+    }
+    const fetched = await Promise.all(
+      blocks.map(async (b) => {
+        const file = `${b.start}-${b.start + 255}.pbf`;
+        // Internal call, not a self-fetch: a worker fetching its own
+        // route trips Cloudflare's recursion guard.
+        const synth = new Request(`${origin}/fonts/${b.stackEnc}/${file}`);
+        const res = await handleFont(synth, env, ctx, b.stackEnc, file);
+        if (res.status !== 200) return { ...b, bytes: null };
+        return { ...b, bytes: new Uint8Array(await res.arrayBuffer()) };
+      }),
+    );
+    for (const f of fetched) {
+      if (!f.bytes) continue;
+      try {
+        ingestGlyphPbf(f.source, f.bytes, wantedBySource.get(f.source) ?? new Set());
+      } catch (e) {
+        console.warn(`ezu: glyph parse ${f.source} ${f.start}: ${String(e)}`);
+      }
+    }
+    // A codepoint the mirror has no glyph for would otherwise refetch its
+    // block on every tile that mentions it.
+    for (const [source, cps] of Object.entries(needed)) {
+      for (const cp of cps) {
+        if (!hasGlyph(source, cp)) st.absentGlyphs.add(`${source}:${cp}`);
       }
     }
   }
-  if (!wanted.length) return;
 
-  const origin = new URL(request.url).origin;
-  const fetched = await Promise.all(
-    wanted.map(async (w) => {
-      const file = `${w.start}-${w.start + 255}.pbf`;
-      // Internal call, not a self-fetch: a worker fetching its own
-      // route trips Cloudflare's recursion guard.
-      const synth = new Request(`${origin}/fonts/${w.stackEnc}/${file}`);
-      const res = await handleFont(synth, env, ctx, w.stackEnc, file);
-      if (res.status !== 200) return { ...w, bytes: null };
-      return { ...w, bytes: new Uint8Array(await res.arrayBuffer()) };
-    }),
-  );
-  // The bank is persistent; mark even the misses so known-absent
-  // ranges aren't refetched on every tile.
-  for (const f of fetched) {
-    if (f.bytes) {
-      try {
-        st.renderer.bindSource(f.source, f.bytes);
-      } catch (e) {
-        console.warn(`ezu: glyph bind ${f.source} ${f.start}: ${String(e)}`);
-      }
+  for (const [source, cps] of Object.entries(needed)) {
+    const fontstack = st.glyphFontstacks.get(source);
+    if (!fontstack) continue;
+    const subset = buildSubsetPbf(source, fontstack, cps);
+    if (!subset) continue;
+    try {
+      st.renderer.bindSource(source, subset.bytes);
+    } catch (e) {
+      console.warn(`ezu: glyph bind ${source}: ${String(e)}`);
     }
-    st.boundRanges.add(`${f.source}:${f.start}`);
   }
 }
 
