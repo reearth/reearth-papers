@@ -20,8 +20,10 @@ command -v "$EZU" >/dev/null || {
 
 mkdir -p src/ezu_recipes
 # Every public theme. The papers house styles are label-free, so their
-# recipes carry no glyph/sprite sources at all; cjk flavors stay out
-# until the comparison graduates toward a cutover.
+# recipes carry no glyph/sprite sources at all. The CJK flavors are not
+# baked here: `?cjk=` only renames the fontstacks the glyph sources
+# point at, so src/ezu.ts derives the SC/TC variants from these by
+# rewriting that one field (see `recipeFor`).
 for theme in papers-light papers-dark protomaps-light protomaps-dark \
              protomaps-white protomaps-black protomaps-grayscale; do
   echo "translate: $theme"

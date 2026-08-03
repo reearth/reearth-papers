@@ -316,16 +316,22 @@ async function handleEzu(
     return new Response("zoom above ezu range", { status: 404 });
   }
   const version = STYLE_VERSION * 1000 + EZU_RECIPE_VERSION;
+  // Han variant selection, picked the same way the container path picks it
+  // (src/cjk_flavor.ts) so the two renderers agree over the same ground.
+  const cjk = tileCjkFlavor(coords) ?? null;
   const served = await serveRenderedTile(request, env, ctx, {
     // The extension is part of the key, so the two encodings cache side by
-    // side instead of one serving the other's bytes.
+    // side instead of one serving the other's bytes. The flavor is derived
+    // from the coordinates, so it is already implied by the key — spell it
+    // out anyway, so redrawing the flavor boxes is a visible cache change.
     cacheKey:
-      `cache/ezu/${version}/${theme}/${coords.z}/${coords.x}/${coords.y}.${format}`,
+      `cache/ezu/${version}/${theme}${cjk ? `-${cjk}` : ""}` +
+      `/${coords.z}/${coords.x}/${coords.y}.${format}`,
     cacheVersion: version,
     contentType: format === "webp" ? "image/webp" : "image/png",
     attribution: PROTOMAPS_ATTRIBUTION,
     persist: true,
-    render: () => renderEzuTile(request, env, ctx, theme, coords, format),
+    render: () => renderEzuTile(request, env, ctx, theme, coords, format, cjk),
   });
   // What this isolate's renderer is holding. Stamped on cache hits too —
   // the value describes the isolate right now, not the cached tile.

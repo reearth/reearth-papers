@@ -32,6 +32,7 @@ import protomapsDarkRecipe from "./ezu_recipes/protomaps-dark.json";
 import protomapsGrayscaleRecipe from "./ezu_recipes/protomaps-grayscale.json";
 import protomapsLightRecipe from "./ezu_recipes/protomaps-light.json";
 import protomapsWhiteRecipe from "./ezu_recipes/protomaps-white.json";
+import { type CjkFlavor } from "./cjk_flavor.js";
 import { handleFont } from "./fonts.js";
 import {
   buildSubsetPbf,
@@ -61,9 +62,10 @@ export const EZU_THEMES = new Set(Object.keys(RECIPES));
 
 /** Namespaces the ezu tile cache alongside STYLE_VERSION. Bump when the
  *  committed recipes are regenerated, and equally when a renderer upgrade
- *  changes the pixels — 3 is the ezu 0.5.0 paint fix, which otherwise
- *  leaves pre-upgrade renders sitting in the cache next to new ones. */
-export const EZU_RECIPE_VERSION = 3;
+ *  changes the pixels — 3 was the ezu 0.5.0 paint fix, 4 the CJK flavors,
+ *  which re-render every tile over Chinese-script regions. Without a bump
+ *  the old renders sit in the cache next to the new ones. */
+export const EZU_RECIPE_VERSION = 4;
 
 /** The protomaps vector source carries data through z15; the shadow
  *  route doesn't overzoom (comparison happens within range). */
@@ -80,8 +82,8 @@ interface EzuState {
   spriteReady: Promise<void> | null;
   /** glyphs source name → the fontstack name to stamp on subset PBFs. */
   glyphFontstacks: Map<string, string>;
-  /** `${source}:${codepoint}` the mirror turned out to have no glyph for.
-   *  Without this every tile mentioning one refetches its whole block. */
+  /** `${fontstack}:${codepoint}` the mirror turned out to have no glyph
+   *  for. Without this every tile mentioning one refetches its block. */
   absentGlyphs: Set<string>;
   /** Serialises bind → glyph-fetch → render sequences: the glyph fetch
    *  awaits mid-sequence, and a concurrent request clearing sources on
@@ -260,15 +262,43 @@ function evictStates(keep: string): void {
   }
 }
 
-function ensureState(theme: string): EzuState {
-  let st = states.get(theme);
+/** The committed recipes are the JP-first flavor. The only thing `?cjk=`
+ *  changes in the style it was translated from is which fontstack the
+ *  glyph sources name — "Noto Sans Regular" becomes "Noto Sans Regular
+ *  SC" / " TC", same layers, same everything else — so the variants are a
+ *  string rewrite rather than ten more recipes to bake and bundle. The
+ *  suffixed stacks are already in the mirror (mirror/fonts/out). */
+function recipeFor(theme: string, flavor: CjkFlavor | null): unknown {
+  const recipe = RECIPES[theme];
+  if (!recipe || !flavor) return recipe;
+  const suffix = flavor === "sc" ? " SC" : " TC";
+  const clone = structuredClone(recipe) as {
+    sources?: Record<string, Record<string, unknown>>;
+  };
+  for (const decl of Object.values(clone.sources ?? {})) {
+    if (decl.type === "glyphs" && typeof decl.fontstack === "string") {
+      decl.fontstack = `${decl.fontstack}${suffix}`;
+    }
+  }
+  return clone;
+}
+
+/** Renderers are per theme *and* per CJK flavor: the flavor picks a
+ *  different set of Han glyph variants, so they cannot share one. */
+function stateKey(theme: string, flavor: CjkFlavor | null): string {
+  return flavor ? `${theme}:${flavor}` : theme;
+}
+
+function ensureState(theme: string, flavor: CjkFlavor | null): EzuState {
+  const key = stateKey(theme, flavor);
+  let st = states.get(key);
   if (st) {
     st.lastUsed = ++useCounter;
     return st;
   }
-  const recipe = RECIPES[theme];
+  const recipe = recipeFor(theme, flavor);
   if (!recipe) throw new Error(`no ezu recipe for theme ${theme}`);
-  console.log(`ezu: init ${theme} (simd: ${simdEnabled()})`);
+  console.log(`ezu: init ${key} (simd: ${simdEnabled()})`);
   const renderer = new Renderer(JSON.stringify(recipe));
   // Per-fontstack ceiling on the glyph bank. Safe to set low only because
   // `ensureGlyphs` re-binds the tile's subset every render out of the
@@ -310,8 +340,8 @@ function ensureState(theme: string): EzuState {
     lastUsed: ++useCounter,
     disposed: false,
   };
-  states.set(theme, st);
-  evictStates(theme);
+  states.set(key, st);
+  evictStates(key);
   return st;
 }
 
@@ -432,24 +462,29 @@ async function ensureGlyphs(
   const needed = st.renderer.neededCodepoints() as Record<string, number[]>;
   if (Object.keys(needed).length) await ensureGlyphSeed(env);
 
-  // Which blocks have to be fetched before the subset can be assembled.
-  const blocks: { source: string; stackEnc: string; start: number }[] = [];
+  // The store is keyed by fontstack, not by the recipe's source name: a
+  // CJK flavor swaps the fontstack behind the same source, and the SC and
+  // JP forms of a Han codepoint are different glyphs that must not share
+  // an entry.
+  const blocks: { stack: string; stackEnc: string; start: number }[] = [];
   for (const [source, cps] of Object.entries(needed)) {
     const stackEnc = st.glyphStacks.get(source);
-    if (!stackEnc) continue;
+    const stack = st.glyphFontstacks.get(source);
+    if (!stackEnc || !stack) continue;
     const starts = new Set<number>();
     for (const cp of cps) {
-      if (hasGlyph(source, cp) || st.absentGlyphs.has(`${source}:${cp}`)) continue;
+      if (hasGlyph(stack, cp) || st.absentGlyphs.has(`${stack}:${cp}`)) continue;
       starts.add(Math.floor(cp / 256) * 256);
     }
-    for (const start of starts) blocks.push({ source, stackEnc, start });
+    for (const start of starts) blocks.push({ stack, stackEnc, start });
   }
 
   if (blocks.length) {
     const origin = new URL(request.url).origin;
-    const wantedBySource = new Map<string, Set<number>>();
+    const wantedByStack = new Map<string, Set<number>>();
     for (const [source, cps] of Object.entries(needed)) {
-      wantedBySource.set(source, new Set(cps));
+      const stack = st.glyphFontstacks.get(source);
+      if (stack) wantedByStack.set(stack, new Set(cps));
     }
     const fetched = await Promise.all(
       blocks.map(async (b) => {
@@ -471,19 +506,21 @@ async function ensureGlyphs(
     for (const f of fetched) {
       if (!f.bytes) continue;
       try {
-        ingestGlyphPbf(f.source, f.bytes, wantedBySource.get(f.source) ?? new Set());
-        settled.add(`${f.source}:${f.start}`);
+        ingestGlyphPbf(f.stack, f.bytes, wantedByStack.get(f.stack) ?? new Set());
+        settled.add(`${f.stack}:${f.start}`);
       } catch (e) {
-        console.warn(`ezu: glyph parse ${f.source} ${f.start}: ${String(e)}`);
+        console.warn(`ezu: glyph parse ${f.stack} ${f.start}: ${String(e)}`);
       }
     }
     // A codepoint the mirror genuinely has no glyph for would otherwise
     // refetch its block on every tile that mentions it.
     for (const [source, cps] of Object.entries(needed)) {
+      const stack = st.glyphFontstacks.get(source);
+      if (!stack) continue;
       for (const cp of cps) {
-        const block = `${source}:${Math.floor(cp / 256) * 256}`;
-        if (settled.has(block) && !hasGlyph(source, cp)) {
-          st.absentGlyphs.add(`${source}:${cp}`);
+        const block = `${stack}:${Math.floor(cp / 256) * 256}`;
+        if (settled.has(block) && !hasGlyph(stack, cp)) {
+          st.absentGlyphs.add(`${stack}:${cp}`);
         }
       }
     }
@@ -493,7 +530,7 @@ async function ensureGlyphs(
   for (const [source, cps] of Object.entries(needed)) {
     const fontstack = st.glyphFontstacks.get(source);
     if (!fontstack) continue;
-    const subset = buildSubsetPbf(source, fontstack, cps);
+    const subset = buildSubsetPbf(fontstack, fontstack, cps);
     if (!subset) continue;
     try {
       st.renderer.bindSource(source, subset.bytes);
@@ -517,13 +554,14 @@ export async function renderEzuTile(
   theme: string,
   coords: { z: number; x: number; y: number },
   format: EzuFormat,
+  flavor: CjkFlavor | null,
 ): Promise<Uint8Array | null> {
   // Taken before the first buffer is allocated, not just around the WASM
   // call: what has to stay bounded is how much tile data is resident at
   // once, and a request queued here holds nothing.
   await acquireRenderPermit();
   try {
-    return await renderEzuTileInner(request, env, ctx, theme, coords, format);
+    return await renderEzuTileInner(request, env, ctx, theme, coords, format, flavor);
   } finally {
     releaseRenderPermit();
   }
@@ -536,8 +574,9 @@ async function renderEzuTileInner(
   theme: string,
   coords: { z: number; x: number; y: number },
   format: EzuFormat,
+  flavor: CjkFlavor | null,
 ): Promise<Uint8Array | null> {
-  const st = ensureState(theme);
+  const st = ensureState(theme, flavor);
   st.inFlight++;
   try {
     return await renderWithState(request, env, ctx, theme, st, coords, format);
