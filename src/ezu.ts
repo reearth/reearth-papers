@@ -63,9 +63,15 @@ export const EZU_THEMES = new Set(Object.keys(RECIPES));
 /** Namespaces the ezu tile cache alongside STYLE_VERSION. Bump when the
  *  committed recipes are regenerated, and equally when a renderer upgrade
  *  changes the pixels — 3 was the ezu 0.5.0 paint fix, 4 the CJK flavors,
- *  which re-render every tile over Chinese-script regions. Without a bump
- *  the old renders sit in the cache next to the new ones. */
-export const EZU_RECIPE_VERSION = 4;
+ *  which re-render every tile over Chinese-script regions, 5 the papers
+ *  cartography re-calibration (see STYLE_VERSION v9) *and* the recipe
+ *  re-bake on ezu 0.6.1, whose `translate` stopped copying MapLibre's
+ *  exclusive `maxzoom` into an inclusive bound (reearth/ezu#90). That
+ *  one moves every theme, not just papers: the stock road casings no
+ *  longer double at z12, so their z12 tiles change too — subtly, and in
+ *  the direction of what gl-js draws. Without a bump the old renders sit
+ *  in the cache next to the new ones. */
+export const EZU_RECIPE_VERSION = 5;
 
 /** The protomaps vector source carries data through z15. Deeper tiles are
  *  rendered by reprojecting that z15 ancestor (ezu >= 0.6.0's

@@ -27,4 +27,9 @@
 // pinVariableAnchors) — v6 tiles are missing a large share of POIs.
 // v8: pois text made optional so icons survive Tile mode's
 // border-priority pass stealing the text's spot.
-export const STYLE_VERSION = 8;
+// v9: the papers house styles re-calibrated against PLATEAU's rendered
+// tiles — screen-space widths halved for the 512px tile, road casings
+// withheld from the fine classes at mid zoom, boundaries moved under the
+// water fill and sea crossings over it, and the z12 double-draw of the
+// overview and detail road networks fixed. Every papers tile changes.
+export const STYLE_VERSION = 9;
