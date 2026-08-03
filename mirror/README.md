@@ -26,3 +26,8 @@ each translated into its own COG, and Natural Earth (vector) is a
 curated multi-scale slice of the same project's vector data built into
 a single PMTiles archive with tippecanoe. See each subdirectory's
 README for the specifics.
+
+`mirror/sprites/` is not populated by any job here: the worker backfills
+it from `protomaps.github.io` on the first request for each object (see
+`src/sprites.ts`), so the only way it goes stale is if upstream changes
+a sheet in place under a version we already hold.

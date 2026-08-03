@@ -20,9 +20,11 @@ are listed in the table below):
 | `/{id}/style.json` | MapLibre style, for vector tilesets that ship their own cartography (e.g. `naturalearth_vector`). |
 | `/{id}/{z}/{x}/{y}.{ext}` | XYZ tiles in the tileset's format(s). |
 | `/{id}.{tif,pmtiles}` | The underlying single-file archive, with HTTP Range support — see [Direct archive access](#direct-archive-access). |
-| `/styles/{theme}/tile/{z}/{x}/{y}.png` | Rendered OSM raster tile. `{theme}` ∈ `papers-light papers-dark light dark white black grayscale`. |
-| `/styles/{theme}/tilejson.json` | TileJSON for a rendered theme. |
+| `/styles/{theme}/tile/{z}/{x}/{y}.{webp,png}` | Rendered OSM raster tile. `{theme}` ∈ `papers-light papers-dark protomaps-light protomaps-dark protomaps-white protomaps-black protomaps-grayscale` (the old unprefixed stock ids 301 here). |
+| `/styles/{theme}/tilejson.json` | TileJSON for a rendered theme (`?format=webp\|png`; default `webp`). |
 | `/styles/{theme}/style.json` | The theme's full MapLibre style, for client-side vector rendering. |
+| `/fonts/{fontstack}/{range}.pbf` | Glyph PBFs the styles reference — Protomaps' stacks with the CJK gap filled. |
+| `/sprites/{version}/{name}.{png,json}` | Protomaps sprite sheets, mirrored. |
 | `/viewer` | Interactive preview of all of the above. |
 
 All responses are CORS-open (`access-control-allow-origin: *`).
@@ -83,12 +85,17 @@ for the rendered themes: *Re:Earth Papers · Protomaps ·
 
 ## Status
 
-PoC, but the end-to-end path is live. The rendered OSM themes go
-through a maplibre-native container: expect ~10 s on the first cold
-tile and 3–7 s while warm. Everything else is served or rendered
-in-Worker and is fast from the first request. Cached tiles come from
-Cloudflare's edge cache (or R2 for the persisted tilesets) in well
-under a second.
+PoC, but the end-to-end path is live. Everything is rendered or served
+in-Worker: the OSM themes go through [ezu](https://github.com/reearth/ezu),
+a WASM renderer, at roughly 0.2–0.8 s for a fresh tile and ~1.5 s for
+the first tile an isolate renders (it loads a sprite and a glyph set
+once). Cached tiles come from Cloudflare's edge cache, or R2 for the
+persisted ones, in well under a second.
+
+maplibre-native is still deployed, in a container, for side-by-side
+comparison at `/styles/{theme}/native/{z}/{x}/{y}.png` and in the
+viewer's `?compare=ezu` mode. Nothing routine reaches it, so expect a
+cold start of several seconds there.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for architecture, local
 development, and deployment, and [`mirror/README.md`](mirror/README.md)

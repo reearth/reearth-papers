@@ -8,7 +8,7 @@ after every rollout (and runnable by hand). Checks every tileset in
 and the fonts route. Themed rasters are fetched twice: a fixed Tokyo
 tile (serving path) and a random z14 tile with a cache-buster — the
 tile-cache key embeds the coordinates, so the random tile is never
-cached and forces the full mirror-style → container → fonts render
+cached and forces a full MVT → glyph → ezu render
 path on every run. Exits non-zero on any failure so the deploy goes
 red; passthrough tilesets (third-party origins) only warn.
 

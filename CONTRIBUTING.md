@@ -12,13 +12,15 @@ flowchart TD
 
   subgraph main["reearth-papers (Worker)"]
     direction TB
-    main_routes["routes: /styles/&#123;theme&#125;/..., /protomaps/..., assets"]
+    main_routes["routes: /styles/&#123;theme&#125;/..., /fonts, /sprites, /protomaps, assets"]
+    ezu["ezu (WASM, in-worker)<br/>MVT + glyph subset + sprite → WebP/PNG"]
     cache["cache layer: Cache API → R2"]
-    do["DurableObject: TileRenderer"]
-    main_routes --> cache --> do
+    do["DurableObject: TileRenderer<br/>(comparison only)"]
+    main_routes --> cache --> ezu
+    main_routes -->|"/native/ only"| do
   end
 
-  subgraph container["TileRenderer container"]
+  subgraph container["TileRenderer container (comparison only)"]
     direction TB
     axum["axum :8080<br/>/tile/:z/:x/:y → maplibre-native render → PNG"]
     proxy["loopback proxy :9000<br/>/proxy/&#123;scheme&#125;/&#123;host&#125;/* — plain HTTP only<br/>(bypasses maplibre-native's libcurl/OpenSSL)"]
@@ -36,16 +38,21 @@ flowchart TD
     direction TB
     r2_archive["mirror/protomaps/&#123;YYYYMMDD&#125;.pmtiles"]
     r2_pointer["mirror/protomaps/latest.json"]
-    r2_cache["cache/tile/&#123;styleHash&#125;/&#123;date&#125;/&#123;z&#125;/&#123;x&#125;/&#123;y&#125;.png"]
+    r2_assets["mirror/fonts/... · mirror/sprites/..."]
+    r2_cache["cache/ezu/&#123;version&#125;/&#123;theme&#125;/&#123;z&#125;/&#123;x&#125;/&#123;y&#125;.&#123;webp,png&#125;"]
+    r2_seed["cache/ezu-glyphs/v&#123;n&#125;.pbf (glyph seed)"]
   end
 
-  pubcdn["protomaps.github.io<br/>(glyphs + sprites)"]
+  pubcdn["protomaps.github.io<br/>(upstream glyphs + sprites)"]
 
   client -->|"GET /styles/&#123;theme&#125;/tile/..."| main_routes
   do -->|"container.fetch()"| axum
   proxy -->|"reqwest (rustls)"| mirror
   proxy -->|"reqwest (rustls)"| pubcdn
-  main_routes -->|"R2 range-read"| r2_archive
+  ezu -->|"R2 range-read"| r2_archive
+  ezu -->|"glyphs / sprite"| r2_assets
+  ezu <-->|"seed get / put"| r2_seed
+  r2_assets -.->|"backfill on first miss"| pubcdn
   mirror -->|"R2 range-read"| r2_archive
   cache <-->|"get / put"| r2_cache
 ```
@@ -54,7 +61,7 @@ Two workers, one shared R2 bucket:
 
 | Worker                      | Where                                         | Job                                                                                                                       |
 |----------------------------|-----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
-| `reearth-papers`           | `papers.reearth.land` (custom domain)         | Public entry. Hosts the renderer container, the rendered-tile cache, and the static preview page.                          |
+| `reearth-papers`           | `papers.reearth.land` (custom domain)         | Public entry. Renders the themed rasters in-process with ezu, mirrors the glyph/sprite assets, owns the rendered-tile cache and the static preview page. Also hosts the comparison-only maplibre-native container. |
 | `reearth-papers-mirror`    | `reearth-papers-mirror.reearth.workers.dev`   | Monthly Workflow that snapshots Protomaps' daily PMTiles into R2. Also serves the `/style.json` + `/protomaps/...` that the renderer container fetches from (gated by `INTERNAL_TOKEN`). |
 
 The mirror duplicates `/style.json` (and `/protomaps`) on purpose. The
@@ -65,28 +72,70 @@ were chasing the maplibre-native HTTP bug (see gotcha §1). Both
 endpoints are gated by `INTERNAL_TOKEN` (a shared secret) so the
 workers.dev hostname can't be abused as a free Protomaps tile CDN.
 
+### Rendering
+
+The themed rasters are rendered by [ezu](https://github.com/reearth/ezu),
+a WASM renderer, inside the worker — no container hop. `src/ezu.ts`
+owns the I/O ezu deliberately doesn't do:
+
+- **MVTs** — the centre tile plus whatever neighbours the recipe asks
+  for (`requestedNeighborOffsets`), because label collision reads
+  across tile borders. Past the vector source's z15 each position
+  resolves to its ancestor there and is bound with `sourceZoom`, which
+  is how deep zooms get a crisp render instead of an upscaled bitmap.
+  Pass the zoom of the tile you actually fetched, not the source's
+  maxzoom — declaring one deeper than the tile being rendered throws.
+- **Glyphs** — via `src/glyphs.ts`. `neededCodepoints()` names them
+  individually; the 256-codepoint blocks `/fonts` serves are fetched,
+  the wanted glyphs kept, the rest dropped, and a subset message bound
+  per render. The store round-trips through one R2 object so a cold
+  isolate starts from what previous ones learned to need.
+- **Sprites** — through our own mirror (`src/sprites.ts`), so a cold
+  isolate doesn't wait on GitHub Pages.
+
+Renderer instances are retained per theme *and* CJK flavor, capped, and
+concurrency-limited; `src/ezu.ts` carries the measured numbers behind
+each constant. `x-ezu-heap`, `x-ezu-glyph` and `x-ezu-store` report what
+the answering isolate is holding.
+
+maplibre-native still runs, in the container, but only for
+`/styles/{theme}/native/...` and the viewer's `?compare=ezu` mode.
+Nothing routine reaches it, and its renders are edge-cached only — no R2
+layer, since a permanent global copy of tiles nobody asks for isn't
+worth paying for.
+
 ### Tile cache
 
-Rendered raster tiles are cached in two layers:
+Rendered raster tiles are cached in two layers (`src/render_cache.ts`):
 
 1. **Cache API** (`caches.default`) — per-colo edge cache. Hot tiles
-   are served from here without ever touching R2 or the worker
-   handler's storage path.
-2. **R2** under the `cache/tile/...` prefix — global, survives isolate
-   recycles. On a Cache API miss we promote the R2 entry back into the
-   edge cache so the next request from the same colo is fast.
+   are served from here without touching R2.
+2. **R2** under `cache/ezu/...` — global, survives isolate recycles. On
+   a Cache API miss we promote the R2 entry back into the edge cache.
 
-The cache key embeds:
-- A **style hash** computed from `STYLE_VERSION:<resolved-style-url>`
-  (see `src/cache.ts`). Bumping `STYLE_VERSION` invalidates every
-  default-style tile in one deploy.
-- The **PMTiles mirror date** (from `mirror/protomaps/latest.json`).
-  A fresh monthly snapshot orphans the previous month's tiles
-  automatically.
+The key is
+`cache/ezu/{STYLE_VERSION*1000+EZU_RECIPE_VERSION}/{theme}[-{cjk}]/{z}/{x}/{y}.{ext}`:
+
+- **`STYLE_VERSION`** (`src/cache.ts`) — cartography. Bump it and every
+  tile re-renders.
+- **`EZU_RECIPE_VERSION`** (`src/ezu.ts`) — the committed recipes, and
+  equally any renderer upgrade that moves pixels.
+- **CJK flavor**, derived from the coordinates (`src/cjk_flavor.ts`), so
+  Han variants can't be served across regions.
+- **Extension**, so the WebP and PNG encodings coexist rather than one
+  serving the other's bytes.
+
+> **Known gap.** Unlike the container path it replaced, this key does
+> *not* embed the PMTiles mirror date, so a fresh monthly snapshot does
+> not invalidate anything — rendered tiles keep serving the data they
+> were rendered from until a version constant moves. Either add the
+> mirror date to the key (and accept a full re-render each snapshot) or
+> bump `STYLE_VERSION` as part of the mirror runbook.
 
 Old cache entries are not actively cleaned — they're simply
-unreachable. If R2 storage becomes a concern, add a lifecycle rule on
-the `cache/tile/` prefix.
+unreachable. `cache/tile/...` is the orphaned namespace from the
+container era (~4.9 GB, 78k objects at the time of the cutover); it is
+dwarfed by `mirror/` and can be dropped whenever convenient.
 
 The mirror duplicates `/style.json` (and `/protomaps`) on purpose. The
 renderer container has to source those from somewhere; routing it
@@ -100,12 +149,19 @@ workers.dev hostname can't be abused as a free Protomaps tile CDN.
 
 - `src/` — `reearth-papers` worker (TypeScript).
   - `index.ts` — route table + tile pipeline.
-  - `cache.ts` — Cache API + R2 layered tile cache.
+  - `ezu.ts` — the WASM renderer's host: recipes, MVT/sprite/glyph
+    fetching, overzoom, per-isolate limits.
+  - `glyphs.ts` — per-codepoint glyph store and subset PBF builder.
+  - `sprites.ts` — mirrored Protomaps sprite sheets.
+  - `fonts.ts` — mirrored glyph PBFs.
+  - `cjk_flavor.ts` — region-priority Han variant selection.
+  - `render_cache.ts` — Cache API + optional R2 layer for rendered tiles.
+  - `cache.ts` — `STYLE_VERSION` (cartography version).
   - `style.ts` — generated MapLibre style per theme.
   - `tilejson.ts` — TileJSON for raster + vector endpoints.
   - `pmtiles.ts` — R2-backed PMTiles vector tile reader.
 - `public/` — static assets served via Workers Assets (preview page).
-- `container/` — renderer container (Rust + axum + maplibre-native).
+- `container/` — comparison renderer container (Rust + axum + maplibre-native).
   - `src/main.rs` — tile-server entry point.
   - `src/proxy.rs` — loopback HTTP proxy (the maplibre-native workaround).
   - `Dockerfile` — image build.
@@ -330,6 +386,35 @@ that happens, two things help:
 2. Use the CF dashboard's "Container" tab on the Worker page, not
    "Workers" — the latter shows worker invocations, not container
    stdout. They're related but separate streams.
+
+### 8. A promise only another request can settle is not awaitable
+
+Limiting concurrency across requests looks like a resolver queue:
+
+```js
+// WRONG — workerd cancels the waiter
+const waiters = [];
+await new Promise((resolve) => waiters.push(resolve));   // another request resolves this
+```
+
+workerd sees a request with no pending I/O of its own and kills it:
+*"The Workers runtime canceled this request because it detected that
+your Worker's code had hung and would never generate a response."* We hit
+this on the first attempt at ezu's render permit — 8 of 12 concurrent
+requests died. Global mutable state is fine; the *handover* is not.
+
+Poll instead, so the waiter owns real I/O:
+
+```js
+while (active >= MAX && Date.now() < deadline) {
+  await new Promise((r) => setTimeout(r, 10));
+}
+active++;   // no await between the check and the increment, so it's atomic here
+```
+
+A promise chain backed by another request's in-flight I/O (ezu's
+per-state `lock`) does work — it's the bare resolver handover that
+doesn't.
 
 ## Other notes
 
