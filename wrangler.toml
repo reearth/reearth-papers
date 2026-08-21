@@ -48,6 +48,11 @@ directory = "./public"
 # Container bound as `TileRenderer`. Renders MapLibre styles to PNG
 # tiles via maplibre-native + lavapipe (software Vulkan). See
 # `container/Dockerfile`.
+#
+# Comparison only since the ezu cutover: the public raster route renders
+# in-worker, and nothing but `/styles/{theme}/native/...` (the viewer's
+# side-by-side map) reaches this. Kept as the reference renderer to diff
+# ezu's cartography against; instances cost nothing idle.
 [[containers]]
 class_name = "TileRenderer"
 image = "./container/Dockerfile"

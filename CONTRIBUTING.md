@@ -177,9 +177,22 @@ workers.dev hostname can't be abused as a free Protomaps tile CDN.
 
 ## Local development
 
-Local iteration of the **renderer container** under plain Docker is
-the fastest loop. The image hash on CF and local is identical, so
-behaviour matches end-to-end.
+Everything public renders in-worker (ezu), so `wrangler dev` is the
+whole loop — no Docker needed for the paths that actually serve
+traffic:
+
+```bash
+npm install
+npx wrangler dev
+curl 'http://localhost:8787/styles/protomaps-light/tile/0/0/0.webp' -o tile.webp
+```
+
+`.png` works on the same route if you want a lossless byte to diff;
+`.webp` is what the TileJSON advertises and what clients get.
+
+Only when you're touching the **comparison renderer** do you need the
+container. Plain Docker is the fastest loop there — the image hash on
+CF and local is identical, so behaviour matches end-to-end:
 
 ```bash
 cd container
@@ -190,12 +203,12 @@ docker run --rm --platform linux/amd64 -p 8080:8080 \
 curl 'http://localhost:8080/tile/0/0/0' -o tile.png
 ```
 
-For the **worker + container chain** locally (needs Docker):
+For the **worker → container chain** locally (needs Docker), drive the
+comparison-only route:
 
 ```bash
-npm install
 npx wrangler dev
-curl 'http://localhost:8787/styles/light/tile/0/0/0.png' -o tile.png
+curl 'http://localhost:8787/styles/protomaps-light/native/0/0/0.png' -o tile.png
 ```
 
 For the **mirror worker** locally:
@@ -314,14 +327,16 @@ remember to re-attach secrets afterwards (`wrangler secret put ...`).
 
 ### 4. Nested style URLs need URL encoding
 
-When testing with an explicit style override:
+`?style=` is the **container's** query parameter, not a public one — the
+worker builds that inner URL itself (`renderNativeTile` in
+`src/index.ts`), so this only bites when you drive a container directly:
 
 ```bash
 # WRONG — the inner `?` ends the outer query
-curl 'https://papers.reearth.land/tile/0/0/0.png?style=https://x/style.json?theme=dark'
+curl 'http://localhost:8080/tile/0/0/0?style=https://x/style.json?theme=dark'
 
 # RIGHT — encode the inner URL
-curl 'https://papers.reearth.land/tile/0/0/0.png?style=https%3A%2F%2Fx%2Fstyle.json%3Ftheme%3Ddark'
+curl 'http://localhost:8080/tile/0/0/0?style=https%3A%2F%2Fx%2Fstyle.json%3Ftheme%3Ddark'
 ```
 
 The container's axum router silently treats the unencoded form as a

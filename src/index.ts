@@ -2,9 +2,10 @@
  * papers-tile worker
  *
  * Public routes:
- *   /styles/{theme}/tile/{z}/{x}/{y}.{png,webp}
- *                                        — rendered raster tile (ezu)
- *   /styles/{theme}/ezu/{z}/{x}/{y}.{png,webp}
+ *   /styles/{theme}/tile/{z}/{x}/{y}.{webp,png}
+ *                                        — rendered raster tile (ezu);
+ *                                          webp is the advertised default
+ *   /styles/{theme}/ezu/{z}/{x}/{y}.{webp,png}
  *                                        — same render, pre-cutover path
  *   /styles/{theme}/native/{z}/{x}/{y}.png
  *                                        — maplibre-native, comparison only
@@ -23,7 +24,9 @@
  *   /                                    — temporary 302 → /viewer (LP TBD)
  *
  * `{theme}` is one of papers-light / papers-dark (the house styles) or
- * light / dark / white / black / grayscale (stock Protomaps themes).
+ * protomaps-{light,dark,white,black,grayscale} (stock Protomaps themes).
+ * The old unprefixed stock ids (light, dark, ...) 301 to the prefixed
+ * ones — see `LEGACY_THEMES` in style.ts.
  * `{id}` and `{ext}` are data-driven from the central tileset registry
  * (src/tilesets.ts) — adding a dataset is one entry there; the tile
  * route, TileJSON route, and catalog entry all derive from it.
@@ -39,12 +42,12 @@ import { Container, getContainer } from "@cloudflare/containers";
 //
 // The render pool is single-threaded per instance (maplibre-native
 // serialises tiles through one Vulkan context), so shards ARE our only
-// render parallelism. Sized to ~a full viewport's tile count so an
-// interactive pan/zoom fans its tiles across distinct instances and
-// renders them concurrently (~1 warm render each) instead of queueing
-// several per instance. Past ~viewport size there's no single-viewport
-// gain — only headroom for concurrent users — and it scatters traffic
-// across more (cold) instances, so don't over-shard.
+// render parallelism. Sized back when this path served the public
+// tiles: ~a full viewport's tile count, so an interactive pan/zoom
+// fanned across distinct instances instead of queueing several per
+// instance. Since the ezu cutover only the viewer's comparison map
+// reaches here, so the number is oversized rather than tuned — left as
+// is because shards cost nothing idle.
 const SHARD_COUNT = 32;
 import { STYLE_VERSION } from "./cache.js";
 import { tileCjkFlavor } from "./cjk_flavor.js";
@@ -82,9 +85,10 @@ import {
 export class TileRenderer extends Container<Env> {
   defaultPort = 8080;
   // Cold starts are the expensive event for this container (image pull +
-  // maplibre Vulkan init). Keep it warm longer between requests — at
-  // 30 min idle, a single tile during business hours pays for the
-  // wake-up amortized over the next half hour of traffic.
+  // maplibre Vulkan init) and, since the ezu cutover, nearly every
+  // request here is one: only the viewer's comparison map reaches this
+  // path. 30 min idle keeps a reviewer's second and third tile warm
+  // without paying for a renderer nobody is looking at.
   sleepAfter = "30m";
 }
 
@@ -98,8 +102,8 @@ export class TileRenderer extends Container<Env> {
 //
 // `.webp` costs the same to encode as an uncompressed render where PNG's
 // deflate adds 30-48ms, is ~17% smaller on the wire, and decodes quicker
-// client-side. The TileJSON still advertises `.png` — that is a public
-// contract with clients we don't control — so `.webp` is opt-in by URL.
+// client-side, so the TileJSON advertises it by default. `.png` stays
+// served on the same route for clients that ask for it (`?format=png`).
 const STYLE_TILE_RE =
   /^\/styles\/([a-z-]+)\/(?:tile|ezu)\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
 // maplibre-native, via the renderer container. Comparison only since the
