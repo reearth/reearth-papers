@@ -97,6 +97,11 @@ DEFAULT_STYLE_URL = "https://reearth-papers-mirror.reearth.workers.dev/style.jso
 # R2 prefix the Protomaps mirror writes under. Must match
 # `mirror/protomaps/wrangler.toml`'s MIRROR_PREFIX.
 MIRROR_PREFIX = "mirror/protomaps"
+# R2 prefix the paint styles are published under, and this worker reads
+# from (see src/paint_styles.ts). A var rather than a constant so a
+# staging shelf can be served from the same bucket without a code
+# change.
+PAINT_STYLES_PREFIX = "styles"
 
 # `INTERNAL_TOKEN` is a Wrangler secret (not in [vars]). It must match
 # the same-named secret on `reearth-papers-mirror`; the main worker

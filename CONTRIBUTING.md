@@ -163,6 +163,8 @@ workers.dev hostname can't be abused as a free Protomaps tile CDN.
   - `cjk_flavor.ts` — region-priority Han variant selection.
   - `render_cache.ts` — Cache API + optional R2 layer for rendered tiles.
   - `cache.ts` — `STYLE_VERSION` (cartography version).
+  - `paint_styles.ts` — the R2 shelf of ezu paint styles: manifest,
+    documents, assets, and param validation.
   - `style.ts` — generated MapLibre style per theme.
   - `tilejson.ts` — TileJSON for raster + vector endpoints.
   - `pmtiles.ts` — R2-backed PMTiles vector tile reader.
@@ -189,6 +191,51 @@ curl 'http://localhost:8787/styles/protomaps-light/tile/0/0/0.webp' -o tile.webp
 
 `.png` works on the same route if you want a lossless byte to diff;
 `.webp` is what the TileJSON advertises and what clients get.
+
+**For the viewer, pass `--local-upstream`.** With a `custom_domain`
+route configured, `wrangler dev` rewrites the request host to that
+route, so `new URL(request.url).origin` — which is what every TileJSON,
+catalog link and tile template is built from — comes out as
+`papers.reearth.land` even though you are on localhost. The page then
+loads production, and anything not deployed yet 404s:
+
+```bash
+npm run dev:viewer      # wrangler dev --port 8787 --local-upstream localhost:8787
+open http://localhost:8787/viewer
+```
+
+The viewer also pins its own fetches to the origin it was served from,
+which covers the workers.dev hostname; the URLs *inside* a TileJSON can
+only come from the worker, hence the flag.
+
+### Paint styles
+
+The paint styles (`/styles/paint-sumi/…` and friends) are ezu documents
+published to an R2 shelf, which this worker reads at request time
+(`src/paint_styles.ts`). Publishing one adds a tileset with no deploy
+here — that is the point of the shelf, and it is why these documents are
+not bundled the way the themed rasters' recipes are.
+
+What this side relies on:
+
+- `${PAINT_STYLES_PREFIX}/latest.json` — the manifest, written last so a
+  half-uploaded revision is never a visible one. It carries each style's
+  id, `rev`, display text, attribution, tile size, max zoom and params
+  schema, so serving the catalog, a TileJSON or `params.json` is one
+  memoised read.
+- `{id}/{rev}/style.json` — the document as strict JSON (comments
+  blanked on the way in, so no JSONC parser lives in the worker).
+- `{id}/{rev}/assets/…` — the brushes and images the document names with
+  `file:` paths.
+
+`rev` is a content hash of the document plus its assets, and every cache
+downstream keys on it, so publishing a change orphans exactly that
+style's tiles. There is no version constant to bump.
+
+A paint style has no `style.json`: an ezu document is a node graph, and
+no MapLibre style means the same thing. `params.json` — the schema ezu
+derives from the document's own `params` — is what a client reads
+instead, and what the viewer builds its panel from.
 
 Only when you're touching the **comparison renderer** do you need the
 container. Plain Docker is the fastest loop there — the image hash on

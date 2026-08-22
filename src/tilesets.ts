@@ -91,6 +91,12 @@ export interface TilesetDef {
   description: string;
   attribution: string;
   type: "raster" | "vector";
+  /** Catalog shelf this entry belongs on (see `Category` in catalog.ts).
+   *  Defaults to `vector` for vector entries and `imagery` for raster
+   *  ones — every registered raster is a data or satellite layer, and
+   *  the rasters we render from cartography live outside this registry
+   *  (see style.ts). Set it only to override that. */
+  category?: "basemap" | "paint" | "imagery" | "vector";
   /** Served extensions; the first is the TileJSON default. Unused for
    *  passthrough entries. */
   formats?: readonly TileFormat[];

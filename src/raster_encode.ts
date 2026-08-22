@@ -9,7 +9,9 @@ import encodeWebp, { init as initWebp } from "@jsquash/webp/encode";
 // .wasm at runtime, which Workers can't satisfy. init() picks SIMD vs
 // scalar at runtime via `wasm-feature-detect.simd()`; Workers support
 // WASM SIMD, so we must hand it the matching SIMD-built wasm.
-// @ts-expect-error — .wasm modules are bundled via wrangler's CompiledWasm rule.
+// The import resolves to a WebAssembly.Module through wrangler's
+// CompiledWasm rule; `wrangler types` now declares that module shape, so
+// this no longer needs a suppression.
 import WEBP_ENC_WASM from "@jsquash/webp/codec/enc/webp_enc_simd.wasm";
 
 // -- PNG ---------------------------------------------------------------------

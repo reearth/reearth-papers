@@ -76,16 +76,17 @@
       color: var(--ink-soft);
     }
 
-    /* -- tabs (Raster / Vector) --------------------------------------- */
+    /* -- tabs (one per catalog category) ------------------------------ */
     #tabs {
       display: flex;
+      flex-wrap: wrap;
       gap: 4px;
       margin-top: 10px;
     }
     #tabs .tab {
-      flex: 1;
+      flex: 1 1 auto;
       font: 500 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-      letter-spacing: .12em;
+      letter-spacing: .08em;
       text-transform: uppercase;
       color: var(--ink-soft);
       background: none;
@@ -368,6 +369,75 @@
       border: 1px solid rgba(0,0,0,.15);
     }
     #layers .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* -- params panel (paint styles) ---------------------------------- */
+    /* Same slot as #layers: a paint style is a raster, so the vector
+       inspector is never up at the same time. */
+    #params {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 232px;
+      max-height: calc(100% - 20px);
+      overflow-y: auto;
+      z-index: 2;
+      background: var(--card);
+      border: 1px solid var(--paper-edge);
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(31,28,23,.15);
+      font-size: 12px;
+    }
+    #params h2 {
+      position: sticky;
+      top: 0;
+      margin: 0;
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font: 600 12px/1.2 'Iowan Old Style', Palatino, Georgia, serif;
+      background: var(--card);
+      border-bottom: 1px solid var(--paper-edge);
+    }
+    #params .reset {
+      font: 500 10px/1 ui-monospace, Menlo, monospace;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+    #params .reset:hover { color: var(--accent); }
+    #params .p { padding: 6px 10px; }
+    #params .p + .p { border-top: 1px solid #efece3; }
+    #params .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    #params .nm {
+      font: 500 11px/1.2 ui-monospace, Menlo, monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #params .val {
+      font: 500 10px/1 ui-monospace, Menlo, monospace;
+      color: var(--ink-soft);
+      flex: none;
+    }
+    #params input[type=range] { width: 100%; margin: 5px 0 0; accent-color: var(--accent); }
+    #params input[type=color] {
+      width: 28px; height: 18px; padding: 0; flex: none;
+      border: 1px solid var(--paper-edge); border-radius: 3px; background: none;
+    }
+    #params .pending { color: var(--ink-soft); padding: 8px 10px; margin: 0; }
+    @media (max-width: 720px) {
+      #params { top: auto; bottom: 10px; right: 10px; max-height: 45%; width: 200px; }
+    }
+
     .maplibregl-popup-content { font: 12px/1.4 system-ui, -apple-system, sans-serif; }
     .ne-pop .h {
       font-weight: 600;
@@ -387,10 +457,10 @@
     <header>
       <h1>Re:Earth Papers</h1>
       <p class="sub">tileset preview</p>
-      <div id="tabs" role="tablist" aria-label="Tileset type">
-        <button type="button" class="tab" role="tab" data-tab="raster" aria-selected="true">Raster</button>
-        <button type="button" class="tab" role="tab" data-tab="vector" aria-selected="false">Vector</button>
-      </div>
+      <!-- One tab per category present in /catalog.json, built at load
+           time: a tileset shelf that appears server-side shows up here
+           without an edit. -->
+      <div id="tabs" role="tablist" aria-label="Tileset category"></div>
     </header>
     <nav id="gallery" aria-label="Tilesets">
       <p class="pending">loading /catalog.json…</p>
@@ -438,6 +508,24 @@
     // tilesets always show their served tiles.
 
     const THUMB = { z: 0, x: 0, y: 0 };
+
+    // The catalog links to itself with absolute URLs built from the
+    // origin the worker was *asked* for, which is not always the origin
+    // this page came from: `wrangler dev` rewrites the request host to
+    // the configured route, and the workers.dev subdomain is a second
+    // hostname for the same service. Fetches this page makes are pinned
+    // to its own origin so a preview never quietly reads production.
+    // (Only for what the page loads — the copy buttons hand out the
+    // catalog's own URLs, which are the ones a consumer should use.)
+    const ours = (u) => {
+      if (!u) return u;
+      try {
+        const p = new URL(u, location.href);
+        return location.origin + p.pathname + p.search;
+      } catch (e) {
+        return u;
+      }
+    };
 
     function rasterStyle(tilejsonUrl) {
       return {
@@ -541,6 +629,24 @@
       }
     }
 
+    // -- categories ------------------------------------------------
+    // The shelves a tileset can sit on, in gallery order, with the label
+    // each one gets. A category the viewer has never heard of still gets
+    // a tab (labelled by its own name) rather than vanishing — the
+    // catalog is allowed to grow without this file changing.
+    const CATEGORY_LABELS = {
+      basemap: 'Basemaps',
+      paint: 'Paint',
+      imagery: 'Imagery',
+      vector: 'Vector',
+    };
+    const CATEGORY_ORDER = Object.keys(CATEGORY_LABELS);
+
+    const categoryOf = (t) =>
+      t.category || (t.type === 'vector' ? 'vector' : 'imagery');
+
+    const categoryLabel = (c) => CATEGORY_LABELS[c] || c;
+
     async function init() {
       const gallery = document.getElementById('gallery');
       const copyTilejson = document.getElementById('copy-tilejson');
@@ -565,9 +671,10 @@
         card.type = 'button';
         card.className = 'card';
         card.dataset.id = t.id;
-        // Which tab this card belongs to: Vector tab holds vector
-        // tilesets, Raster tab holds everything else.
-        card.dataset.tab = t.type === 'vector' ? 'vector' : 'raster';
+        // Which tab this card belongs to. `category` is what the catalog
+        // groups by; `type` is only the fallback for a catalog that
+        // predates it.
+        card.dataset.tab = categoryOf(t);
 
         const thumb = document.createElement('span');
         thumb.className = 'thumb';
@@ -619,7 +726,7 @@
       // and edge-cached for 5 minutes.
       for (const t of tilesets) {
         if (t.type === 'vector') continue;
-        fetch(t.tilejson)
+        fetch(ours(t.tilejson))
           .then((r) => r.json())
           .then((tj) => {
             const tpl = tj.tiles && tj.tiles[0];
@@ -688,7 +795,7 @@
           version: 8,
           glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
           sources: {
-            ne: { type: 'vector', url: new URL(t.tilejson, location.href).toString(),
+            ne: { type: 'vector', url: ours(t.tilejson),
               attribution: tj.attribution || '' },
           },
           layers: [
@@ -763,6 +870,7 @@
       // hover → pointer cursor. No-ops unless an inspector is active.
       function bindInspector() {
         document.getElementById('map').appendChild(layersPanel);
+        document.getElementById('map').appendChild(paramsPanel);
         const hitIds = () => neLayers.flatMap((l) => l.ids).filter((id) => map.getLayer(id));
 
         const clearSel = () => {
@@ -806,6 +914,189 @@
         });
       }
 
+      // -- params (paint styles) ------------------------------------
+      // A paint style declares its own knobs, and the tile route takes
+      // them as query params. The catalog entry links to the schema ezu
+      // derived from the document, so this panel is generated rather
+      // than written: a style that grows a param grows a control here
+      // with no edit, and one that renames a param cannot leave a stale
+      // slider behind.
+      //
+      // Non-default values live in the page URL under `p.<name>` (the
+      // prefix keeps them clear of the viewer's own `id` / `compare`),
+      // so a tuned picture is a shareable link.
+      const paramsPanel = document.createElement('aside');
+      paramsPanel.id = 'params';
+      paramsPanel.hidden = true;
+      // Query string appended to the TileJSON URL — the server folds it
+      // into the `tiles` template, so the copy buttons hand out the
+      // picture on screen rather than the defaults.
+      let paramsQuery = '';
+
+      const tileUrl = (t) => {
+        const base = ours(t.tilejson);
+        return base + (paramsQuery ? (base.includes('?') ? '&' : '?') + paramsQuery : '');
+      };
+
+      // Slider granularity. A declared range gets 100 steps, which is
+      // finer than these knobs read at; an unbounded number falls back
+      // to a hundredth.
+      const stepFor = (prop) =>
+        prop.minimum !== undefined && prop.maximum !== undefined
+          ? Math.max((prop.maximum - prop.minimum) / 100, 0.0001)
+          : 0.01;
+
+      const sameValue = (a, b) => String(a) === String(b);
+
+      async function setupParams(t) {
+        paramsQuery = '';
+        paramsPanel.innerHTML = '';
+        if (!t.params) {
+          paramsPanel.hidden = true;
+          return;
+        }
+        paramsPanel.hidden = false;
+        paramsPanel.innerHTML = '<p class="pending">loading params…</p>';
+        let schema;
+        try {
+          schema = await fetch(ours(t.params)).then((r) => r.json());
+        } catch (e) {
+          paramsPanel.innerHTML = '<p class="pending">params unavailable</p>';
+          return;
+        }
+        const props = schema.properties || {};
+        const names = Object.keys(props);
+        if (!names.length) {
+          paramsPanel.hidden = true;
+          return;
+        }
+
+        const urlParams = new URLSearchParams(location.search);
+        const current = {}; // name → value as text, defaults included
+
+        // Re-derive `paramsQuery` and the `p.*` keys in the page URL from
+        // `current`. Only non-defaults are carried, so an untouched panel
+        // leaves both exactly as they were.
+        const sync = () => {
+          const changed = names.filter((n) => !sameValue(current[n], props[n].default));
+          paramsQuery = changed
+            .map((n) => `${encodeURIComponent(n)}=${encodeURIComponent(current[n])}`)
+            .join('&');
+          const u = new URL(location.href);
+          for (const k of [...u.searchParams.keys()]) {
+            if (k.startsWith('p.')) u.searchParams.delete(k);
+          }
+          for (const n of changed) u.searchParams.set(`p.${n}`, current[n]);
+          history.replaceState(null, '', u.toString());
+        };
+
+        // Debounced tile reload for a control the user moved. Dragging a
+        // slider would otherwise ask the renderer for a tile per frame,
+        // and each one is seconds of CPU nobody will ask for again.
+        let timer = null;
+        const apply = () => {
+          sync();
+          clearTimeout(timer);
+          timer = setTimeout(() => ensureMap(rasterStyle(tileUrl(t))), 300);
+        };
+
+        const h = document.createElement('h2');
+        const title = document.createElement('span');
+        title.textContent = 'Params';
+        const reset = document.createElement('button');
+        reset.type = 'button';
+        reset.className = 'reset';
+        reset.textContent = 'defaults';
+        h.append(title, reset);
+        paramsPanel.innerHTML = '';
+        paramsPanel.appendChild(h);
+
+        const setters = [];
+        for (const n of names) {
+          const prop = props[n];
+          const fromUrl = urlParams.get(`p.${n}`);
+          current[n] = fromUrl !== null ? fromUrl : String(prop.default);
+
+          const box = document.createElement('div');
+          box.className = 'p';
+          const row = document.createElement('div');
+          row.className = 'row';
+          const nm = document.createElement('span');
+          nm.className = 'nm';
+          nm.textContent = n;
+          nm.title = prop.description || n;
+          row.appendChild(nm);
+          box.appendChild(row);
+
+          if (prop.type === 'number') {
+            const val = document.createElement('span');
+            val.className = 'val';
+            val.textContent = current[n];
+            row.appendChild(val);
+            const input = document.createElement('input');
+            input.type = 'range';
+            if (prop.minimum !== undefined) input.min = prop.minimum;
+            if (prop.maximum !== undefined) input.max = prop.maximum;
+            input.step = stepFor(prop);
+            input.value = current[n];
+            input.addEventListener('input', () => {
+              // Trim the float noise a range slider produces, and match
+              // what the server rounds to for its cache key.
+              current[n] = String(Math.round(Number(input.value) * 1e4) / 1e4);
+              val.textContent = current[n];
+              apply();
+            });
+            box.appendChild(input);
+            setters.push(() => {
+              current[n] = String(prop.default);
+              input.value = prop.default;
+              val.textContent = current[n];
+            });
+          } else if (prop.type === 'boolean') {
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.checked = current[n] === 'true';
+            input.addEventListener('change', () => {
+              current[n] = String(input.checked);
+              apply();
+            });
+            row.appendChild(input);
+            setters.push(() => {
+              current[n] = String(prop.default);
+              input.checked = prop.default === true;
+            });
+          } else {
+            // The only string param ezu declares is a colour.
+            const input = document.createElement('input');
+            input.type = 'color';
+            // <input type=color> speaks #rrggbb only; a document's
+            // default may carry alpha, which the picker would mangle, so
+            // feed it the opaque part and send back what it gives.
+            input.value = String(current[n]).slice(0, 7);
+            input.addEventListener('input', () => {
+              current[n] = input.value;
+              apply();
+            });
+            row.appendChild(input);
+            setters.push(() => {
+              current[n] = String(prop.default);
+              input.value = String(prop.default).slice(0, 7);
+            });
+          }
+          paramsPanel.appendChild(box);
+        }
+
+        reset.addEventListener('click', () => {
+          for (const set of setters) set();
+          apply();
+        });
+
+        // Seed only: `current` already holds whatever the URL carried, and
+        // the caller loads the map right after this — reloading here
+        // would fetch every tile twice on a shared link.
+        sync();
+      }
+
       // -- selection / map ------------------------------------------
       const ensureMap = (style) => {
         if (!map) {
@@ -826,13 +1117,33 @@
         }
       };
 
-      // -- tabs (Raster / Vector) -----------------------------------
+      // -- tabs (one per category present) --------------------------
       // The gallery holds every card; the active tab just filters which
       // are visible. Switching tabs never changes the map selection.
-      const tabBtns = document.querySelectorAll('#tabs .tab');
-      let activeTab = 'raster';
+      // Only categories the catalog actually served get a tab, in
+      // CATEGORY_ORDER, with anything unrecognised appended after — an
+      // empty tab would be a dead end, and a missing one would hide
+      // tilesets entirely.
+      const tabsEl = document.getElementById('tabs');
+      const present = new Set(tilesets.map(categoryOf));
+      const tabOrder = [
+        ...CATEGORY_ORDER.filter((c) => present.has(c)),
+        ...[...present].filter((c) => !CATEGORY_ORDER.includes(c)),
+      ];
+      const tabBtns = [];
+      for (const c of tabOrder) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'tab';
+        b.setAttribute('role', 'tab');
+        b.dataset.tab = c;
+        b.setAttribute('aria-selected', 'false');
+        b.textContent = categoryLabel(c);
+        b.addEventListener('click', () => applyTab(c));
+        tabsEl.appendChild(b);
+        tabBtns.push(b);
+      }
       const applyTab = (tab) => {
-        activeTab = tab;
         for (const b of tabBtns) {
           b.setAttribute('aria-selected', String(b.dataset.tab === tab));
         }
@@ -840,9 +1151,6 @@
           card.hidden = card.dataset.tab !== tab;
         }
       };
-      for (const b of tabBtns) {
-        b.addEventListener('click', () => applyTab(b.dataset.tab));
-      }
 
       const select = async (t) => {
         selected = t;
@@ -851,7 +1159,7 @@
         }
         // Make sure the tab holding the selected card is the active one,
         // so the card is visible (and scrollIntoView below can reach it).
-        applyTab(t.type === 'vector' ? 'vector' : 'raster');
+        applyTab(categoryOf(t));
 
         const u = new URL(location.href);
         u.searchParams.set('id', t.id);
@@ -862,10 +1170,13 @@
         copyXyz.disabled = false;
         cards.get(t.id)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 
-        // Raster: show served tiles, no inspector.
+        // Raster: show served tiles, no inspector. Params first — the
+        // panel owns `paramsQuery`, and building the map before it would
+        // request this style's tiles with the previous style's knobs.
         if (t.type !== 'vector') {
           teardownInspector();
-          ensureMap(rasterStyle(t.tilejson));
+          await setupParams(t);
+          ensureMap(rasterStyle(tileUrl(t)));
           updateCompare(t);
           return;
         }
@@ -873,16 +1184,17 @@
         // Vector: inspector when the TileJSON lists vector_layers,
         // otherwise fall back to a MapLibre style (protomaps ships
         // none of its own, so use the light theme).
+        await setupParams(t); // clears the panel: vector tilesets take none
         let tj = null;
         try {
-          tj = await fetch(t.tilejson).then((r) => r.json());
+          tj = await fetch(ours(t.tilejson)).then((r) => r.json());
         } catch (e) {}
         if (tj && Array.isArray(tj.vector_layers) && tj.vector_layers.length) {
           ensureMap(buildInspectorStyle(t, tj));
           setupInspector();
         } else {
           teardownInspector();
-          ensureMap(t.style || '/styles/protomaps-light/style.json');
+          ensureMap(ours(t.style) || '/styles/protomaps-light/style.json');
         }
         updateCompare(t);
       };
@@ -909,7 +1221,13 @@
 
       copyTilejson.addEventListener('click', async () => {
         if (!selected) return;
-        const url = new URL(selected.tilejson, location.href).toString();
+        // The catalog's URL, not this page's origin — plus whatever the
+        // params panel is showing, so the link reproduces the picture.
+        const url =
+          selected.tilejson +
+          (paramsQuery
+            ? (selected.tilejson.includes('?') ? '&' : '?') + paramsQuery
+            : '');
         await navigator.clipboard.writeText(url);
         flashCopied(copyTilejson);
       });
@@ -934,7 +1252,7 @@
         if (!selected) return;
         copyXyz.disabled = true;
         try {
-          const tj = await fetch(selected.tilejson).then((r) => r.json());
+          const tj = await fetch(tileUrl(selected)).then((r) => r.json());
           const xyz = tj.tiles && tj.tiles[0];
           if (!xyz) throw new Error('no tiles[] in TileJSON');
           await navigator.clipboard.writeText(xyz);

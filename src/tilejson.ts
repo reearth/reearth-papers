@@ -1,5 +1,10 @@
 // TileJSON 3.0.0 — https://github.com/mapbox/tilejson-spec/tree/master/3.0.0
 
+import {
+  PAINT_FORMATS,
+  type PaintStyle,
+  readParams,
+} from "./paint_styles.js";
 import { type Theme, themeName } from "./style.js";
 import {
   PROTOMAPS_ATTRIBUTION,
@@ -54,6 +59,40 @@ export function handleRasterTilejson(request: Request, theme: Theme): Response {
     // zoom z, so these are true 512px tiles — consumed as 256 they'd
     // show every label at half size.
     tileSize: 512,
+  });
+}
+
+// Paint styles (see paint_styles.ts). Same route shape as the themed
+// rasters, with two differences that come from what these are: the max
+// zoom is the style's own (a style reading terrain stops where that
+// source does), and any params the request carried ride into the
+// `tiles` template — so a client that copies this URL keeps the picture
+// it was looking at, knobs and all, rather than reverting to defaults.
+export function handlePaintTilejson(request: Request, style: PaintStyle): Response {
+  const url = new URL(request.url);
+  const q = url.searchParams.get("format");
+  const fmt = (PAINT_FORMATS as readonly string[]).includes(q ?? "")
+    ? q
+    : PAINT_FORMATS[0];
+  const params = readParams(style, url.searchParams);
+  const query = typeof params === "string" || !params.canonical
+    ? ""
+    : `?${params.canonical}`;
+  return json({
+    tilejson: "3.0.0",
+    name: `Re:Earth Papers — ${style.title}`,
+    description: style.description,
+    attribution: style.attribution,
+    scheme: "xyz",
+    tiles: [`${url.origin}/styles/${style.name}/tile/{z}/{x}/{y}.${fmt}${query}`],
+    minzoom: 0,
+    maxzoom: style.maxzoom,
+    bounds: BOUNDS,
+    center: CENTER,
+    // Same non-standard field the themed rasters carry, and for the same
+    // reason: MapLibre reads `tileSize` off a raster source's TileJSON,
+    // and these are rendered at the document's own canvas size.
+    tileSize: style.tileSize,
   });
 }
 

@@ -11,6 +11,12 @@
  *                                        — maplibre-native, comparison only
  *   /styles/{theme}/tilejson.json        — TileJSON for the above
  *   /styles/{theme}/style.json           — MapLibre style with that theme
+ *   /styles/{paint}/tile/{z}/{x}/{y}.{webp,png}
+ *                                        — paint style, rendered from a
+ *                                          document on the R2 shelf
+ *                                          (?<param>= per its schema)
+ *   /styles/{paint}/tilejson.json        — TileJSON for the above
+ *   /styles/{paint}/params.json          — JSON Schema of that style's params
  *   /{id}/{z}/{x}/{y}.{ext}              — tiles for every registered tileset
  *   /{id}/tilejson.json                  — TileJSON (?format= where multi-format)
  *   /{id}/style.json                     — MapLibre style (vector tilesets that ship cartography)
@@ -27,6 +33,11 @@
  * protomaps-{light,dark,white,black,grayscale} (stock Protomaps themes).
  * The old unprefixed stock ids (light, dark, ...) 301 to the prefixed
  * ones — see `LEGACY_THEMES` in style.ts.
+ * `{paint}` is whatever the R2 shelf currently holds (src/paint_styles.ts)
+ * — `paint-sumi`, `paint-wash`, … — so that set grows by publishing
+ * rather than by deploying. Paint styles have no `style.json`: an ezu
+ * document is a node graph, and there is no MapLibre style that means the
+ * same thing. `params.json` is what a client reads instead.
  * `{id}` and `{ext}` are data-driven from the central tileset registry
  * (src/tilesets.ts) — adding a dataset is one entry there; the tile
  * route, TileJSON route, and catalog entry all derive from it.
@@ -53,13 +64,22 @@ import { STYLE_VERSION } from "./cache.js";
 import { tileCjkFlavor } from "./cjk_flavor.js";
 import { handleCatalog } from "./catalog.js";
 import {
+  ezuRecipeVersion,
   ezuRenderStats,
   type EzuFormat,
-  EZU_RECIPE_VERSION,
   EZU_THEMES,
+  renderEzuStyleTile,
   renderEzuTile,
 } from "./ezu.js";
 import { handleFont } from "./fonts.js";
+import {
+  type PaintFormat,
+  type PaintStyle,
+  paintAsset,
+  paintDocument,
+  paintStyle,
+  readParams,
+} from "./paint_styles.js";
 import { readMirrorPointer } from "./pmtiles.js";
 import { serveRenderedTile } from "./render_cache.js";
 import { handleSprite } from "./sprites.js";
@@ -72,6 +92,7 @@ import {
   type Theme,
 } from "./style.js";
 import {
+  handlePaintTilejson,
   handleRasterTilejson,
   handleTilesetTilejson,
   RENDERED_RASTER_MAXZOOM,
@@ -112,6 +133,11 @@ const STYLE_TILE_RE =
 const STYLE_NATIVE_RE = /^\/styles\/([a-z-]+)\/native\/(\d+)\/(\d+)\/(\d+)\.png$/;
 const STYLE_TILEJSON_RE = /^\/styles\/([a-z-]+)\/tilejson\.json$/;
 const STYLE_STYLE_RE = /^\/styles\/([a-z-]+)\/style\.json$/;
+// Paint styles only: the params schema behind /styles/{name}/params.json.
+// This is the whole of what one publishes about itself — there is no
+// `style.json` for a paint style, an ezu document being a node graph with
+// no MapLibre style that means the same thing.
+const STYLE_PARAMS_RE = /^\/styles\/([a-z-]+)\/params\.json$/;
 // Tile + TileJSON + source-archive shapes for every registered
 // tileset, resolved against the central registry (src/tilesets.ts).
 const TILESET_TILE_RE = /^\/([a-z0-9_]+)\/(\d+)\/(\d+)\/(\d+)\.([a-z]+)$/;
@@ -195,7 +221,7 @@ async function dispatch(
   }
 
   if (url.pathname === "/catalog.json") {
-    return handleCatalog(request);
+    return handleCatalog(request, env);
   }
 
   // Registered tilesets (src/tilesets.ts) — TileJSON, then tiles.
@@ -272,19 +298,44 @@ async function dispatch(
   }
   const tilejson = url.pathname.match(STYLE_TILEJSON_RE);
   if (tilejson) {
-    const theme = requireTheme(tilejson[1]);
-    return theme instanceof Response ? theme : handleRasterTilejson(request, theme);
+    // Themes first, then the paint shelf: a bundled theme id can never
+    // be shadowed by something published to R2.
+    if (isTheme(tilejson[1])) return handleRasterTilejson(request, tilejson[1]);
+    const paint = await paintStyle(env, tilejson[1]);
+    if (paint) return handlePaintTilejson(request, paint);
+    return new Response(`unknown style: ${tilejson[1]}`, { status: 404 });
+  }
+  // The params a paint style declares, as JSON Schema — what a UI builds
+  // its sliders and colour pickers from. Derived metadata, not the
+  // document: it names the knobs and their ranges, and carries none of
+  // the cartography that produces the picture.
+  const paintParams = url.pathname.match(STYLE_PARAMS_RE);
+  if (paintParams) {
+    const style = await paintStyle(env, paintParams[1]);
+    if (style) {
+      return new Response(
+        JSON.stringify(style.params ?? { type: "object", properties: {} }),
+        {
+          headers: {
+            "content-type": "application/json",
+            "cache-control": "public, max-age=300",
+            "access-control-allow-origin": "*",
+          },
+        },
+      );
+    }
   }
   const ezu = url.pathname.match(STYLE_TILE_RE);
   if (ezu) {
-    return handleEzu(
-      request,
-      env,
-      ctx,
-      ezu[1],
-      { z: Number(ezu[2]), x: Number(ezu[3]), y: Number(ezu[4]) },
-      ezu[5] as EzuFormat,
-    );
+    const coords = { z: Number(ezu[2]), x: Number(ezu[3]), y: Number(ezu[4]) };
+    if (EZU_THEMES.has(ezu[1])) {
+      return handleEzu(request, env, ctx, ezu[1], coords, ezu[5] as EzuFormat);
+    }
+    const paint = await paintStyle(env, ezu[1]);
+    if (paint) {
+      return handlePaint(request, env, ctx, paint, coords, ezu[5] as PaintFormat);
+    }
+    return new Response(`unknown style: ${ezu[1]}`, { status: 404 });
   }
   const native = url.pathname.match(STYLE_NATIVE_RE);
   if (native) {
@@ -323,7 +374,7 @@ async function handleEzu(
   if (coords.z > RENDERED_RASTER_MAXZOOM) {
     return new Response("zoom above available range", { status: 404 });
   }
-  const version = STYLE_VERSION * 1000 + EZU_RECIPE_VERSION;
+  const version = STYLE_VERSION * 1000 + ezuRecipeVersion(theme);
   // Han variant selection, picked the same way the container path picks it
   // (src/cjk_flavor.ts) so the two renderers agree over the same ground.
   const cjk = tileCjkFlavor(coords) ?? null;
@@ -355,6 +406,74 @@ async function handleEzu(
   out.headers.set("x-ezu-heap", String(stats.heapBytes));
   out.headers.set("x-ezu-glyph", String(stats.glyphBytes));
   out.headers.set("x-ezu-store", `${stats.storeGlyphs}/${stats.storeBytes}`);
+  return out;
+}
+
+// One paint tile. Same two-layer cache as the themed rasters and the
+// same permit budget in the renderer, with two things of its own: the
+// document comes from R2 (keyed by its `rev`, which is what makes the
+// cache safe), and the request may carry params.
+async function handlePaint(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  style: PaintStyle,
+  coords: { z: number; x: number; y: number },
+  format: PaintFormat,
+): Promise<Response> {
+  // A style reading terrain stops where that source stops (see
+  // `PaintStyle.maxzoom`) — 404 rather than a tile with a flat DEM
+  // silently baked into it.
+  if (coords.z > style.maxzoom) {
+    return new Response("zoom above available range", { status: 404 });
+  }
+  const url = new URL(request.url);
+  const params = readParams(style, url.searchParams);
+  if (typeof params === "string") {
+    return new Response(params, {
+      status: 400,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+  }
+  // Same reasoning as the themed route: a render is only valid for the
+  // vector snapshot behind it, and these go out `immutable, max-age=1y`.
+  const { date } = await readMirrorPointer(env);
+  const version =
+    `${style.rev}-${date}-${style.sourceVersion}` +
+    (params.canonical ? `-${params.canonical}` : "");
+  const served = await serveRenderedTile(request, env, ctx, {
+    cacheKey:
+      `cache/paint/${style.name}/${style.rev}/${date}/${style.sourceVersion || "-"}` +
+      `/${params.canonical || "default"}/${coords.z}/${coords.x}/${coords.y}.${format}`,
+    cacheVersion: version,
+    contentType: format === "webp" ? "image/webp" : "image/png",
+    attribution: style.attribution,
+    // Paint renders are the expensive kind — brushes, noise fields and a
+    // padded canvas, seconds of WASM CPU rather than the fraction of one
+    // a themed tile costs — so they earn the global R2 layer outright.
+    persist: true,
+    render: async () =>
+      renderEzuStyleTile(
+        request,
+        env,
+        ctx,
+        {
+          // `rev` in the key, so a republished style builds a new
+          // renderer instead of a warm isolate serving the old document.
+          key: `paint:${style.name}:${style.rev}`,
+          doc: await paintDocument(env, style),
+          fetchAsset: (path) => paintAsset(env, style, path),
+        },
+        coords,
+        { format, ...(params.canonical ? { params: params.values } : {}) },
+      ),
+  });
+  const stats = ezuRenderStats();
+  const out = new Response(served.body, served);
+  out.headers.set("x-ezu-heap", String(stats.heapBytes));
+  // What the render actually applied, so a client can tell "the knob did
+  // nothing" from "the knob was never read".
+  out.headers.set("x-ezu-params", params.canonical || "default");
   return out;
 }
 

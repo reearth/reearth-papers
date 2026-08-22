@@ -70,8 +70,42 @@ export const EZU_THEMES = new Set(Object.keys(RECIPES));
  *  one moves every theme, not just papers: the stock road casings no
  *  longer double at z12, so their z12 tiles change too — subtly, and in
  *  the direction of what gl-js draws. Without a bump the old renders sit
- *  in the cache next to the new ones. */
-export const EZU_RECIPE_VERSION = 5;
+ *  in the cache next to the new ones.
+ *
+ *  Per theme, not global, since ezu 0.7.0: a renderer upgrade moves the
+ *  themes it touches and leaves the rest alone, and bumping all seven
+ *  for a change that reaches two throws away renders that are still
+ *  correct. `ezu check` says which: it reports the padding a recipe's
+ *  graph needs, and 0.7.0 renders with that instead of the declared
+ *  `pad` (reearth/ezu b8be479).
+ *
+ *  6 (protomaps-* only) is that upgrade. Those recipes declare `pad: 16`
+ *  and need 128, so their labels no longer lose the part that overhangs
+ *  a tile edge — the seams change, in the direction of what gl-js draws.
+ *  The papers house styles need 0, so their pixels are identical and
+ *  their namespace stays at 5. */
+const RECIPE_VERSIONS: Record<string, number> = {
+  "papers-light": 5,
+  "papers-dark": 5,
+  "protomaps-light": 6,
+  "protomaps-dark": 6,
+  "protomaps-white": 6,
+  "protomaps-black": 6,
+  "protomaps-grayscale": 6,
+};
+
+/** Cache namespace for one theme's renders. Unknown themes get the
+ *  highest version in play rather than a default that could collide
+ *  with a namespace already holding tiles. */
+export function ezuRecipeVersion(theme: string): number {
+  return RECIPE_VERSIONS[theme] ?? Math.max(...Object.values(RECIPE_VERSIONS));
+}
+
+/** Version of the glyph-seed object format (src/glyphs.ts serialization),
+ *  which a recipe re-bake does not change. Held apart from the per-theme
+ *  numbers above so bumping a theme doesn't throw away the seed every
+ *  cold isolate reads. */
+const GLYPH_SEED_VERSION = 5;
 
 /** The protomaps vector source carries data through z15. Deeper tiles are
  *  rendered by reprojecting that z15 ancestor (ezu >= 0.6.0's
@@ -79,11 +113,46 @@ export const EZU_RECIPE_VERSION = 5;
  *  the route serves the full raster range rather than stopping here. */
 export const EZU_MAXZOOM = 15;
 
+/** A DEM source the document reads, with the offsets it asks for.
+ *
+ *  Terrain is fetched by URL rather than through a handler of ours: the
+ *  documents point at our terrain service, which serves the world as
+ *  ordinary XYZ tiles, and re-plumbing that through the worker would buy
+ *  nothing. The host is checked against `DEM_HOSTS` all the same — a
+ *  document is data, and data that names a host must not be able to
+ *  aim this worker at an arbitrary one. */
+interface DemSource {
+  name: string;
+  /** `{z}/{x}/{y}` template, as declared. */
+  url: string;
+  /** Offsets the document asks for beyond the centre tile. Edge-continuous
+   *  hillshade reads the full 3x3, which is nine fetches per tile. */
+  offsets: [number, number][];
+}
+
+/** A document-scoped asset: a MyPaint brush or an image the document
+ *  loads with `"src": "file:..."`. Bound once per renderer — these live
+ *  in a persistent bank that `clearSources` does not touch. */
+interface AssetSource {
+  name: string;
+  /** Path relative to the style's asset root (the `file:` prefix gone). */
+  path: string;
+}
+
 interface EzuState {
   renderer: InstanceType<typeof Renderer>;
   mvtSource: string;
   /** Offsets the recipe wants beyond the centre tile. */
   neighborOffsets: [number, number][];
+  /** DEM sources the recipe reads, empty for the themed rasters. */
+  demSources: DemSource[];
+  /** Brushes / images the recipe loads, empty for the themed rasters. */
+  assetSources: AssetSource[];
+  /** Resolves `assetSources` for this style. Absent where the style has
+   *  none (the bundled themes). */
+  fetchAsset: ((path: string) => Promise<Uint8Array | null>) | null;
+  /** Bound once, like the sprite: null until the first render asks. */
+  assetsReady: Promise<void> | null;
   /** glyphs source name → percent-encoded fontstack for /fonts. */
   glyphStacks: Map<string, string>;
   sprite: { name: string; image: string; index: string } | null;
@@ -177,7 +246,7 @@ const GLYPH_BUDGET_BYTES = 4 * 1024 * 1024;
 // (last write wins, and they are writing near-identical sets), a miss just
 // means the blocks get fetched as before, and the key is versioned so a
 // format change orphans the old object instead of misreading it.
-const GLYPH_SEED_KEY = `cache/ezu-glyphs/v${EZU_RECIPE_VERSION}.pbf`;
+const GLYPH_SEED_KEY = `cache/ezu-glyphs/v${GLYPH_SEED_VERSION}.pbf`;
 /** Don't rewrite the seed for every handful of new glyphs. */
 const GLYPH_SEED_REWRITE_RATIO = 1.25;
 /** Ceiling on the seed object. Every cold isolate reads it, so it is held
@@ -297,15 +366,30 @@ function stateKey(theme: string, flavor: CjkFlavor | null): string {
   return flavor ? `${theme}:${flavor}` : theme;
 }
 
-function ensureState(theme: string, flavor: CjkFlavor | null): EzuState {
-  const key = stateKey(theme, flavor);
+/** One style to render: the document, the cache key that identifies it,
+ *  and (for paint styles) how to read the assets it loads.
+ *
+ *  The bundled themes and the paint styles from R2 differ only in where
+ *  the document came from, so they share one renderer pool, one permit
+ *  budget and one eviction policy — a paint tile and a basemap tile
+ *  compete for the same isolate memory, which is the truth of it. */
+export interface EzuStyle {
+  /** Renderer state key. Must change whenever the document does — the
+   *  themes use theme + CJK flavor, the paint styles their content
+   *  `rev` — or a warm isolate keeps rendering the old document. */
+  key: string;
+  doc: Record<string, unknown>;
+  fetchAsset?: (path: string) => Promise<Uint8Array | null>;
+}
+
+function ensureState(style: EzuStyle): EzuState {
+  const key = style.key;
   let st = states.get(key);
   if (st) {
     st.lastUsed = ++useCounter;
     return st;
   }
-  const recipe = recipeFor(theme, flavor);
-  if (!recipe) throw new Error(`no ezu recipe for theme ${theme}`);
+  const recipe = style.doc;
   console.log(`ezu: init ${key} (simd: ${simdEnabled()})`);
   const renderer = new Renderer(JSON.stringify(recipe));
   // Per-fontstack ceiling on the glyph bank. Safe to set low only because
@@ -320,6 +404,12 @@ function ensureState(theme: string, flavor: CjkFlavor | null): EzuState {
   const glyphStacks = new Map<string, string>();
   const glyphFontstacks = new Map<string, string>();
   let sprite: EzuState["sprite"] = null;
+  const demSources: DemSource[] = [];
+  const assetSources: AssetSource[] = [];
+  // Every source kind the documents we serve declare. `raster` and
+  // `geojson` are ezu features nothing here uses yet; they would be
+  // bound the same way DEM is, so they fall through to the warning
+  // rather than being silently treated as absent.
   for (const [name, decl] of Object.entries(sources)) {
     if (decl.type === "mvt") mvtSource = name;
     else if (decl.type === "glyphs") {
@@ -328,16 +418,34 @@ function ensureState(theme: string, flavor: CjkFlavor | null): EzuState {
       glyphFontstacks.set(name, fontstack);
     } else if (decl.type === "sprite") {
       sprite = { name, image: String(decl.image), index: String(decl.index) };
+    } else if (decl.type === "dem") {
+      demSources.push({ name, url: String(decl.url ?? ""), offsets: [] });
+    } else if (decl.type === "brush" || decl.type === "image") {
+      const src = String(decl.src ?? "");
+      assetSources.push({ name, path: src.replace(/^file:/, "") });
+    } else {
+      console.warn(`ezu: ${key} declares unsupported source type ${decl.type}`);
     }
   }
-  if (!mvtSource) throw new Error(`recipe ${theme} has no mvt source`);
+  if (!mvtSource) throw new Error(`recipe ${key} has no mvt source`);
   const neighborOffsets = (
     renderer.requestedNeighborOffsets(mvtSource) as [number, number][]
   ).filter(([dx, dy]) => dx !== 0 || dy !== 0);
+  // Asked per source: a document may read neighbour DEM for a shaded
+  // relief and only the centre MVT, or the other way round.
+  for (const dem of demSources) {
+    dem.offsets = (
+      renderer.requestedNeighborOffsets(dem.name) as [number, number][]
+    ).filter(([dx, dy]) => dx !== 0 || dy !== 0);
+  }
   st = {
     renderer,
     mvtSource,
     neighborOffsets,
+    demSources,
+    assetSources,
+    fetchAsset: style.fetchAsset ?? null,
+    assetsReady: null,
     glyphStacks,
     sprite,
     spriteReady: null,
@@ -414,6 +522,90 @@ async function fetchMvt(
   if (res.status !== 200) return null;
   const buf = new Uint8Array(await res.arrayBuffer());
   return buf.length ? buf : null;
+}
+
+/** Hosts a document may name as a DEM source.
+ *
+ *  A style document is data we load at runtime, so the URL in it decides
+ *  where this worker sends a request — and that decision has to be ours,
+ *  not the document's. Only our own terrain service is listed; a
+ *  document naming anything else renders without its terrain and says so
+ *  in the log, which is a visible flat hillshade rather than a worker
+ *  fetching wherever it is pointed. */
+const DEM_HOSTS = new Set(["terrain.reearth.land"]);
+
+/** One DEM tile, from the URL template the document declares.
+ *
+ *  The tiles are big (~380KB at terrarium/webp) and a 3x3 window is nine
+ *  of them, but adjacent renders overlap by six, so the edge cache does
+ *  most of the work — hence `cacheEverything`, which puts a response the
+ *  origin already marks cacheable into the PoP's cache under our own
+ *  TTL rather than relying on the default heuristics. */
+async function fetchDem(
+  url: string,
+  z: number,
+  x: number,
+  y: number,
+): Promise<Uint8Array | null> {
+  const n = 2 ** z;
+  if (y < 0 || y >= n) return null;
+  const wx = ((x % n) + n) % n;
+  const target = url
+    .replace("{z}", String(z))
+    .replace("{x}", String(wx))
+    .replace("{y}", String(y));
+  let host: string;
+  try {
+    host = new URL(target).host;
+  } catch {
+    console.warn(`ezu: dem url not a url: ${url}`);
+    return null;
+  }
+  if (!DEM_HOSTS.has(host)) {
+    console.warn(`ezu: dem host not allowed: ${host}`);
+    return null;
+  }
+  const res = await fetch(target, {
+    cf: { cacheEverything: true, cacheTtl: 86400 },
+  });
+  if (!res.ok) return null;
+  const buf = new Uint8Array(await res.arrayBuffer());
+  return buf.length ? buf : null;
+}
+
+/** Bind the document's brushes and images once per renderer.
+ *
+ *  They live in a persistent bank — `clearSources` does not touch them —
+ *  so this runs on the first render of an isolate's renderer and never
+ *  again. A missing asset is logged and skipped: ezu draws the strokes
+ *  that asked for it with its fallback rather than failing the tile, and
+ *  a style whose brush is genuinely gone is a publish problem, visible
+ *  in the pixels. */
+async function ensureAssets(st: EzuState): Promise<void> {
+  if (!st.assetSources.length || !st.fetchAsset) return;
+  st.assetsReady ??= (async () => {
+    const fetchAsset = st.fetchAsset!;
+    const loaded = await Promise.all(
+      st.assetSources.map(async (a) => ({ a, bytes: await fetchAsset(a.path) })),
+    );
+    for (const { a, bytes } of loaded) {
+      if (!bytes) {
+        console.warn(`ezu: asset missing ${a.path}`);
+        continue;
+      }
+      try {
+        st.renderer.bindSource(a.name, bytes);
+      } catch (e) {
+        console.warn(`ezu: asset bind ${a.name}: ${String(e)}`);
+      }
+    }
+  })();
+  try {
+    await st.assetsReady;
+  } catch (e) {
+    st.assetsReady = null; // allow a retry on the next tile
+    throw e;
+  }
 }
 
 /** Fetch a sprite asset through our own mirror where the recipe points at
@@ -566,8 +758,18 @@ async function ensureGlyphs(
  *  30-48ms, and it is ~17% smaller on the wire than that PNG. */
 export type EzuFormat = "png" | "webp";
 
-/** Render one tile with ezu. Returns the encoded image bytes. */
-export async function renderEzuTile(
+/** One tile's render request. `params` reaches the document's declared
+ *  `params` (ezu >= 0.7.0 validates them against those declarations and
+ *  throws `InvalidStyle` on a name or range the document doesn't allow),
+ *  so a caller passes what the client asked for and lets the renderer
+ *  be the judge of it. */
+export interface EzuRenderOptions {
+  format: EzuFormat;
+  params?: Record<string, string>;
+}
+
+/** Render one tile of a bundled theme. Returns the encoded image bytes. */
+export function renderEzuTile(
   request: Request,
   env: Env,
   ctx: ExecutionContext,
@@ -576,12 +778,34 @@ export async function renderEzuTile(
   format: EzuFormat,
   flavor: CjkFlavor | null,
 ): Promise<Uint8Array | null> {
+  const recipe = recipeFor(theme, flavor);
+  if (!recipe) throw new Error(`no ezu recipe for theme ${theme}`);
+  return renderEzuStyleTile(
+    request,
+    env,
+    ctx,
+    { key: stateKey(theme, flavor), doc: recipe as Record<string, unknown> },
+    coords,
+    { format },
+  );
+}
+
+/** Render one tile of any ezu document — a bundled theme or a paint
+ *  style read from R2. Returns the encoded image bytes. */
+export async function renderEzuStyleTile(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  style: EzuStyle,
+  coords: { z: number; x: number; y: number },
+  opts: EzuRenderOptions,
+): Promise<Uint8Array | null> {
   // Taken before the first buffer is allocated, not just around the WASM
   // call: what has to stay bounded is how much tile data is resident at
   // once, and a request queued here holds nothing.
   await acquireRenderPermit();
   try {
-    return await renderEzuTileInner(request, env, ctx, theme, coords, format, flavor);
+    return await renderEzuTileInner(request, env, ctx, style, coords, opts);
   } finally {
     releaseRenderPermit();
   }
@@ -591,15 +815,14 @@ async function renderEzuTileInner(
   request: Request,
   env: Env,
   ctx: ExecutionContext,
-  theme: string,
+  style: EzuStyle,
   coords: { z: number; x: number; y: number },
-  format: EzuFormat,
-  flavor: CjkFlavor | null,
+  opts: EzuRenderOptions,
 ): Promise<Uint8Array | null> {
-  const st = ensureState(theme, flavor);
+  const st = ensureState(style);
   st.inFlight++;
   try {
-    return await renderWithState(request, env, ctx, theme, st, coords, format);
+    return await renderWithState(request, env, ctx, style.key, st, coords, opts);
   } finally {
     st.inFlight--;
     if (st.disposed && st.inFlight === 0) freeState(st);
@@ -613,9 +836,10 @@ async function renderWithState(
   theme: string,
   st: EzuState,
   coords: { z: number; x: number; y: number },
-  format: EzuFormat,
+  opts: EzuRenderOptions,
 ): Promise<Uint8Array | null> {
   await ensureSprite(request, env, ctx, st);
+  await ensureAssets(st);
 
   // Past the vector source's own maxzoom there is no tile to fetch, so
   // each position resolves to its ancestor there and ezu reprojects it
@@ -648,6 +872,23 @@ async function renderWithState(
     bytes: byAncestor.get(`${w.at.z}/${w.at.x}/${w.at.y}`) ?? null,
   }));
 
+  // DEM, at the rendered zoom exactly. There is no ancestor path here
+  // the way there is for MVT: `bindSource` reprojects vector bytes from
+  // a shallower zoom but not raster ones, so a style that reads terrain
+  // can only be served as deep as its DEM source goes — which is why the
+  // route caps those styles at the source's maxzoom (see
+  // `PaintStyle.maxzoom`) instead of asking for a tile that isn't there.
+  const dems = await Promise.all(
+    st.demSources.flatMap((dem) =>
+      [[0, 0] as [number, number], ...dem.offsets].map(async ([dx, dy]) => ({
+        name: dem.name,
+        dx,
+        dy,
+        bytes: await fetchDem(dem.url, coords.z, coords.x + dx, coords.y + dy),
+      })),
+    ),
+  );
+
   const run = st.lock.then(async () => {
     st.renderer.clearSources();
     for (const m of mvts) {
@@ -661,8 +902,17 @@ async function renderWithState(
         sourceZoom: m.sourceZoom,
       });
     }
+    for (const d of dems) {
+      if (!d.bytes) continue;
+      st.renderer.bindSource(d.name, d.bytes, {
+        ...(d.dx || d.dy ? { coord: [d.dx, d.dy] } : {}),
+      });
+    }
     await ensureGlyphs(request, env, ctx, st);
-    const encoded = st.renderer.renderTile(coords.z, coords.x, coords.y, { format });
+    const encoded = st.renderer.renderTile(coords.z, coords.x, coords.y, {
+      format: opts.format,
+      ...(opts.params ? { params: opts.params } : {}),
+    });
     const mu = st.renderer.memoryUsage() as { heapBytes?: number; glyphBytes?: number };
     lastHeapBytes = mu.heapBytes ?? 0;
     lastGlyphBytes = mu.glyphBytes ?? 0;

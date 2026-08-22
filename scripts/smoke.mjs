@@ -58,10 +58,10 @@ function lonLatToTile(lon, lat, z) {
   return { x: Math.min(n - 1, Math.max(0, x)), y: Math.min(n - 1, Math.max(0, y)) };
 }
 
-function randomRenderTile() {
+function randomRenderTile(z = RENDER_Z) {
   const lon = RENDER_BOX.west + Math.random() * (RENDER_BOX.east - RENDER_BOX.west);
   const lat = RENDER_BOX.south + Math.random() * (RENDER_BOX.north - RENDER_BOX.south);
-  return { z: RENDER_Z, ...lonLatToTile(lon, lat, RENDER_Z) };
+  return { z, ...lonLatToTile(lon, lat, z) };
 }
 
 /** Fetch with a timeout and one retry — cold containers legitimately
@@ -200,6 +200,40 @@ for (const t of tilesets) {
           `${t.id} tile (fresh render ${r.z}/${r.x}/${r.y})`,
           `${fill(tpl, r)}?${RUN}`,
           { expectPng: true },
+        );
+        return;
+      }
+
+      // Paint styles (src/paint_styles.ts): rendered like the themes, but
+      // from a document on the R2 shelf rather than a bundled recipe — so
+      // the thing to prove is that the shelf is readable and the document
+      // still builds. Same cached/fresh pair as the themes, plus the
+      // params schema a client generates its UI from.
+      //
+      // And one negative: a paint style has no `style.json`, and that is
+      // part of its contract rather than a gap to fill in later. A route
+      // that starts answering there is a regression, so assert it does
+      // not.
+      if (t.params) {
+        await checkJson(`${t.id} params.json`, t.params);
+        const none = await get(`${BASE}/styles/${t.id}/style.json`, { tries: 1 });
+        if (none.status === 200) {
+          fail(`${t.id} style.json`, "answered; a paint style has no MapLibre style");
+        } else {
+          ok(`${t.id} style.json absent (HTTP ${none.status})`);
+        }
+        // These are rendered at the document's own canvas size, so only
+        // assert dimensions where the TileJSON says 512 — the check
+        // itself is hardcoded to that.
+        const sized = { expectPng: (tj.tileSize ?? 512) === 512 };
+        await checkTile(`${t.id} tile (cached path)`, fill(tpl, TOKYO), sized);
+        // Fresh render at a zoom this style can actually serve — one
+        // reading terrain stops at that source's maxzoom.
+        const r = randomRenderTile(Math.min(RENDER_Z, tj.maxzoom ?? RENDER_Z));
+        await checkTile(
+          `${t.id} tile (fresh render ${r.z}/${r.x}/${r.y})`,
+          `${fill(tpl, r)}?${RUN}`,
+          sized,
         );
         return;
       }
