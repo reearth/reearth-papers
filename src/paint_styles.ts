@@ -53,19 +53,17 @@ export interface PaintStyle {
   attribution: string;
   /** `tile-size` the document declares (or ezu's 512 default). */
   tileSize: number;
-  /** Deepest zoom this style renders. Not a property of the cartography
-   *  but of what it reads: a style sampling the terrain DEM cannot go
-   *  past that source's own maxzoom, because ezu 0.7.0 reprojects a
-   *  shallower ancestor for MVT (`sourceZoom`) and not for DEM. It is
-   *  worked out at publish time from the source's own TileJSON; the route
-   *  serves 404 above it rather than a tile drawn from nothing.
+  /** Deepest zoom this style renders; the route answers 404 above it.
    *
-   *  Upstream is lifting that (reearth/ezu 536e852, unreleased):
-   *  `Renderer.sourceTile(name, z, x, y)` answers with the tile to fetch
-   *  for any source, ancestor included, and DEM bytes then bind with a
-   *  `sourceZoom` like vector ones. When that lands, this side asks the
-   *  renderer instead and the field — a second copy of a number the
-   *  document already states — goes away. */
+   *  Not a property of the cartography, and — since ezu 0.8.0 reprojects
+   *  a DEM from its ancestor the way it always did for vector tiles — no
+   *  longer a property of what the style samples either. What sets it
+   *  today is a renderer bug: past a zoom that varies by style, the wasm
+   *  build panics inside the noise crate, so the shelf advertises a depth
+   *  every style survives. Clients stretch the last tile past it.
+   *
+   *  It travels with the style rather than being a constant here, so
+   *  raising it when the renderer is fixed is a republish. */
   maxzoom: number;
   /** JSON Schema for the document's `params` (ezu's own
    *  `Document::params_schema`), or null where it declares none. */

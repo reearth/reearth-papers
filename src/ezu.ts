@@ -872,22 +872,51 @@ async function renderWithState(
     bytes: byAncestor.get(`${w.at.z}/${w.at.x}/${w.at.y}`) ?? null,
   }));
 
-  // DEM, at the rendered zoom exactly. There is no ancestor path here
-  // the way there is for MVT: `bindSource` reprojects vector bytes from
-  // a shallower zoom but not raster ones, so a style that reads terrain
-  // can only be served as deep as its DEM source goes — which is why the
-  // route caps those styles at the source's maxzoom (see
-  // `PaintStyle.maxzoom`) instead of asking for a tile that isn't there.
-  const dems = await Promise.all(
-    st.demSources.flatMap((dem) =>
-      [[0, 0] as [number, number], ...dem.offsets].map(async ([dx, dy]) => ({
-        name: dem.name,
-        dx,
-        dy,
-        bytes: await fetchDem(dem.url, coords.z, coords.x + dx, coords.y + dy),
-      })),
-    ),
+  // DEM, through the renderer's own answer to "which tile do I fetch for
+  // this one" (ezu >= 0.8.0). Past a source's declared `max-zoom` that is
+  // the covering ancestor, which then binds with `sourceZoom` and gets
+  // reprojected exactly as an overzoomed MVT does — so a style that
+  // shades terrain is no longer capped at the terrain's own depth.
+  //
+  // Asking the renderer rather than reading `max-zoom` here is the point:
+  // the ceiling is declared once, in the document, and a host that keeps
+  // its own copy is a host whose copy goes stale.
+  //
+  // Deduplicated per resolved tile, for the same reason the MVT window is:
+  // deep enough and the whole 3x3 collapses onto one or two ancestors.
+  const demWanted = st.demSources.flatMap((dem) =>
+    [[0, 0] as [number, number], ...dem.offsets].map(([dx, dy]) => ({
+      dem,
+      dx,
+      dy,
+      at: st.renderer.sourceTile(
+        dem.name,
+        coords.z,
+        coords.x + dx,
+        coords.y + dy,
+      ) as { z: number; x: number; y: number },
+    })),
   );
+  const demFetches = new Map<string, Promise<Uint8Array | null>>();
+  for (const w of demWanted) {
+    const key = `${w.dem.name}/${w.at.z}/${w.at.x}/${w.at.y}`;
+    if (!demFetches.has(key)) {
+      demFetches.set(key, fetchDem(w.dem.url, w.at.z, w.at.x, w.at.y));
+    }
+  }
+  const demBytes = new Map<string, Uint8Array | null>();
+  await Promise.all(
+    [...demFetches].map(async ([key, p]) => {
+      demBytes.set(key, await p);
+    }),
+  );
+  const dems = demWanted.map((w) => ({
+    name: w.dem.name,
+    dx: w.dx,
+    dy: w.dy,
+    sourceZoom: w.at.z,
+    bytes: demBytes.get(`${w.dem.name}/${w.at.z}/${w.at.x}/${w.at.y}`) ?? null,
+  }));
 
   const run = st.lock.then(async () => {
     st.renderer.clearSources();
@@ -906,6 +935,9 @@ async function renderWithState(
       if (!d.bytes) continue;
       st.renderer.bindSource(d.name, d.bytes, {
         ...(d.dx || d.dy ? { coord: [d.dx, d.dy] } : {}),
+        // The zoom of the tile that was actually fetched — equal to the
+        // rendered zoom below the source's ceiling, shallower above it.
+        sourceZoom: d.sourceZoom,
       });
     }
     await ensureGlyphs(request, env, ctx, st);
