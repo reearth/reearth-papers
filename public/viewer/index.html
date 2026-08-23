@@ -314,6 +314,94 @@
       color: var(--accent);
     }
 
+    /* -- help modal --------------------------------------------------- */
+    #help-modal {
+      width: min(560px, calc(100vw - 32px));
+      max-height: calc(100vh - 64px);
+      padding: 0;
+      /* The body scrolls, not the dialog, so the title bar stays put. */
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--paper-edge);
+      border-radius: 10px;
+      background: var(--card);
+      color: var(--ink);
+      box-shadow: 0 8px 32px rgba(31,28,23,.25);
+    }
+    #help-modal[open] { display: flex; }
+    #help-modal:not([open]) { display: none; }
+    #help-modal::backdrop { background: rgba(31,28,23,.35); }
+    #help-modal header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 13px 18px 11px;
+      border-bottom: 1px solid var(--paper-edge);
+    }
+    #help-modal h2 {
+      margin: 0;
+      font: 600 16px/1.2 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+    }
+    #help-close {
+      font: 400 20px/1 system-ui, sans-serif;
+      color: var(--ink-soft);
+      background: none;
+      border: none;
+      padding: 0 2px;
+      cursor: pointer;
+    }
+    #help-close:hover { color: var(--ink); }
+    #help-modal .body {
+      padding: 14px 18px 18px;
+      overflow-y: auto;
+    }
+    #help-modal h3 {
+      margin: 18px 0 6px;
+      font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    #help-modal h3:first-child { margin-top: 0; }
+    #help-modal p { margin: 0 0 10px; font-size: 12.5px; }
+    #help-modal ul { margin: 0 0 10px; padding-left: 18px; font-size: 12.5px; }
+    #help-modal li { margin-bottom: 5px; }
+    #help-modal a { color: var(--accent); }
+    #help-modal code {
+      font: 11.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--accent);
+    }
+    #help-modal .note { font-size: 11.5px; color: var(--ink-soft); }
+    #help-modal .codeblock { position: relative; margin: 0 0 10px; }
+    #help-modal pre {
+      margin: 0;
+      /* Right padding keeps the text clear of the parked copy button. */
+      padding: 10px 62px 10px 12px;
+      border: 1px dashed #c9c2b2;
+      border-radius: 6px;
+      background: var(--paper);
+      font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      /* Code scrolls rather than wraps: a wrapped URL reads as two lines
+         you can't paste. */
+      white-space: pre;
+      overflow-x: auto;
+    }
+    #help-modal .copy {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      font: inherit;
+      font-size: 11px;
+      padding: 2px 8px;
+      border: 1px solid #c9c2b2;
+      background: var(--card);
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #help-modal .copy:hover { background: #f3efe6; }
+    #help-modal .copy.copied { background: #e4f3df; border-color: #8fbf80; }
+
     /* -- vector inspector (layer panel + attribute popup) ------------- */
     #layers {
       position: absolute;
@@ -496,6 +584,7 @@
     <div id="actions">
       <button id="copy-tilejson" disabled type="button">Copy TileJSON URL</button>
       <button id="copy-xyz" disabled type="button">Copy XYZ URL</button>
+      <button id="open-help" type="button">Help</button>
     </div>
   </aside>
   <div id="map"></div>
@@ -521,6 +610,149 @@
         <button type="button" id="attr-copy" class="primary">Copy attribution HTML</button>
         <button type="button" id="attr-close">Close</button>
       </div>
+    </div>
+  </dialog>
+  <!-- Help: what the service is, how to point a client at it, and the
+       policy it runs under. Opened from the panel; never auto-opened —
+       most visitors arrive knowing what they came for. -->
+  <dialog id="help-modal" aria-labelledby="help-title">
+    <header>
+      <h2 id="help-title">About Re:Earth Papers</h2>
+      <button type="button" id="help-close" aria-label="Close">&times;</button>
+    </header>
+    <div class="body">
+      <p>
+        Re:Earth Papers is an open tile service: the Protomaps basemap —
+        Protomaps' daily vector build of OpenStreetMap — rendered here
+        into a curated set of raster styles, plus a growing shelf of
+        global basemaps and thematic layers (Natural Earth, Overture,
+        NASA, ESA, Stamen) served from the edge. Everything you see in
+        this preview is a live endpoint — point any map client at it.
+      </p>
+
+      <h3>Endpoints</h3>
+      <ul>
+        <li><code>/catalog.json</code> — machine-readable index of every tileset.</li>
+        <li><code>/{id}/tilejson.json</code> — TileJSON 3.0.0, attribution included.</li>
+        <li><code>/{id}/{z}/{x}/{y}.{ext}</code> — XYZ tiles.</li>
+        <li><code>/styles/{theme}/tilejson.json</code> — a rendered basemap theme, e.g. <code>papers-light</code>.</li>
+      </ul>
+      <p class="note">
+        Pick a tileset on the left and the Copy buttons hand you its exact
+        URLs. Every response is CORS-open.
+      </p>
+
+      <h3>Reading the gallery</h3>
+      <p>
+        Every card is tagged with what a client gets — <code>raster</code>
+        or <code>vector</code> — and, where it applies, a suffix for where
+        the bytes come from. Vector tilesets have no picture to preview,
+        so their thumbnail shows <code>MVT</code> instead. Four
+        arrangements sit behind those tags:
+      </p>
+      <ul>
+        <li>
+          <strong>Rendered on demand</strong> (<code>raster</code>) — the
+          basemap themes and the paint styles. Nothing is stored per
+          theme: each tile is drawn in the Worker from the mirrored vector
+          data when you ask for it, then cached.
+        </li>
+        <li>
+          <strong>Served from our mirror</strong> (<code>raster</code>,
+          <code>vector</code>) — the datasets we copy into R2 as a COG or
+          PMTiles archive. Fastest, and the archive itself is downloadable.
+        </li>
+        <li>
+          <strong>Proxied</strong> (<code>·px</code>) — we serve the bytes
+          but mirror nothing: the Worker range-reads a remote archive on
+          demand. Overture works this way, so its tiles inherit whatever
+          the upstream release is doing.
+        </li>
+        <li>
+          <strong>Passthrough</strong> (<code>·pt</code>) — the TileJSON
+          points straight at the provider (NASA GIBS, EOX), so your client
+          fetches those tiles from them, not from us. We supply the
+          TileJSON and its attribution; availability is theirs.
+        </li>
+      </ul>
+      <p class="note">
+        Hover a badge to see the same thing spelled out.
+      </p>
+
+      <h3>Sample code (MapLibre)</h3>
+      <div class="codeblock">
+        <pre id="help-sample">import maplibregl from "maplibre-gl";
+
+const map = new maplibregl.Map({
+  container: "map",
+  center: [139.767, 35.681],
+  zoom: 11,
+  style: {
+    version: 8,
+    sources: {
+      papers: {
+        type: "raster",
+        // Any tilejson.json from /catalog.json works here.
+        url: "https://papers.reearth.land/styles/papers-light/tilejson.json",
+      },
+    },
+    layers: [{ id: "papers", type: "raster", source: "papers" }],
+  },
+});</pre>
+        <button class="copy" data-target="help-sample" type="button">Copy</button>
+      </div>
+
+      <h3>Attribution (required)</h3>
+      <p>
+        Each tileset carries its required credit in the
+        <code>attribution</code> field of its TileJSON or style, and most
+        clients render that automatically — which is why a TileJSON URL is
+        the better thing to hand your map. A raw XYZ URL carries no such
+        metadata, so if you use one, display the attribution for each
+        tileset you use; Copy XYZ URL shows you the exact text. The
+        <a href="https://github.com/reearth/reearth-papers#readme" target="_blank" rel="noopener noreferrer">README</a>
+        lists the license behind every tileset.
+      </p>
+
+      <h3>Operating policy</h3>
+      <ul>
+        <li>
+          This is a best-effort community service with no SLA or uptime
+          guarantee. Use at your own risk, and please don't put production
+          traffic on it without hosting your own mirror.
+        </li>
+        <li>
+          It's a shared endpoint, so please be gentle: no bulk crawling or
+          pre-seeding of whole zoom levels. For work at that scale, take
+          the single-file archives instead —
+          <code>/{id}.tif</code> and <code>/{id}.pmtiles</code> support
+          HTTP Range, so GDAL, QGIS and PMTiles clients can read them
+          directly.
+        </li>
+        <li>
+          The cartography is still moving. Styles get retuned and renders
+          are re-versioned, so the same tile URL can return a different
+          picture without notice. Pin your own copy if you need the image
+          to stay put.
+        </li>
+        <li>
+          The Protomaps basemap is re-mirrored monthly, so the map follows
+          OpenStreetMap with roughly that lag; the other datasets are
+          frozen snapshots of their published releases.
+        </li>
+      </ul>
+
+      <h3>Operator</h3>
+      <p>
+        Operated by
+        <a href="https://eukarya.io/" target="_blank" rel="noopener noreferrer">Eukarya Inc.</a>
+        as part of the
+        <a href="https://reearth.io/" target="_blank" rel="noopener noreferrer">Re:Earth</a>
+        ecosystem. Source, architecture notes and the full tileset table
+        live in the
+        <a href="https://github.com/reearth/reearth-papers" target="_blank" rel="noopener noreferrer">repository</a>;
+        bugs and requests are welcome as issues there.
+      </p>
     </div>
   </dialog>
   <script src="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"></script>
@@ -694,6 +926,36 @@
       t.category || (t.type === 'vector' ? 'vector' : 'imagery');
 
     const categoryLabel = (c) => CATEGORY_LABELS[c] || c;
+
+    function flashCopied(btn) {
+      btn.classList.add('copied');
+      const orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => {
+        btn.classList.remove('copied');
+        btn.textContent = orig;
+      }, 1200);
+    }
+
+    // Wired outside init() on purpose: the help text is worth reading
+    // even when /catalog.json is the thing that's broken.
+    function setupHelp() {
+      const modal = document.getElementById('help-modal');
+      document.getElementById('open-help')
+        .addEventListener('click', () => modal.showModal());
+      document.getElementById('help-close')
+        .addEventListener('click', () => modal.close());
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.close(); // backdrop click
+      });
+      for (const btn of modal.querySelectorAll('.copy')) {
+        btn.addEventListener('click', async () => {
+          const pre = document.getElementById(btn.dataset.target);
+          await navigator.clipboard.writeText(pre.textContent);
+          flashCopied(btn);
+        });
+      }
+    }
 
     async function init() {
       const gallery = document.getElementById('gallery');
@@ -1319,16 +1581,6 @@
       // URL is read out of the live TileJSON document (so
       // format-flavoured tilesets like esa_worldcover yield their
       // default extension automatically).
-      const flashCopied = (btn) => {
-        btn.classList.add('copied');
-        const orig = btn.textContent;
-        btn.textContent = 'Copied!';
-        setTimeout(() => {
-          btn.classList.remove('copied');
-          btn.textContent = orig;
-        }, 1200);
-      };
-
       copyTilejson.addEventListener('click', async () => {
         if (!selected) return;
         // The catalog's URL, not this page's origin — plus whatever the
@@ -1382,6 +1634,7 @@
       });
     }
 
+    setupHelp();
     init();
   </script>
 </body>
