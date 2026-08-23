@@ -28,6 +28,20 @@
 // The manifest is written last, so a half-uploaded revision is not a
 // visible one: readers only ever see `rev`s whose objects are complete.
 
+/** Namespaces paint renders against the renderer that produced them.
+ *
+ *  A style's `rev` covers the document and its assets, which is
+ *  everything the *shelf* can change — but not the thing turning that
+ *  document into pixels. A renderer upgrade that draws differently would
+ *  otherwise leave the old tiles in place, `immutable` and unreachable,
+ *  the way the themed rasters' `ezuRecipeVersion` exists to prevent.
+ *
+ *  So: bump this when an ezu upgrade moves what a paint style draws. It
+ *  is 1 through ezu 0.8.1 — the noise fix there folds coordinates only
+ *  past a bound no tile at these zooms reaches, so every tile rendered
+ *  before it is still the tile that renderer would draw today. */
+export const PAINT_RUNTIME_VERSION = 1;
+
 /** Formats the paint route serves, best first (same rationale as the
  *  themed rasters: WebP encodes for free where PNG's deflate costs
  *  30-48ms, and is smaller on the wire). */

@@ -73,6 +73,7 @@ import {
 } from "./ezu.js";
 import { handleFont } from "./fonts.js";
 import {
+  PAINT_RUNTIME_VERSION,
   type PaintFormat,
   type PaintStyle,
   paintAsset,
@@ -439,11 +440,12 @@ async function handlePaint(
   // vector snapshot behind it, and these go out `immutable, max-age=1y`.
   const { date } = await readMirrorPointer(env);
   const version =
-    `${style.rev}-${date}-${style.sourceVersion}` +
+    `${style.rev}-r${PAINT_RUNTIME_VERSION}-${date}-${style.sourceVersion}` +
     (params.canonical ? `-${params.canonical}` : "");
   const served = await serveRenderedTile(request, env, ctx, {
     cacheKey:
-      `cache/paint/${style.name}/${style.rev}/${date}/${style.sourceVersion || "-"}` +
+      `cache/paint/${style.name}/${style.rev}/r${PAINT_RUNTIME_VERSION}` +
+      `/${date}/${style.sourceVersion || "-"}` +
       `/${params.canonical || "default"}/${coords.z}/${coords.x}/${coords.y}.${format}`,
     cacheVersion: version,
     contentType: format === "webp" ? "image/webp" : "image/png",
