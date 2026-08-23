@@ -81,7 +81,7 @@ import {
   readParams,
 } from "./paint_styles.js";
 import { readMirrorPointer } from "./pmtiles.js";
-import { serveRenderedTile } from "./render_cache.js";
+import { headerSafeHtml, serveRenderedTile } from "./render_cache.js";
 import { handleSprite } from "./sprites.js";
 import { handleSourceFile } from "./source_file.js";
 import {
@@ -559,7 +559,7 @@ async function renderNativeTile(
       "cache-control": "public, max-age=31536000, immutable",
       "x-cache": "miss",
       "x-renderer": "maplibre-native",
-      "x-attribution": PROTOMAPS_ATTRIBUTION,
+      "x-attribution": headerSafeHtml(PROTOMAPS_ATTRIBUTION),
     },
   });
   ctx.waitUntil(cache.put(request, response.clone()));

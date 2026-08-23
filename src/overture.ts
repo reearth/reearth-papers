@@ -24,11 +24,18 @@
 
 import { FetchSource, PMTiles } from "pmtiles";
 
+import { headerSafeHtml } from "./render_cache.js";
+
 // Overture ships monthly releases; the version is part of the S3 path.
 // Bump this (and re-check layer ids / zoom ranges) when adopting a newer
 // release. The route path (/overture_*/{z}/{x}/{y}.mvt) is stable across
 // bumps, so the edge cache rolls over within the tile TTL below.
-export const OVERTURE_RELEASE = "2026-06-17.0";
+//
+// It is not optional maintenance: Overture keeps a rolling window of
+// releases in that bucket and deletes what falls out of it, so a pin left
+// alone eventually 404s and every tile on these five routes becomes a
+// 500. That is how `2026-06-17.0` ended — the archives were simply gone.
+export const OVERTURE_RELEASE = "2026-08-19.0";
 
 const S3_BASE =
   "https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles";
@@ -114,7 +121,7 @@ export const OVERTURE_TILESETS: readonly OvertureTileset[] = [
     minzoom: 0,
     maxzoom: 14,
     layers: [
-      { id: "building", description: "Building footprint polygons", geometry: "polygon", minzoom: 6 },
+      { id: "building", description: "Building footprint polygons", geometry: "polygon", minzoom: 4 },
       {
         id: "building_part",
         description: "Building part polygons (3D detail)",
@@ -225,7 +232,7 @@ export async function handleOvertureTile(
       // release bumps, so use a moderate TTL with SWR (not immutable) so
       // a bumped OVERTURE_RELEASE reaches clients within a day.
       "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
-      "x-attribution": OVERTURE_ATTRIBUTION,
+      "x-attribution": headerSafeHtml(OVERTURE_ATTRIBUTION),
     },
   });
 }

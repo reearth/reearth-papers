@@ -18,6 +18,8 @@
 
 import { PMTiles, type RangeResponse, type Source } from "pmtiles";
 
+import { headerSafeHtml } from "./render_cache.js";
+
 // Public domain — no attribution required; we credit Natural Earth
 // anyway, matching the raster side (src/naturalearth.ts).
 export const NE_VECTOR_ATTRIBUTION =
@@ -426,7 +428,7 @@ export async function handleNeVectorTile(
       // moderate TTL with SWR lets a fresh build reach clients within a
       // day instead of being pinned for a year.
       "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
-      "x-attribution": NE_VECTOR_ATTRIBUTION,
+      "x-attribution": headerSafeHtml(NE_VECTOR_ATTRIBUTION),
     },
   });
 }

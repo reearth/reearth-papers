@@ -7,6 +7,8 @@
 
 import { PMTiles, type RangeResponse, type Source } from "pmtiles";
 
+import { headerSafeHtml } from "./render_cache.js";
+
 export const WATERCOLOR_ARCHIVE_KEY = "mirror/watercolor/v1.pmtiles";
 
 // Attribution required by both upstreams:
@@ -83,7 +85,7 @@ export async function handleWatercolorTile(
       // the browser. The path itself never changes, so we don't need
       // stale-while-revalidate.
       "cache-control": "public, max-age=31536000, immutable",
-      "x-attribution": ATTRIBUTION,
+      "x-attribution": headerSafeHtml(ATTRIBUTION),
     },
   });
 }
