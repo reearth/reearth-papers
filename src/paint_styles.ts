@@ -129,10 +129,20 @@ interface Manifest {
 
 const DEFAULT_PREFIX = "styles";
 
-/** How long an isolate trusts the manifest it read. Same hour the
- *  mirror pointer uses: publishing is a human-scale event, and every
- *  tile render would otherwise pay an R2 GET to re-learn nothing. */
-const MANIFEST_TTL_MS = 60 * 60 * 1000;
+/** How long an isolate trusts the manifest it read.
+ *
+ *  The mirror pointer next door uses an hour, and for a monthly rebuild
+ *  that is right. This one is different: the manifest is also the lever
+ *  for a style's advertised depth, and lowering that is something you do
+ *  because tiles are failing. An hour of isolates disagreeing — some
+ *  serving the old ceiling, some the new — is an hour of a fix being
+ *  half-applied, which is what the first attempt at exactly that looked
+ *  like.
+ *
+ *  Ten minutes costs one R2 GET per isolate per ten minutes, which is
+ *  nothing beside a render, and bounds how long a publish takes to mean
+ *  something everywhere. */
+const MANIFEST_TTL_MS = 10 * 60 * 1000;
 
 interface CachedManifest {
   styles: PaintStyle[];
