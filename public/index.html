@@ -234,25 +234,48 @@
     .card.selected .kind { color: var(--accent); }
 
     /* -- actions ------------------------------------------------------ */
+    /* Grid, not flex: these are the two things the panel is for, and
+       auto-width let them wrap into a ragged pair of different sizes.
+       One column each, full width, so they read as a matched pair and
+       stay put when the label swaps to "Copied!". */
     #actions {
       padding: 10px 12px;
       border-top: 1px solid var(--paper-edge);
-      display: flex;
+      display: grid;
       gap: 6px;
-      flex-wrap: wrap;
     }
+    /* Same tiny uppercase mono as the tabs, but in the accent and a
+       size up: the panel's other controls are for browsing, and these
+       are what a visitor came to press. */
     #actions button {
-      font: inherit;
-      font-size: 12px;
-      padding: 4px 10px;
-      border: 1px solid #c9c2b2;
+      width: 100%;
+      font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding: 9px 10px;
+      color: var(--accent);
       background: var(--card);
+      border: 1px solid var(--accent);
       border-radius: 5px;
       cursor: pointer;
+      transition: color .15s, background .15s, border-color .15s;
     }
-    #actions button:hover { background: #f3efe6; }
-    #actions button:disabled { color: #b3ac9d; cursor: default; }
-    #actions button.copied {
+    #actions button:hover:not(:disabled) {
+      background: var(--accent);
+      color: var(--card);
+    }
+    /* Disabled until a tileset is picked, which is most of the first
+       few seconds — so it recedes to the browsing controls' weight
+       rather than sitting there as a dead accent. */
+    #actions button:disabled {
+      color: var(--ink-soft);
+      background: none;
+      border-color: var(--paper-edge);
+      cursor: default;
+    }
+    #actions button.copied,
+    #actions button.copied:hover {
+      color: #3f7a2e;
       background: #e4f3df;
       border-color: #8fbf80;
     }
@@ -301,7 +324,14 @@
       .thumb { height: 60px; }
       .card .label { padding: 5px 8px 6px; }
       .card .kind { display: none; }
-      #actions { padding: 8px 12px; border-top: none; }
+      /* Side by side here: the panel is a strip above the map, and two
+         stacked full-width buttons would cost the map a band of its
+         height for nothing — the width is going spare instead. */
+      #actions {
+        padding: 8px 12px;
+        border-top: none;
+        grid-template-columns: 1fr 1fr;
+      }
     }
 
     /* -- attribution modal -------------------------------------------- */
