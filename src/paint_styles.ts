@@ -36,11 +36,23 @@
  *  otherwise leave the old tiles in place, `immutable` and unreachable,
  *  the way the themed rasters' `ezuRecipeVersion` exists to prevent.
  *
- *  So: bump this when an ezu upgrade moves what a paint style draws. It
- *  is 1 through ezu 0.8.1 — the noise fix there folds coordinates only
- *  past a bound no tile at these zooms reaches, so every tile rendered
- *  before it is still the tile that renderer would draw today. */
-export const PAINT_RUNTIME_VERSION = 1;
+ *  So: bump this when an ezu upgrade moves what a paint style draws.
+ *
+ *  1 was everything through ezu 0.8.1.
+ *
+ *  2 is ezu 0.8.2, for the styles that read terrain — which is four of
+ *  the five. `requestedNeighborOffsets` answered nothing for a `dem`
+ *  source, because it looked for a `<source>.<layer>@dx,dy` binding and a
+ *  DEM binds under a bare name, so this host bound the centre tile alone
+ *  and the renderer filled the pad by clamping that tile's own edge. Every
+ *  filter reading the pad carried the guess back inside as a seam along
+ *  the tile border. Those renders are wrong, not merely different.
+ *
+ *  It is one number for the whole shelf rather than one per style: the
+ *  styles that read no terrain get re-rendered for nothing, which for
+ *  pencil-sketch is a few dozen tiles, against carrying "reads a DEM"
+ *  through the manifest to save them. */
+export const PAINT_RUNTIME_VERSION = 2;
 
 /** Formats the paint route serves, best first (same rationale as the
  *  themed rasters: WebP encodes for free where PNG's deflate costs

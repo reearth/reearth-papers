@@ -13,7 +13,7 @@
   "dependencies": {
     "@cloudflare/containers": "^0.3.4",
     "@jsquash/webp": "^1.5.0",
-    "@reearth/ezu": "^0.8.1",
+    "@reearth/ezu": "^0.8.2",
     "geotiff": "^3.0.5",
     "pmtiles": "^4.4.1"
   },
