@@ -30,6 +30,7 @@
 // registry — they're style permutations of one source with their own
 // route shape and a per-theme style.json (see style.ts).
 
+import { type CreditGroupId, attributionOf } from "./credits.js";
 import {
   BLACKMARBLE_ATTRIBUTION,
   BLACKMARBLE_COG_KEY,
@@ -89,7 +90,13 @@ export interface TilesetDef {
   /** Catalog display name; defaults to `name`. */
   catalogName?: string;
   description: string;
+  /** Derived from `credits` — see the SPECS -> TILESETS map below. */
   attribution: string;
+  /** Which entry of the credit registry this tileset's sources sit in
+   *  (see src/credits.ts). The map credit is derived from it, and
+   *  /attribution reads membership back off this field — so a tileset
+   *  cannot be served without being listed on the credits page. */
+  credits: CreditGroupId;
   type: "raster" | "vector";
   /** Catalog shelf this entry belongs on (see `Category` in catalog.ts).
    *  Defaults to `vector` for vector entries and `imagery` for raster
@@ -137,24 +144,22 @@ export interface TilesetDef {
   styleJson?: (origin: string) => unknown;
 }
 
-const PAPERS = '<a href="https://papers.reearth.land">Re:Earth Papers</a>';
-
 // Shared by the themed rasters (tilejson.ts) and the protomaps vector
 // entry below — both surface the same OSM-derived data.
-export const PROTOMAPS_ATTRIBUTION = [
-  PAPERS,
-  '<a href="https://protomaps.com">Protomaps</a>',
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-].join(" · ");
+export const PROTOMAPS_ATTRIBUTION = attributionOf("osm");
 
-export const TILESETS: readonly TilesetDef[] = [
+/** A registry entry as written below: everything but the map credit,
+ *  which is derived from `credits` rather than repeated by hand. */
+type TilesetSpec = Omit<TilesetDef, "attribution">;
+
+const SPECS: readonly TilesetSpec[] = [
   {
     id: "protomaps",
     catalogId: "protomaps-vector",
     name: "Re:Earth Papers — vector",
     catalogName: "Protomaps Vector",
     description: "Protomaps daily basemap, mirrored to R2.",
-    attribution: PROTOMAPS_ATTRIBUTION,
+    credits: "osm",
     type: "vector",
     formats: ["mvt"],
     minzoom: 0,
@@ -185,13 +190,13 @@ export const TILESETS: readonly TilesetDef[] = [
   // entry (physical, admin, labels, land use, transport, bathymetry);
   // geometry + display metadata live in naturalearth_vector.ts.
   ...NE_VECTOR_TILESETS.map(
-    (d): TilesetDef => ({
+    (d): TilesetSpec => ({
       id: d.id,
       catalogId: d.catalogId,
       name: d.name,
       catalogName: d.catalogName,
       description: d.description,
-      attribution: NE_VECTOR_ATTRIBUTION,
+      credits: "naturalEarth",
       type: "vector",
       formats: ["mvt"],
       minzoom: d.minzoom,
@@ -220,13 +225,13 @@ export const TILESETS: readonly TilesetDef[] = [
   // viewer auto-colours from `vector_layers`, same as the protomaps
   // entry).
   ...OVERTURE_TILESETS.map(
-    (d): TilesetDef => ({
+    (d): TilesetSpec => ({
       id: d.id,
       catalogId: d.catalogId,
       name: d.name,
       catalogName: d.catalogName,
       description: d.description,
-      attribution: OVERTURE_ATTRIBUTION,
+      credits: "overture",
       type: "vector",
       formats: ["mvt"],
       minzoom: d.minzoom,
@@ -249,7 +254,7 @@ export const TILESETS: readonly TilesetDef[] = [
     description:
       "Stamen's Watercolor map tiles, snapshotted from the upstream " +
       "long-term cache. Frozen historical raster set.",
-    attribution: WATERCOLOR_ATTRIBUTION,
+    credits: "watercolor",
     type: "raster",
     formats: ["jpg"],
     minzoom: 0,
@@ -268,7 +273,7 @@ export const TILESETS: readonly TilesetDef[] = [
     description:
       "ESA WorldCover 2021 v200 — 10 m global land-cover classification, " +
       "rendered on-the-fly from per-3° COGs mirrored to R2.",
-    attribution: ESA_WORLDCOVER_ATTRIBUTION,
+    credits: "esaWorldcover",
     type: "raster",
     formats: ["webp", "png"],
     // z<8 reads from a pre-baked global overview.tif (~1.78 km/px);
@@ -290,7 +295,7 @@ export const TILESETS: readonly TilesetDef[] = [
     description:
       "NASA Earth Observatory's \"Earth at Night 2016\" (Suomi NPP VIIRS), " +
       "rendered on-the-fly from a global 500 m / pixel COG mirrored to R2.",
-    attribution: BLACKMARBLE_ATTRIBUTION,
+    credits: "blackmarble",
     type: "raster",
     formats: ["webp", "png"],
     minzoom: 0,
@@ -304,11 +309,11 @@ export const TILESETS: readonly TilesetDef[] = [
   // Natural Earth rasters — geometry + display metadata live in the
   // registry in naturalearth.ts; one TilesetDef per entry.
   ...NATURAL_EARTH_RASTERS.map(
-    (d): TilesetDef => ({
+    (d): TilesetSpec => ({
       id: d.id,
       name: d.name,
       description: d.description,
-      attribution: NATURAL_EARTH_ATTRIBUTION,
+      credits: "naturalEarth",
       type: "raster",
       formats: ["webp", "png"],
       minzoom: 0,
@@ -329,11 +334,7 @@ export const TILESETS: readonly TilesetDef[] = [
     description:
       "NASA GIBS \"BlueMarble: Next Generation\" — a global cloud-free " +
       "true-colour mosaic, served directly from NASA's GIBS WMTS.",
-    attribution: [
-      PAPERS,
-      'Imagery courtesy of <a href="https://earthdata.nasa.gov/gibs">NASA EOSDIS GIBS</a>',
-      "Blue Marble: Next Generation (public domain)",
-    ].join(" · "),
+    credits: "bluemarble",
     type: "raster",
     minzoom: 0,
     maxzoom: 8,
@@ -352,11 +353,7 @@ export const TILESETS: readonly TilesetDef[] = [
       "EOX Sentinel-2 cloudless 2016 — a global cloud-free 10 m mosaic " +
       "of Copernicus Sentinel-2 data, served directly from EOX's WMTS. " +
       "The 2016 layer is CC BY 4.0 (later years are non-commercial).",
-    attribution: [
-      PAPERS,
-      '<a href="https://s2maps.eu">Sentinel-2 cloudless 2016</a> by EOX IT Services GmbH',
-      "Contains modified Copernicus Sentinel data 2016 &amp; 2017 · CC BY 4.0",
-    ].join(" · "),
+    credits: "s2cloudless",
     type: "raster",
     minzoom: 0,
     maxzoom: 14,
@@ -365,6 +362,11 @@ export const TILESETS: readonly TilesetDef[] = [
     ],
   },
 ];
+
+export const TILESETS: readonly TilesetDef[] = SPECS.map((spec) => ({
+  ...spec,
+  attribution: attributionOf(spec.credits),
+}));
 
 export const TILESETS_BY_ID: ReadonlyMap<string, TilesetDef> = new Map(
   TILESETS.map((t) => [t.id, t]),

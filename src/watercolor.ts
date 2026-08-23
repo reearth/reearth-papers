@@ -5,6 +5,7 @@
 // once on EC2 by `mirror/watercolor/builder/`. The key is therefore
 // hardcoded; no pointer indirection.
 
+import { attributionOf } from "./credits.js";
 import { PMTiles, type RangeResponse, type Source } from "pmtiles";
 
 import { headerSafeHtml } from "./render_cache.js";
@@ -15,10 +16,7 @@ export const WATERCOLOR_ARCHIVE_KEY = "mirror/watercolor/v1.pmtiles";
 //   - Stamen Design (map tiles, CC BY 4.0)
 //   - OpenStreetMap contributors (underlying data, ODbL)
 // Re:Earth Papers added per our own hosting attribution.
-export const WATERCOLOR_ATTRIBUTION =
-  '<a href="https://papers.reearth.land">Re:Earth Papers</a> · ' +
-  '<a href="https://stamen.com">Stamen Design</a> (CC BY 4.0) · ' +
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+export const WATERCOLOR_ATTRIBUTION = attributionOf("watercolor");
 
 const ATTRIBUTION = WATERCOLOR_ATTRIBUTION;
 

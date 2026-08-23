@@ -1,0 +1,181 @@
+// The credits page every tile's short credit points at (/attribution,
+// and /attribution.json for the same thing machine-readable).
+//
+// Nothing here is written by hand twice. The sources and licences come
+// from src/credits.ts; which tilesets sit under each of them is read
+// back off the registries that serve those tilesets — `credits` on a
+// TilesetDef, the theme list for the rendered rasters, the paint
+// manifest for the paint shelf. A tileset therefore cannot be served
+// without appearing on this page, which is the condition under which
+// its sources may be folded out of the map credit at all.
+
+import {
+  CREDIT_GROUPS,
+  type Credit,
+  type CreditGroup,
+  type CreditGroupId,
+  attributionOf,
+} from "./credits.js";
+import { paintStyles } from "./paint_styles.js";
+import { THEMES } from "./style.js";
+import { TILESETS } from "./tilesets.js";
+
+/** Public ids of everything covered by each credit group, in the order
+ *  a reader meets them: rendered themes, then registered tilesets, then
+ *  the paint shelf (which is published to R2 rather than compiled in). */
+async function membership(env: Env): Promise<Record<CreditGroupId, string[]>> {
+  const ids = {} as Record<CreditGroupId, string[]>;
+  for (const id of Object.keys(CREDIT_GROUPS) as CreditGroupId[]) ids[id] = [];
+
+  // The themed rasters are style permutations of one source and live
+  // outside the tileset registry (see style.ts), so they are named here.
+  for (const theme of THEMES) ids.osm.push(`styles/${theme}`);
+
+  // The route id, not the catalog id: this page is read next to a URL.
+  for (const t of TILESETS) ids[t.credits].push(t.id);
+
+  // A paint style is published without a deploy; an unreadable manifest
+  // leaves the shelf unlisted rather than the page broken.
+  for (const s of await paintStyles(env)) ids.paint.push(`styles/${s.name}`);
+
+  return ids;
+}
+
+const ESCAPES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+};
+
+const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ESCAPES[c]);
+
+function creditHtml(c: Credit): string {
+  const name = c.url ? `<a href="${esc(c.url)}">${esc(c.name)}</a>` : esc(c.name);
+  const license = c.licenseUrl
+    ? `<a href="${esc(c.licenseUrl)}">${esc(c.license)}</a>`
+    : esc(c.license);
+  const note = c.note ? `<p class="note">${esc(c.note)}</p>` : "";
+  const onMap = c.onMap
+    ? '<span class="tag" title="This licence requires its notice on the map itself">on the map</span>'
+    : "";
+  return `<li><span class="src">${name}</span>${onMap}<span class="lic">${license}</span>${note}</li>`;
+}
+
+function groupHtml(id: CreditGroupId, g: CreditGroup, ids: string[]): string {
+  return `<section>
+  <h2>${esc(g.title)}</h2>
+  <p class="ids">${ids.length ? esc(ids.join(" · ")) : "&mdash;"}</p>
+  ${g.note ? `<p class="note">${esc(g.note)}</p>` : ""}
+  <ul>${g.credits.map(creditHtml).join("")}</ul>
+  <p class="credit">Map credit: ${attributionOf(id)}</p>
+</section>`;
+}
+
+const PAGE_CSS = `
+:root { --paper:#f7f4ee; --edge:#e3ded3; --ink:#1f1c17; --soft:#8a8273; --accent:#b4490e; --card:#fffdf9; }
+* { box-sizing:border-box; }
+body { margin:0; padding:32px 20px 64px; background:var(--paper); color:var(--ink);
+       font:14px/1.6 system-ui,-apple-system,sans-serif; }
+main { max-width:760px; margin:0 auto; }
+h1 { margin:0 0 4px; font:600 24px/1.2 'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif; }
+.sub { margin:0 0 24px; color:var(--soft); font-size:12px; letter-spacing:.14em; text-transform:uppercase; }
+.lede { margin:0 0 28px; }
+a { color:var(--accent); }
+section { margin:0 0 22px; padding:14px 16px; background:var(--card);
+          border:1px solid var(--edge); border-radius:10px; }
+h2 { margin:0 0 2px; font:600 15px/1.3 'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif; }
+.ids { margin:0 0 10px; font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+       color:var(--soft); overflow-wrap:anywhere; }
+ul { margin:0; padding:0; list-style:none; }
+li { padding:8px 0; border-top:1px solid var(--edge); }
+.src { font-weight:600; }
+.lic { display:block; font-size:12px; color:var(--soft); }
+.tag { margin-left:8px; font:600 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+       letter-spacing:.1em; text-transform:uppercase; color:var(--accent);
+       border:1px solid var(--accent); border-radius:4px; padding:3px 5px; vertical-align:2px; }
+.note { margin:4px 0 0; font-size:12px; color:var(--soft); }
+.credit { margin:10px 0 0; padding-top:10px; border-top:1px dashed #c9c2b2; font-size:12px; color:var(--soft); }
+.credit a { color:var(--accent); }
+footer { margin-top:28px; font-size:12px; color:var(--soft); }
+`;
+
+function page(ids: Record<CreditGroupId, string[]>): string {
+  const sections = (Object.keys(CREDIT_GROUPS) as CreditGroupId[])
+    .map((id) => groupHtml(id, CREDIT_GROUPS[id], ids[id]))
+    .join("\n");
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Attribution — Re:Earth Papers</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>${PAGE_CSS}</style>
+</head>
+<body>
+<main>
+<h1>Attribution</h1>
+<p class="sub">Re:Earth Papers</p>
+<p class="lede">
+  Every tile we serve carries a short credit in its TileJSON, and that
+  credit links here. This page is the rest of it: what each tileset is
+  built from, under which licence. A name marked <span class="tag">on the
+  map</span> is one whose licence requires the notice on the map itself —
+  display those wherever the tiles are shown. The others are satisfied by
+  a link to this page, which is what the credit does for you.
+</p>
+${sections}
+<footer>
+  Machine-readable: <a href="/attribution.json">attribution.json</a>.
+  Source: <a href="https://github.com/reearth/reearth-papers">reearth/reearth-papers</a>.
+</footer>
+</main>
+</body>
+</html>`;
+}
+
+function json(ids: Record<CreditGroupId, string[]>): unknown {
+  return {
+    name: "Re:Earth Papers — attribution",
+    description:
+      "Sources behind every tileset. Credits marked `onMap` must be " +
+      "displayed on the map itself; the rest are satisfied by a link to " +
+      "https://papers.reearth.land/attribution.",
+    groups: (Object.keys(CREDIT_GROUPS) as CreditGroupId[]).map((id) => {
+      const g = CREDIT_GROUPS[id];
+      return {
+        id,
+        title: g.title,
+        ...(g.note ? { note: g.note } : {}),
+        tilesets: ids[id],
+        attribution: attributionOf(id),
+        credits: g.credits.map((c) => ({
+          name: c.name,
+          ...(c.url ? { url: c.url } : {}),
+          license: c.license,
+          ...(c.licenseUrl ? { licenseUrl: c.licenseUrl } : {}),
+          ...(c.note ? { note: c.note } : {}),
+          onMap: Boolean(c.onMap),
+        })),
+      };
+    }),
+  };
+}
+
+export async function handleAttribution(env: Env, asJson: boolean): Promise<Response> {
+  const ids = await membership(env);
+  return asJson
+    ? new Response(JSON.stringify(json(ids), null, 2), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "access-control-allow-origin": "*",
+          "cache-control": "public, max-age=3600",
+        },
+      })
+    : new Response(page(ids), {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "public, max-age=3600",
+        },
+      });
+}

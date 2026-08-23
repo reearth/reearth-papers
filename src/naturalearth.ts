@@ -17,6 +17,7 @@
 // the central tileset registry in src/tilesets.ts) plus one `DATASETS`
 // entry in `mirror/naturalearth/scripts/_lib.sh`.
 
+import { attributionOf } from "./credits.js";
 import { fromCustomClient } from "geotiff";
 import { pixelToLonLat, R2GeoTiffClient, TILE_SIZE } from "./cog.js";
 import { encodePngRGBA, encodeWebpRGBA } from "./raster_encode.js";
@@ -133,10 +134,7 @@ function pickOverviewLevel(def: NaturalEarthRaster, z: number): number {
   return Math.min(Math.max(def.maxZoom - z, 0), def.overviewCount);
 }
 
-export const NATURAL_EARTH_ATTRIBUTION =
-  '<a href="https://papers.reearth.land">Re:Earth Papers</a> · ' +
-  '<a href="https://www.naturalearthdata.com">Natural Earth</a> · ' +
-  "public domain";
+export const NATURAL_EARTH_ATTRIBUTION = attributionOf("naturalEarth");
 
 // -- rendering -------------------------------------------------------------
 

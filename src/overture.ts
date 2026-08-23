@@ -22,6 +22,7 @@
 // ids + zoom ranges below were read from the live archives' metadata —
 // keep them in sync when bumping OVERTURE_RELEASE.
 
+import { attributionOf } from "./credits.js";
 import { FetchSource, PMTiles } from "pmtiles";
 
 import { headerSafeHtml } from "./render_cache.js";
@@ -46,11 +47,7 @@ const archiveUrl = (theme: string) => `${S3_BASE}/${OVERTURE_RELEASE}/${theme}.p
 // divisions are ODbL/OSM-derived, places is CDLA Permissive 2.0). We
 // surface a single shared credit covering the foundation and the OSM
 // contributors behind the OSM-derived themes.
-export const OVERTURE_ATTRIBUTION = [
-  '<a href="https://papers.reearth.land">Re:Earth Papers</a>',
-  '<a href="https://overturemaps.org">Overture Maps Foundation</a>',
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-].join(" · ");
+export const OVERTURE_ATTRIBUTION = attributionOf("overture");
 
 /** One MVT layer of an Overture theme archive. `geometry` is the
  *  viewer-inspector hint (fill / line / circle). A few Overture layers

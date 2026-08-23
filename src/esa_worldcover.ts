@@ -15,6 +15,7 @@
 //
 // Output formats: PNG (always) and WebP (via @jsquash/webp).
 
+import { attributionOf } from "./credits.js";
 import { fromCustomClient } from "geotiff";
 import { pixelToLonLat, R2GeoTiffClient, TILE_SIZE } from "./cog.js";
 import { encodePngRGBA, encodeWebpRGBA } from "./raster_encode.js";
@@ -66,11 +67,7 @@ const PALETTE: ReadonlyArray<readonly [number, number, number] | undefined> = ((
 // Required by the dataset license — must appear in TileJSON and any
 // visible product derived from the layer. Match the punctuation style
 // used by the other tilesets in this worker (`·` separators).
-export const ESA_WORLDCOVER_ATTRIBUTION =
-  '<a href="https://papers.reearth.land">Re:Earth Papers</a> · ' +
-  '&copy; <a href="https://esa-worldcover.org">ESA WorldCover project 2021</a> · ' +
-  "Contains modified Copernicus Sentinel data (2021) processed by " +
-  "ESA WorldCover consortium · CC BY 4.0";
+export const ESA_WORLDCOVER_ATTRIBUTION = attributionOf("esaWorldcover");
 
 // -- coordinate / grid helpers --------------------------------------------
 // R2 transport + inverse Web Mercator shared with blackmarble.ts and

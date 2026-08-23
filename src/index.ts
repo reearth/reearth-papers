@@ -98,6 +98,7 @@ import {
   handleTilesetTilejson,
   RENDERED_RASTER_MAXZOOM,
 } from "./tilejson.js";
+import { handleAttribution } from "./attribution.js";
 import {
   PROTOMAPS_ATTRIBUTION,
   TILESETS_BY_ID,
@@ -223,6 +224,13 @@ async function dispatch(
 
   if (url.pathname === "/catalog.json") {
     return handleCatalog(request, env);
+  }
+
+  // The page every tile credit links to. Rendered from src/credits.ts,
+  // so a source folded out of the short credit is still named here —
+  // which is the whole basis on which it may be folded.
+  if (url.pathname === "/attribution" || url.pathname === "/attribution.json") {
+    return handleAttribution(env, url.pathname.endsWith(".json"));
   }
 
   // Registered tilesets (src/tilesets.ts) — TileJSON, then tiles.

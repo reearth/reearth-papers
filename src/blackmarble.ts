@@ -19,6 +19,7 @@
 //
 // Build pipeline: see `mirror/blackmarble/scripts/`.
 
+import { attributionOf } from "./credits.js";
 import { fromCustomClient } from "geotiff";
 import { pixelToLonLat, R2GeoTiffClient, TILE_SIZE } from "./cog.js";
 import { encodePngRGBA, encodeWebpRGBA } from "./raster_encode.js";
@@ -63,10 +64,7 @@ function pickOverviewLevel(z: number): number {
   return 7;              // z=0,1 → 1.875 (or coarsest available)
 }
 
-export const BLACKMARBLE_ATTRIBUTION =
-  '<a href="https://papers.reearth.land">Re:Earth Papers</a> · ' +
-  '<a href="https://science.nasa.gov/earth/earth-observatory/earth-at-night/maps">NASA Earth Observatory</a> · ' +
-  "Suomi NPP VIIRS · Black Marble 2016";
+export const BLACKMARBLE_ATTRIBUTION = attributionOf("blackmarble");
 
 // R2 transport + coordinate helpers shared with esa_worldcover.ts and
 // naturalearth.ts — see src/cog.ts.

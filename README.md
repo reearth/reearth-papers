@@ -27,6 +27,7 @@ are listed in the table below):
 | `/styles/{paint}/tilejson.json` | TileJSON for a paint style (`?format=webp\|png`). |
 | `/fonts/{fontstack}/{range}.pbf` | Glyph PBFs the styles reference — Protomaps' stacks with the CJK gap filled. |
 | `/sprites/{version}/{name}.{png,json}` | Protomaps sprite sheets, mirrored. |
+| `/attribution` | Credits page: every tileset's sources and licences (`/attribution.json` for the machine-readable form). |
 | `/viewer` | Interactive preview of all of the above. |
 
 All responses are CORS-open (`access-control-allow-origin: *`).
@@ -95,9 +96,27 @@ pmtiles://https://papers.reearth.land/watercolor.pmtiles
 
 Each tileset carries its required attribution in the TileJSON / style
 `attribution` field — most map clients render it automatically. If
-yours doesn't, display the attribution for the tilesets you use (e.g.
-for the rendered themes: *Re:Earth Papers · Protomaps ·
-© OpenStreetMap contributors*).
+yours doesn't, display the attribution for the tilesets you use.
+
+Those credits are deliberately short, and that is a licence question
+rather than a design one. A licence that requires its notice on the
+*produced work* keeps its name in the credit — ODbL does, which is why
+`© OpenStreetMap contributors` survives on every OSM-derived tileset.
+CC BY 4.0 allows the required information to be given "by providing a
+URI or hyperlink to a resource that includes the required information"
+(§3(a)(2)), so those credits sit one click away, behind the
+*Re:Earth Papers* link that every credit carries. Public-domain and
+open-government sources are listed there too, for the reader rather
+than for a licence.
+
+That link goes to [`/attribution`](https://papers.reearth.land/attribution)
+(and `/attribution.json`). Sources and licences come from
+[`src/credits.ts`](src/credits.ts); which tilesets sit under each of them
+is read back off the registries that serve them — the `credits` field on
+a tileset, the theme list, the paint manifest — so a tileset can't be
+served without being named there, which is the condition under which its
+sources may be folded out of the map credit at all. Paint styles publish
+their own credit with the style rather than from this registry.
 
 ## Status
 

@@ -664,6 +664,7 @@
         <li><code>/{id}/tilejson.json</code> — TileJSON 3.0.0, attribution included.</li>
         <li><code>/{id}/{z}/{x}/{y}.{ext}</code> — XYZ tiles.</li>
         <li><code>/styles/{theme}/tilejson.json</code> — a rendered basemap theme, e.g. <code>papers-light</code>.</li>
+        <li><code>/attribution</code> — every tileset's sources and licences (<code>.json</code> too).</li>
       </ul>
       <p class="note">
         Pick a tileset in the gallery and the Copy buttons hand you its
@@ -737,9 +738,16 @@ const map = new maplibregl.Map({
         clients render that automatically — which is why a TileJSON URL is
         the better thing to hand your map. A raw XYZ URL carries no such
         metadata, so if you use one, display the attribution for each
-        tileset you use; Copy XYZ URL shows you the exact text. The
-        <a href="https://github.com/reearth/reearth-papers#readme" target="_blank" rel="noopener noreferrer">README</a>
-        lists the license behind every tileset.
+        tileset you use; Copy XYZ URL shows you the exact text.
+      </p>
+      <p>
+        Those credits are short because most licences allow it: only a
+        licence that requires its notice on the map itself — ODbL, hence
+        <em>© OpenStreetMap contributors</em> — stays in the line. The rest
+        sit behind the <em>Re:Earth Papers</em> link every credit carries,
+        which goes to
+        <a href="/attribution" target="_blank" rel="noopener noreferrer">/attribution</a>:
+        every source, with its licence, per tileset.
       </p>
 
       <h3>Operating policy</h3>
