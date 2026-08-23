@@ -409,6 +409,18 @@
       cursor: pointer;
     }
     #params .reset:hover { color: var(--accent); }
+    /* A tuned tile is rendered on demand and not persisted, so a knob
+       costs seconds of real work. Without a sign of it the panel looks
+       broken while the old tiles sit there. */
+    #params .busy {
+      font: 500 10px/1 ui-monospace, Menlo, monospace;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: var(--accent);
+      display: none;
+    }
+    #params.busy .busy { display: inline; }
+    #params.busy .reset { display: none; }
     #params .p { padding: 6px 10px; }
     #params .p + .p { border-top: 1px solid #efece3; }
     #params .row {
@@ -516,14 +528,25 @@
     // Build the preview's tileset gallery from /catalog.json so adding
     // a new theme or raster source on the server side shows up here
     // without any HTML edit. Each card carries a live tile thumbnail
-    // (the z0 whole-world tile, so no region gets top billing) fetched
-    // through the tileset's own TileJSON.
+    // fetched through the tileset's own TileJSON.
     //
     // Rendering mode is implicit: vector PMTiles tilesets (and only
     // those) are rendered client-side from a MapLibre style; raster
     // tilesets always show their served tiles.
 
+    // The whole world at z0, so no region gets top billing — right for a
+    // basemap or a global dataset, where the thumbnail's job is to say
+    // what the colours are.
     const THUMB = { z: 0, x: 0, y: 0 };
+
+    // Except for the paint styles, whose job it is to look like
+    // something. At z0 every one of them is a beige rectangle with a
+    // coastline in it: the graphite hatching, the neon glow, the ink
+    // bleed and the pixel grid are all street-scale, and a card that
+    // doesn't show them is a card that sells nothing. So they get a
+    // dense city — central Tokyo at z13, where all five have plenty of
+    // road, water and terrain to draw.
+    const THUMB_PAINT = { z: 13, x: 7276, y: 3225 };
 
     // The catalog links to itself with absolute URLs built from the
     // origin the worker was *asked* for, which is not always the origin
@@ -757,10 +780,11 @@
             const tpl = tj.tiles && tj.tiles[0];
             const img = cards.get(t.id)?.querySelector('img');
             if (!tpl || !img) return;
+            const at = categoryOf(t) === 'paint' ? THUMB_PAINT : THUMB;
             img.src = tpl
-              .replace('{z}', THUMB.z)
-              .replace('{x}', THUMB.x)
-              .replace('{y}', THUMB.y);
+              .replace('{z}', at.z)
+              .replace('{x}', at.x)
+              .replace('{y}', at.y);
           })
           .catch(() => {});
       }
@@ -896,6 +920,11 @@
       function bindInspector() {
         document.getElementById('map').appendChild(layersPanel);
         document.getElementById('map').appendChild(paramsPanel);
+        // The panel says when the map is still fetching. `idle` means
+        // every tile in view has arrived, which for a paint style is the
+        // only honest "done" — a knob turns into seconds of rendering.
+        map.on('dataloading', () => paramsPanel.classList.add('busy'));
+        map.on('idle', () => paramsPanel.classList.remove('busy'));
         const hitIds = () => neLayers.flatMap((l) => l.ids).filter((id) => map.getLayer(id));
 
         const clearSel = () => {
@@ -1044,7 +1073,10 @@
         reset.type = 'button';
         reset.className = 'reset';
         reset.textContent = 'defaults';
-        h.append(title, reset);
+        const busy = document.createElement('span');
+        busy.className = 'busy';
+        busy.textContent = 'rendering…';
+        h.append(title, busy, reset);
         paramsPanel.innerHTML = '';
         paramsPanel.appendChild(h);
 
