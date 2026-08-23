@@ -68,6 +68,26 @@
       font: 600 16px/1.2 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
       letter-spacing: .01em;
     }
+    #panel .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #open-help {
+      flex: none;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      display: grid;
+      place-items: center;
+      font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--accent);
+      background: none;
+      border: 1px solid var(--accent);
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    #open-help:hover { background: var(--accent); color: var(--card); }
     #panel .sub {
       margin: 2px 0 0;
       font-size: 11px;
@@ -243,7 +263,10 @@
         padding: 8px 12px 6px;
         border-bottom: none;
       }
-      #panel h1 { font-size: 14px; }
+      #panel h1 { font-size: 14px; white-space: nowrap; }
+      /* The strip is one line: title, help, tabs. The subtitle is the
+         thing worth losing to keep them there. */
+      #panel .sub { display: none; }
       /* Inline in the header row (pushed to the right) so the tabs cost
          no extra vertical space on the mobile strip. */
       #tabs { margin: 0 0 0 auto; flex: none; }
@@ -571,7 +594,12 @@
 <body>
   <aside id="panel">
     <header>
-      <h1>Re:Earth Papers</h1>
+      <div class="brand">
+        <h1>Re:Earth Papers</h1>
+        <button id="open-help" type="button"
+                title="About Re:Earth Papers"
+                aria-label="About Re:Earth Papers">?</button>
+      </div>
       <p class="sub">tileset preview</p>
       <!-- One tab per category present in /catalog.json, built at load
            time: a tileset shelf that appears server-side shows up here
@@ -584,7 +612,6 @@
     <div id="actions">
       <button id="copy-tilejson" disabled type="button">Copy TileJSON URL</button>
       <button id="copy-xyz" disabled type="button">Copy XYZ URL</button>
-      <button id="open-help" type="button">Help</button>
     </div>
   </aside>
   <div id="map"></div>
@@ -622,12 +649,13 @@
     </header>
     <div class="body">
       <p>
-        Re:Earth Papers is an open tile service: the Protomaps basemap —
-        Protomaps' daily vector build of OpenStreetMap — rendered here
-        into a curated set of raster styles, plus a growing shelf of
-        global basemaps and thematic layers (Natural Earth, Overture,
-        NASA, ESA, Stamen) served from the edge. Everything you see in
-        this preview is a live endpoint — point any map client at it.
+        Re:Earth Papers is an open tile service: a growing shelf of
+        openly-licensed map data, served ready to use from one origin.
+        Raster basemaps and painterly styles rendered here from vector
+        data; satellite and thematic imagery from NASA, ESA, Natural
+        Earth and Stamen; vector tilesets from Overture and Natural Earth
+        for you to style yourself. Everything you see in this preview is
+        a live endpoint — point any map client at it.
       </p>
 
       <h3>Endpoints</h3>
@@ -638,8 +666,8 @@
         <li><code>/styles/{theme}/tilejson.json</code> — a rendered basemap theme, e.g. <code>papers-light</code>.</li>
       </ul>
       <p class="note">
-        Pick a tileset on the left and the Copy buttons hand you its exact
-        URLs. Every response is CORS-open.
+        Pick a tileset in the gallery and the Copy buttons hand you its
+        exact URLs. Every response is CORS-open.
       </p>
 
       <h3>Reading the gallery</h3>
@@ -736,9 +764,10 @@ const map = new maplibregl.Map({
           to stay put.
         </li>
         <li>
-          The Protomaps basemap is re-mirrored monthly, so the map follows
-          OpenStreetMap with roughly that lag; the other datasets are
-          frozen snapshots of their published releases.
+          The vector basemap the styles render from — currently Protomaps'
+          daily OpenStreetMap build — is re-mirrored monthly, so the map
+          follows OSM with roughly that lag; the other datasets are frozen
+          snapshots of their published releases.
         </li>
       </ul>
 
