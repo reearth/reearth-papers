@@ -6,7 +6,7 @@ growing shelf of global basemaps and thematic layers (Natural Earth,
 Overture, NASA, ESA, Stamen) mirrored into R2 and served — or rendered
 on the fly from COGs — at the edge.
 
-Browse everything at **<https://papers.reearth.land/viewer>**.
+Browse everything at **<https://papers.reearth.land>**.
 
 ## Endpoints
 
@@ -28,7 +28,7 @@ are listed in the table below):
 | `/fonts/{fontstack}/{range}.pbf` | Glyph PBFs the styles reference — Protomaps' stacks with the CJK gap filled. |
 | `/sprites/{version}/{name}.{png,json}` | Protomaps sprite sheets, mirrored. |
 | `/attribution` | Credits page: every tileset's sources and licences (`/attribution.json` for the machine-readable form). |
-| `/viewer` | Interactive preview of all of the above. |
+| `/` | Interactive preview of all of the above. |
 
 All responses are CORS-open (`access-control-allow-origin: *`).
 

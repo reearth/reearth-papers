@@ -26,8 +26,8 @@
  *   /fonts/{fontstack}/{range}.pbf       — mirrored glyph PBFs
  *   /sprites/{version}/{name}.{png,json} — mirrored Protomaps sprites
  *   /catalog.json                        — index of all tilesets
- *   /viewer                              — preview page (public/viewer/index.html)
- *   /                                    — temporary 302 → /viewer (LP TBD)
+ *   /                                    — the viewer (public/index.html)
+ *   /viewer                              — 302 → / (where the viewer used to live)
  *
  * `{theme}` is one of papers-light / papers-dark (the house styles) or
  * protomaps-{light,dark,white,black,grayscale} (stock Protomaps themes).
@@ -215,11 +215,14 @@ async function dispatch(
     return new Response("ok");
   }
 
-  // Temporary: root redirects to the preview viewer until a real
-  // landing page lands. Use 302 (not 301) so we can swap it for the
-  // LP without browsers caching the redirect forever.
-  if (url.pathname === "/" || url.pathname === "/index.html") {
-    return Response.redirect(`${url.origin}/viewer`, 302);
+  // The viewer is the site now: it is served from public/index.html by
+  // the assets binding, which matches before this handler runs, so `/`
+  // never reaches here. What does reach here is the address the viewer
+  // used to have — links to it are already out in the world. 302, not
+  // 301, so a real landing page can take `/` back without every browser
+  // that ever followed this holding a cached redirect to it.
+  if (url.pathname === "/viewer" || url.pathname === "/viewer/") {
+    return Response.redirect(`${url.origin}/`, 302);
   }
 
   if (url.pathname === "/catalog.json") {

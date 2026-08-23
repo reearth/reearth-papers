@@ -110,6 +110,16 @@ function page(ids: Record<CreditGroupId, string[]>): string {
 <meta charset="utf-8" />
 <title>Attribution — Re:Earth Papers</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Re:Earth Papers" />
+<meta property="og:title" content="Attribution — Re:Earth Papers" />
+<meta property="og:description" content="What each tileset is built from, and under which licence." />
+<meta property="og:image" content="https://papers.reearth.land/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 <style>${PAGE_CSS}</style>
 </head>
 <body>

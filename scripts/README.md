@@ -45,3 +45,37 @@ node scripts/thumbnails.mjs [options]
 One `{out}/{tileset.id}.png` is written for each `type: "raster"` entry
 in `catalog.json`. Empty tiles (HTTP 204) are left transparent, so
 tilesets with no data yet still produce a valid PNG instead of failing.
+
+## og.py
+
+Draws the two pieces of artwork this site shows of itself: the social
+card (`public/og.png`, 1200×630) and the favicon
+(`public/favicon.ico`, `icon-512.png`, `apple-touch-icon.png`). Both are
+committed and served as static files — nothing at request time runs
+this. The script exists so the framing, the type and the ink are
+parameters rather than a memory of what was done in an image editor.
+
+```
+python3 scripts/og.py [--out public] [--font path/to/EB_Garamond.ttf]
+```
+
+Needs Pillow and numpy, neither of which the worker depends on.
+
+**Typeface: [EB Garamond](https://fonts.google.com/specimen/EB+Garamond)**
+(SIL OFL 1.1), from Google Fonts. Only its rasterised output is
+committed, so nothing is redistributed — but the `.ttf` has to be on
+disk to redraw the card. Point `--font` at it, or set `OG_FONT`.
+
+The card is a `paint-sumi` render of the Bay of Naples. Two things in it
+are deliberate and easy to undo by accident:
+
+- The field is fetched at **z12 and downsampled** to 1200×630, not
+  fetched at z11. The bay and Vesuvio's pine forest do not both fit in a
+  z12 screenful, and z11 draws the coast too coarsely to read at card
+  size.
+- The title is drawn a glyph at a time, because Pillow has no
+  letter-spacing — and a glyph at a time discards the kerning raqm would
+  otherwise apply. `draw_title` measures the pair adjustments back out of
+  the font (`kern(a,b) = len(a+b) − len(a) − len(b)`) and re-applies them
+  before adding the track. Without that step `Re` and `Pa` sit apart and
+  the whole card reads as a default.

@@ -201,7 +201,7 @@ loads production, and anything not deployed yet 404s:
 
 ```bash
 npm run dev:viewer      # wrangler dev --port 8787 --local-upstream localhost:8787
-open http://localhost:8787/viewer
+open http://localhost:8787
 ```
 
 The viewer also pins its own fetches to the origin it was served from,
@@ -245,7 +245,7 @@ Each style declares its own parameters, and the tile route takes them:
 
 `/styles/{id}/params.json` serves the schema ezu derives from the
 document — types, defaults, ranges — and the viewer generates a panel
-from it at **`/viewer?params=1`**. Both are deliberately quiet: the
+from it at **`/?params=1`**. Both are deliberately quiet: the
 switch has no affordance in the UI and the catalog does not advertise the
 schema, because this is here to demo rather than to ship. Making it a
 feature is putting the `params` link back in the catalog entry
