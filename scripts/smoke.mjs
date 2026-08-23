@@ -214,8 +214,10 @@ for (const t of tilesets) {
       // part of its contract rather than a gap to fill in later. A route
       // that starts answering there is a regression, so assert it does
       // not.
-      if (t.params) {
-        await checkJson(`${t.id} params.json`, t.params);
+      if (t.category === "paint") {
+        // The schema is served but not advertised in the catalog while
+        // tuning is a demo rather than a feature, so name the route.
+        await checkJson(`${t.id} params.json`, `${BASE}/styles/${t.id}/params.json`);
         const none = await get(`${BASE}/styles/${t.id}/style.json`, { tries: 1 });
         if (none.status === 200) {
           fail(`${t.id} style.json`, "answered; a paint style has no MapLibre style");

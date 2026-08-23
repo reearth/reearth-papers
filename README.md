@@ -23,9 +23,8 @@ are listed in the table below):
 | `/styles/{theme}/tile/{z}/{x}/{y}.{webp,png}` | Rendered OSM raster tile. `{theme}` ∈ `papers-light papers-dark protomaps-light protomaps-dark protomaps-white protomaps-black protomaps-grayscale` (the old unprefixed stock ids 301 here). |
 | `/styles/{theme}/tilejson.json` | TileJSON for a rendered theme (`?format=webp\|png`; default `webp`). |
 | `/styles/{theme}/style.json` | The theme's full MapLibre style, for client-side vector rendering. |
-| `/styles/{paint}/tile/{z}/{x}/{y}.{webp,png}` | Paint style tile — an ezu-native painterly render (`{paint}` ∈ `paint-pencil-sketch paint-pixel-art paint-voltage paint-sumi paint-wash`). Takes the style's own parameters as query params (see `params.json`). |
-| `/styles/{paint}/tilejson.json` | TileJSON for a paint style (`?format=webp\|png`; params ride into the `tiles` template). |
-| `/styles/{paint}/params.json` | JSON Schema of a paint style's parameters — types, defaults, ranges. Drive sliders and colour pickers off this. |
+| `/styles/{paint}/tile/{z}/{x}/{y}.{webp,png}` | Paint style tile — an ezu-native painterly render (`{paint}` ∈ `paint-pencil-sketch paint-pixel-art paint-voltage paint-sumi paint-wash`). |
+| `/styles/{paint}/tilejson.json` | TileJSON for a paint style (`?format=webp\|png`). |
 | `/fonts/{fontstack}/{range}.pbf` | Glyph PBFs the styles reference — Protomaps' stacks with the CJK gap filled. |
 | `/sprites/{version}/{name}.{png,json}` | Protomaps sprite sheets, mirrored. |
 | `/viewer` | Interactive preview of all of the above. |

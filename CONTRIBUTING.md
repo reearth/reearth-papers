@@ -233,9 +233,33 @@ downstream keys on it, so publishing a change orphans exactly that
 style's tiles. There is no version constant to bump.
 
 A paint style has no `style.json`: an ezu document is a node graph, and
-no MapLibre style means the same thing. `params.json` — the schema ezu
-derives from the document's own `params` — is what a client reads
-instead, and what the viewer builds its panel from.
+no MapLibre style means the same thing.
+
+### Tuning a paint style (unreleased)
+
+Each style declares its own parameters, and the tile route takes them:
+
+```
+/styles/paint-pencil-sketch/tile/12/3637/1612.webp?grain=0.9&paper=%23e8f0ff
+```
+
+`/styles/{id}/params.json` serves the schema ezu derives from the
+document — types, defaults, ranges — and the viewer generates a panel
+from it at **`/viewer?params=1`**. Both are deliberately quiet: the
+switch has no affordance in the UI and the catalog does not advertise the
+schema, because this is here to demo rather than to ship. Making it a
+feature is putting the `params` link back in the catalog entry
+(`src/catalog.ts`).
+
+Two things follow from that being a demo:
+
+- **Tuned tiles are not persisted.** Every distinct set of knobs is its
+  own cache namespace, so R2 would fill with pictures nobody asks for
+  twice; they live in the per-PoP edge cache only. The default picture —
+  what every client actually requests — still gets the global layer.
+- Out-of-range or malformed values are refused with a 400 rather than
+  clamped, so one URL cannot mean two pictures. Unknown query keys are
+  ignored, because tile URLs collect cache-busters in the wild.
 
 Only when you're touching the **comparison renderer** do you need the
 container. Plain Docker is the fastest loop there — the image hash on

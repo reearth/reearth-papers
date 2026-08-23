@@ -433,6 +433,22 @@
       width: 28px; height: 18px; padding: 0; flex: none;
       border: 1px solid var(--paper-edge); border-radius: 3px; background: none;
     }
+    /* The hex beside the swatch — there to be read and copied, so it gets
+       a monospace face and selects on focus (see the script). */
+    #params input.hex {
+      width: 9ch;
+      flex: none;
+      font: 500 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid var(--paper-edge);
+      border-radius: 3px;
+      padding: 1px 4px;
+      text-align: right;
+    }
+    #params input.hex:focus { outline: 1px solid var(--accent); outline-offset: 0; }
+    /* Half-typed value: marked, and changing nothing until it parses. */
+    #params input.hex.bad { border-color: #c0392b; color: #c0392b; }
     #params .pending { color: var(--ink-soft); padding: 8px 10px; margin: 0; }
     @media (max-width: 720px) {
       #params { top: auto; bottom: 10px; right: 10px; max-height: 45%; width: 200px; }
@@ -551,6 +567,15 @@
     // links keep working, so a comparison spot is shareable as a URL.
     const compareEzu =
       new URLSearchParams(location.search).get('compare') === 'ezu';
+    // -- hidden params panel (?params=1) ----------------------------
+    // A paint style's tile route takes its declared knobs as query
+    // params, and this page can drive them. It is a demo, not a
+    // published feature: no affordance in the UI, the catalog does not
+    // advertise the schema, and tuned tiles are not persisted server-side
+    // (each set of knobs is its own cache namespace). The query param is
+    // the switch, so a tuned view stays shareable as a URL.
+    const paramsUi =
+      new URLSearchParams(location.search).get('params') === '1';
     // Every themed raster is renderable both ways; the theme ids match
     // the catalog entries' `theme` field.
     const EZU_COMPARE_THEMES = [
@@ -948,10 +973,20 @@
 
       const sameValue = (a, b) => String(a) === String(b);
 
+      /** `#rgb` / `#rrggbb` / `#rrggbbaa` → the form ezu declares
+       *  (`#rrggbb[aa]`, lowercase), or null if it isn't one yet. */
+      const normalizeHex = (raw) => {
+        const v = raw.trim().toLowerCase();
+        if (/^#[0-9a-f]{3}$/.test(v)) {
+          return `#${v[1]}${v[1]}${v[2]}${v[2]}${v[3]}${v[3]}`;
+        }
+        return /^#[0-9a-f]{6}([0-9a-f]{2})?$/.test(v) ? v : null;
+      };
+
       async function setupParams(t) {
         paramsQuery = '';
         paramsPanel.innerHTML = '';
-        if (!t.params) {
+        if (!paramsUi || categoryOf(t) !== 'paint') {
           paramsPanel.hidden = true;
           return;
         }
@@ -959,7 +994,9 @@
         paramsPanel.innerHTML = '<p class="pending">loading params…</p>';
         let schema;
         try {
-          schema = await fetch(ours(t.params)).then((r) => r.json());
+          // Named rather than read off the catalog entry: the catalog
+          // does not advertise tunability yet.
+          schema = await fetch(`/styles/${t.id}/params.json`).then((r) => r.json());
         } catch (e) {
           paramsPanel.innerHTML = '<p class="pending">params unavailable</p>';
           return;
@@ -1066,21 +1103,62 @@
               input.checked = prop.default === true;
             });
           } else {
-            // The only string param ezu declares is a colour.
-            const input = document.createElement('input');
-            input.type = 'color';
-            // <input type=color> speaks #rrggbb only; a document's
-            // default may carry alpha, which the picker would mangle, so
-            // feed it the opaque part and send back what it gives.
-            input.value = String(current[n]).slice(0, 7);
-            input.addEventListener('input', () => {
-              current[n] = input.value;
+            // The only string param ezu declares is a colour, and a
+            // colour is something you want to read off and paste
+            // somewhere — into a style document, into a chat. So the
+            // swatch comes with the hex beside it, editable: the picker
+            // is for finding a colour, the field is for carrying one.
+            const swatch = document.createElement('input');
+            swatch.type = 'color';
+            const hex = document.createElement('input');
+            hex.type = 'text';
+            hex.className = 'hex';
+            hex.spellcheck = false;
+            hex.autocapitalize = 'off';
+            hex.setAttribute('aria-label', `${n} hex`);
+
+            // <input type=color> speaks #rrggbb only, while a document
+            // may carry #rrggbbaa. The text field holds the real value
+            // and the swatch shows its opaque part, so pasting an alpha
+            // colour keeps its alpha instead of being rounded to opaque.
+            const show = (v) => {
+              hex.value = v;
+              swatch.value = v.slice(0, 7);
+              hex.classList.remove('bad');
+            };
+            show(String(current[n]));
+
+            swatch.addEventListener('input', () => {
+              current[n] = swatch.value;
+              show(swatch.value);
               apply();
             });
-            row.appendChild(input);
+            // Typed or pasted: accept #rgb as well and expand it, since
+            // that is how a colour is often written down. An unfinished
+            // value marks the field and changes nothing — the map should
+            // not flicker through `#ff` on the way to `#ff8800`.
+            hex.addEventListener('input', () => {
+              const v = normalizeHex(hex.value);
+              if (!v) {
+                hex.classList.add('bad');
+                return;
+              }
+              hex.classList.remove('bad');
+              current[n] = v;
+              swatch.value = v.slice(0, 7);
+              apply();
+            });
+            // Repaint the canonical form once editing stops, so a valid
+            // shorthand settles into what the tile URL actually carries.
+            hex.addEventListener('blur', () => show(String(current[n])));
+            // Click selects the whole value: this field exists to be
+            // copied out as much as typed into.
+            hex.addEventListener('focus', () => hex.select());
+
+            row.append(hex, swatch);
             setters.push(() => {
               current[n] = String(prop.default);
-              input.value = String(prop.default).slice(0, 7);
+              show(String(prop.default));
             });
           }
           paramsPanel.appendChild(box);

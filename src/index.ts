@@ -450,10 +450,17 @@ async function handlePaint(
     cacheVersion: version,
     contentType: format === "webp" ? "image/webp" : "image/png",
     attribution: style.attribution,
-    // Paint renders are the expensive kind — brushes, noise fields and a
-    // padded canvas, seconds of WASM CPU rather than the fraction of one
-    // a themed tile costs — so they earn the global R2 layer outright.
-    persist: true,
+    // The default picture earns the global R2 layer outright: a paint
+    // render is brushes, noise fields and a padded canvas — seconds of
+    // WASM CPU where a themed tile costs a fraction of one — and every
+    // client asking for a style asks for the same tiles.
+    //
+    // A tuned one does not. Each distinct set of knobs is its own
+    // namespace, so persisting them buys storage for pictures nobody
+    // asks for twice. Tuned tiles stay in the per-PoP edge cache, which
+    // is what someone dragging a slider and then panning actually
+    // re-reads.
+    persist: params.canonical === "",
     render: async () =>
       renderEzuStyleTile(
         request,

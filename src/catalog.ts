@@ -56,16 +56,18 @@ interface RegisteredTileset {
 }
 
 /** A paint style (see paint_styles.ts). No `style` link: an ezu document
- *  has no MapLibre equivalent to link to. `params` points at its JSON
- *  Schema instead, which is what a client needs to offer the knobs the
- *  tile URL accepts. */
+ *  has no MapLibre equivalent to link to.
+ *
+ *  No `params` link either, for now. The tile route does accept a style's
+ *  declared knobs, and `/styles/{id}/params.json` does serve the schema —
+ *  but tuning is a demo rather than a published feature, so the catalog
+ *  does not advertise it. Adding the field back is how it ships. */
 interface PaintTileset {
   id: string;
   name: string;
   type: "raster";
   category: Category;
   tilejson: string;
-  params: string;
 }
 
 type Tileset = ThemedRasterTileset | RegisteredTileset | PaintTileset;
@@ -101,7 +103,6 @@ export async function handleCatalog(request: Request, env: Env): Promise<Respons
         type: "raster",
         category: "paint",
         tilejson: `${origin}/styles/${p.name}/tilejson.json`,
-        params: `${origin}/styles/${p.name}/params.json`,
       }),
     ),
     // Everything else is derived from the registry in tilesets.ts.
