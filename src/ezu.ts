@@ -83,15 +83,27 @@ export const EZU_THEMES = new Set(Object.keys(RECIPES));
  *  and need 128, so their labels no longer lose the part that overhangs
  *  a tile edge — the seams change, in the direction of what gl-js draws.
  *  The papers house styles need 0, so their pixels are identical and
- *  their namespace stays at 5. */
+ *  their namespace stays at 5.
+ *
+ *  7 (protomaps-* only) is ezu 0.9.0, which applies the Unicode
+ *  bidirectional algorithm and joins Arabic. Before it, a right-to-left
+ *  label was laid out in logical order — `الورود` came out as `دورولا`,
+ *  six isolated letterforms running the wrong way — so every cached
+ *  tile carrying an Arabic, Hebrew or Thaana label holds a picture that
+ *  is simply wrong. Bumping is the point of the upgrade: those renders
+ *  have to go.
+ *
+ *  Again only the themes that draw text. The papers house styles carry
+ *  no `glyphs` source at all (label-free by design), and neither do the
+ *  paint styles, so nothing in either can have been reordered. */
 const RECIPE_VERSIONS: Record<string, number> = {
   "papers-light": 5,
   "papers-dark": 5,
-  "protomaps-light": 6,
-  "protomaps-dark": 6,
-  "protomaps-white": 6,
-  "protomaps-black": 6,
-  "protomaps-grayscale": 6,
+  "protomaps-light": 7,
+  "protomaps-dark": 7,
+  "protomaps-white": 7,
+  "protomaps-black": 7,
+  "protomaps-grayscale": 7,
 };
 
 /** Cache namespace for one theme's renders. Unknown themes get the
