@@ -1,0 +1,21 @@
+{
+  "manifest": "okibi-service/1",
+  "service": "papers",
+  "url_template": "https://papers.reearth.land/styles/{tileset}/tile/{id}",
+  "cost": {
+    "default_gen_ms": 1491,
+    "default_bytes": 124208,
+    "concurrency_limit": 4,
+    "rate_per_s": 2,
+    "billing": {
+      "pricing_profile": "cloudflare",
+      "per_gen": {
+        "cpu_ms": null,
+        "class_a_operation": 1,
+        "egress_byte": null
+      }
+    }
+  },
+  "lanes": { "interactive_priority": true },
+  "zoom_semantics": "resolution"
+}

@@ -68,6 +68,13 @@ export async function serveRenderedTile(
   ctx: ExecutionContext,
   o: RenderedTileOptions,
 ): Promise<Response> {
+  // Timed from here rather than from around the render, because a Worker's
+  // clock only advances after I/O — a Spectre mitigation — so a stopwatch
+  // either side of a render reads whatever the last fetch left it at, and a
+  // render that is pure CPU reads zero. What this spans is the cold request
+  // end to end, which is also the number worth having: it is what somebody
+  // waited.
+  const startedAt = Date.now();
   // Both cache layers are hits as far as demand goes: what okibi is counting
   // is that somebody wanted this tile, and where the bytes came from is not
   // what makes it worth warming.
@@ -109,16 +116,13 @@ export async function serveRenderedTile(
     }
   }
 
-  const startedAt = Date.now();
   const encoded = await o.render();
-  const genMs = Date.now() - startedAt;
   if (!encoded) {
     // A tile with no data behind it is not demand for a tile: nothing here
     // could ever be warmed, and counting it would put a cell in the ledger
     // that no plan can act on.
     return new Response("no data", { status: 404 });
   }
-  record("miss", genMs, encoded.byteLength);
 
   const response = new Response(encoded, {
     headers: {
@@ -139,7 +143,14 @@ export async function serveRenderedTile(
           }),
         );
       }
-      await Promise.all(puts);
+      // Recorded after the writes, because they are the I/O that lets the
+      // clock catch up with the render. Reading it before would be reading
+      // the time as of whatever the render last fetched.
+      try {
+        await Promise.all(puts);
+      } finally {
+        record("miss", Date.now() - startedAt, encoded.byteLength);
+      }
     })(),
   );
 

@@ -419,13 +419,17 @@ async function handleEzu(
       tileset: theme,
       coords,
       fmt: format,
-      // The key's own two namespacing parts, spelled the way the key above
-      // spells them — `version` folds the style and recipe numbers into one,
-      // and there is no third part to name. Describing them instead
-      // (`style-9`) would put a string in the ledger that appears in no
-      // cache key, and okibi could not match a change against what it
-      // invalidated.
-      epoch: { source: date, algo: String(version) },
+      // The key's namespacing parts, split back into the things that move
+      // separately. `version` folds the style and the recipe into one number
+      // for the key's benefit; a query that cannot tell them apart cannot say
+      // what a style bump cost as against a recipe re-bake. Both are read
+      // here from the same constants the line above multiplies, so there is
+      // nothing to drift from.
+      epoch: {
+        source: date,
+        algo: `style-${STYLE_VERSION}`,
+        param: `r${ezuRecipeVersion(theme)}`,
+      },
     },
   });
   // What this isolate's renderer is holding. Stamped on cache hits too —
@@ -482,12 +486,12 @@ async function handlePaint(
       tileset: style.name,
       coords,
       fmt: format,
-      // As above: the parts of `version`, which is what the key is
-      // namespaced by. The style revision and the runtime version are
-      // separate strings here because the key keeps them separate.
+      // The parts of `version`, which is what the key is namespaced by, kept
+      // apart because they move apart: the paint runtime, the style's own
+      // revision, and the snapshot it was drawn from.
       epoch: {
         source: `${date}/${style.sourceVersion || "-"}`,
-        algo: `r${PAINT_RUNTIME_VERSION}`,
+        algo: `paint-r${PAINT_RUNTIME_VERSION}`,
         param: `${style.rev}${params.canonical ? `-${params.canonical}` : ""}`,
       },
     },
