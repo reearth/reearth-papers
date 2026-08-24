@@ -625,6 +625,62 @@
       #params { top: auto; bottom: 10px; right: 10px; max-height: 45%; width: 200px; }
     }
 
+    /* -- tile progress ------------------------------------------------ */
+    /* Top-left, the one corner nothing else claims: the nav controls sit
+       top-right, the inspector and params panels under them. */
+    #tiles {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 2;
+      width: 208px;
+      padding: 7px 9px 8px;
+      background: var(--card);
+      border: 1px solid var(--paper-edge);
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(31,28,23,.15);
+      pointer-events: none;
+    }
+    #tiles[hidden] { display: none; }
+    #tiles .hd {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      font: 600 10px/1.2 ui-monospace, Menlo, monospace;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    #tiles .what { color: var(--ink-soft); }
+    #tiles.cold .what { color: var(--accent); }
+    #tiles .elapsed { color: var(--ink-soft); font-weight: 500; flex: none; }
+    /* The bar is the answer to "how much is left" — done over the whole
+       burst, so it only ever grows within one wait. */
+    #tiles .bar {
+      height: 3px;
+      margin: 6px 0 5px;
+      border-radius: 2px;
+      background: #ece7dc;
+      overflow: hidden;
+    }
+    #tiles .bar i {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: var(--ink-soft);
+      transition: width .2s linear;
+    }
+    #tiles.cold .bar i { background: var(--accent); }
+    #tiles .note {
+      font: 11px/1.35 system-ui, -apple-system, sans-serif;
+      color: var(--ink-soft);
+    }
+    #tiles .note b { font-weight: 600; color: var(--ink); }
+    #tiles .bad { color: #c0392b; }
+    @media (max-width: 720px) {
+      #tiles { width: 176px; }
+    }
+
     .maplibregl-popup-content { font: 12px/1.4 system-ui, -apple-system, sans-serif; }
     .ne-pop .h {
       font-weight: 600;
@@ -801,9 +857,9 @@ const map = new maplibregl.Map({
       <h3>Operating policy</h3>
       <ul>
         <li>
-          This is a best-effort community service with no SLA or uptime
-          guarantee. Use at your own risk, and please don't put production
-          traffic on it without hosting your own mirror.
+          This is a best-effort community service: no SLA, no uptime
+          guarantee, no support commitment. That says what we promise,
+          not how much you may use it — the service is here to be used.
         </li>
         <li>
           It's a shared endpoint, so please be gentle: no bulk crawling or
@@ -897,6 +953,162 @@ const map = new maplibregl.Map({
         layers: [{ id: 'raster', type: 'raster', source: 'raster' }],
       };
     }
+
+    // -- tile progress -------------------------------------------------
+    // A rendered tile is drawn on demand: the first request for one costs
+    // seconds of work in the Worker, every request after it is a cache
+    // hit. From the outside the two are the same picture — a blank square
+    // — so a map that is busy rendering reads as a map that has hung.
+    // This watches tile traffic and says which of the two is happening,
+    // how many tiles are still out, and how long the wait has run.
+    //
+    // Two sources, because neither is enough alone. MapLibre's per-tile
+    // `dataloading`/`data` events count what the view still wants,
+    // including vector tiles, which are fetched from a worker thread
+    // where wrapping `fetch` cannot see them. Wrapping `fetch` is in turn
+    // the only way to read `x-cache`, and `x-cache: miss` is the server
+    // saying in so many words that it rendered this tile just now.
+    const TILE_PATH = /\/\d+\/\d+\/\d+(\.[a-z0-9]+)?$/i;
+    const traffic = {
+      inflight: new Set(), // { start } per outstanding tile request
+      cold: 0,   // came back `x-cache: miss` — rendered for this request
+      failed: 0, // errored, not counting aborts and empty (404) tiles
+    };
+    (() => {
+      const original = window.fetch;
+      window.fetch = function (input, init) {
+        let path = null;
+        try {
+          path = new URL(
+            typeof input === 'string' ? input : input.url, location.href).pathname;
+        } catch (e) { /* not a URL we can read — leave the call alone */ }
+        if (!path || !TILE_PATH.test(path)) return original.call(this, input, init);
+        const rec = { start: performance.now() };
+        traffic.inflight.add(rec);
+        const settled = () => traffic.inflight.delete(rec);
+        return original.call(this, input, init).then(
+          (res) => {
+            settled();
+            // A raster with no data at this tile answers 404, and
+            // MapLibre fills the hole from an ancestor. Normal, not a
+            // failure. (A cross-origin passthrough tileset doesn't
+            // expose `x-cache` at all; the elapsed-time rule below is
+            // what catches a slow one of those.)
+            if (res.ok) {
+              if (res.headers.get('x-cache') === 'miss') traffic.cold++;
+            } else if (res.status !== 404) traffic.failed++;
+            return res;
+          },
+          (err) => {
+            settled();
+            // Panning away aborts the tiles the old view wanted.
+            if (!err || err.name !== 'AbortError') traffic.failed++;
+            throw err;
+          },
+        );
+      };
+    })();
+
+    const tilesEl = document.createElement('div');
+    tilesEl.id = 'tiles';
+    tilesEl.hidden = true;
+    tilesEl.innerHTML =
+      '<div class="hd"><span class="what"></span><span class="elapsed"></span></div>' +
+      '<div class="bar"><i></i></div><div class="note"></div>';
+    const tilesWhat = tilesEl.querySelector('.what');
+    const tilesElapsed = tilesEl.querySelector('.elapsed');
+    const tilesBar = tilesEl.querySelector('.bar i');
+    const tilesNote = tilesEl.querySelector('.note');
+
+    // One wait, from the first tile the view asks for to `idle`. Counting
+    // per burst is what makes "8 of 14" mean anything: a running total
+    // over the session would only ever say "lots".
+    const waiting = new Set(); // tile objects MapLibre has not resolved
+    let burstStart = 0;
+    let burstDone = 0;
+    let lastArrival = 0;
+
+    function bindTileStatus(m) {
+      const tileOf = (e) => (e.dataType === 'source' ? e.tile : null);
+      m.on('dataloading', (e) => {
+        const tile = tileOf(e);
+        if (!tile) return;
+        // A burst opens on the first tile after the last `idle`. Not on
+        // "nothing is in flight": MapLibre starts the request inside
+        // `_addTile` and fires this event after, so the first tile of a
+        // burst is already out by the time we hear about it.
+        if (!burstStart) {
+          burstStart = performance.now();
+          lastArrival = burstStart;
+        }
+        waiting.add(tile);
+      });
+      const arrived = (e) => {
+        const tile = tileOf(e);
+        if (!tile || !waiting.delete(tile)) return;
+        burstDone++;
+        lastArrival = performance.now();
+      };
+      m.on('data', arrived);
+      m.on('dataabort', (e) => {
+        // Aborted tiles are no longer wanted, so they leave the total
+        // rather than counting as done.
+        const tile = tileOf(e);
+        if (tile) waiting.delete(tile);
+      });
+      // `idle` is the one honest "everything in view has arrived", and it
+      // doubles as the reset: a tile MapLibre served from its own cache
+      // never fires `data`, so the set would otherwise keep a ghost.
+      m.on('idle', () => {
+        waiting.clear();
+        burstStart = 0;
+        burstDone = 0;
+        traffic.cold = traffic.failed = 0;
+      });
+    }
+
+    function updateTileStatus() {
+      const pending = Math.max(waiting.size, traffic.inflight.size);
+      const now = performance.now();
+      // Under half a second nothing is worth saying: a cached view is
+      // done inside that, and a panel that blinks on every pan is noise.
+      if (!pending || !burstStart || now - burstStart < 500) {
+        tilesEl.hidden = true;
+        return;
+      }
+      let oldest = 0;
+      for (const rec of traffic.inflight) oldest = Math.max(oldest, now - rec.start);
+      // Cold either because the server said so, or because no cache hit
+      // takes this long — which is the honest read while the first tile
+      // of a cold view is still out and has told us nothing yet.
+      const cold = traffic.cold > 0 || oldest > 1500;
+      const total = burstDone + pending;
+      const stalled = now - lastArrival > 15000;
+
+      tilesEl.hidden = false;
+      tilesEl.classList.toggle('cold', cold);
+      tilesWhat.textContent = cold ? 'Rendering tiles' : 'Loading tiles';
+      tilesElapsed.textContent = Math.round((now - burstStart) / 1000) + 's';
+      tilesBar.style.width = Math.round((burstDone / total) * 100) + '%';
+
+      let note = '<b>' + burstDone + ' of ' + total + '</b> tiles';
+      if (cold) {
+        note += ' — this view isn\'t cached yet, so each tile is being ' +
+          'drawn now, and cached once it is.';
+      }
+      if (stalled) {
+        note += ' <span class="bad">Nothing has come back in ' +
+          Math.round((now - lastArrival) / 1000) + 's.</span>';
+      }
+      if (traffic.failed) {
+        note += ' <span class="bad">' + traffic.failed +
+          (traffic.failed === 1 ? ' tile failed.' : ' tiles failed.') + '</span>';
+      }
+      tilesNote.innerHTML = note;
+    }
+    // Elapsed seconds tick on their own, so this is a clock rather than
+    // an event handler.
+    setInterval(updateTileStatus, 250);
 
     let map = null;
 
@@ -1267,6 +1479,8 @@ const map = new maplibregl.Map({
       function bindInspector() {
         document.getElementById('map').appendChild(layersPanel);
         document.getElementById('map').appendChild(paramsPanel);
+        document.getElementById('map').appendChild(tilesEl);
+        bindTileStatus(map);
         // The panel says when the map is still fetching. `idle` means
         // every tile in view has arrived, which for a paint style is the
         // only honest "done" — a knob turns into seconds of rendering.
