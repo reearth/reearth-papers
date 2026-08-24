@@ -16,6 +16,32 @@ red; passthrough tilesets (third-party origins) only warn.
 node scripts/smoke.mjs [--base=https://papers.reearth.land]
 ```
 
+## overture-release.mjs
+
+Refreshes what `src/overture.ts` says about the Overture archives.
+
+The worker doesn't pin a release: Overture keeps a rolling window of
+them in its public S3 bucket and deletes what falls out of it (that is
+how `2026-06-17.0` took all five `/overture_*` routes down), so the
+handler lists the bucket and serves the newest, cached for an hour per
+isolate. `x-overture-release` on a tile says which one it was.
+
+What the file still carries is the metadata the catalog and the TileJSON
+have to state up front — each theme's zoom range, each layer's id and
+minzoom — and those move between releases (`building`'s minzoom went
+6 → 4 in `2026-08-19.0`). This script reads the live archives and, with
+`--bump`, writes the current numbers back. Layer *membership* is
+reported, never rewritten: a new layer needs a description and a
+geometry hint, which only a person can write.
+
+Nothing breaks while it goes unrun — the catalog just describes the
+tiles slightly wrong — so run it when Overture publishes, or when a
+`vector_layers` entry looks off.
+
+```
+node scripts/overture-release.mjs [--bump] [--json]
+```
+
 ## thumbnails.mjs
 
 Generates a thumbnail PNG for every raster tileset listed in the

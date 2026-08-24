@@ -508,6 +508,29 @@ A promise chain backed by another request's in-flight I/O (ezu's
 per-state `lock`) does work — it's the bare resolver handover that
 doesn't.
 
+### 9. Overture releases roll out of the bucket; don't pin one
+
+Overture's public S3 bucket keeps a **rolling window** of releases —
+usually two — and deletes what falls out of it. A pinned release is a
+dated bomb: `2026-06-17.0` was simply gone one morning and all five
+`/overture_*` routes returned 500.
+
+So `src/overture.ts` resolves the release instead. `currentRelease`
+lists the bucket, takes the newest, and caches it for an hour per
+isolate; the route path doesn't change when the release does, and tiles
+go out `max-age=3600` with SWR, so a new release reaches clients within
+the day on its own. `x-overture-release` on a tile says which release
+served it.
+
+`OVERTURE_RELEASE` is still in the file, but only as the release its
+layer metadata was read from (and the fallback if the bucket can't be
+listed). That metadata does drift — `building`'s minzoom went 6 → 4 in
+`2026-08-19.0` — and it is compiled in, because the catalog and the
+TileJSON describe the tiles before anyone asks for one. Refresh it with
+`node scripts/overture-release.mjs --bump`, which reads the live
+archives and writes the numbers back. Skipping it costs a slightly wrong
+`vector_layers`, not an outage.
+
 ## Other notes
 
 - `package-lock.json` is committed. `npm ci` in CI; `npm install` for
