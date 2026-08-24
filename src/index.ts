@@ -410,6 +410,23 @@ async function handleEzu(
     attribution: PROTOMAPS_ATTRIBUTION,
     persist: true,
     render: () => renderEzuTile(request, env, ctx, theme, coords, format, cjk),
+    demand: {
+      // The theme is the tileset: it is what a client asks for and what an
+      // invalidation moves. The Han flavor is not part of it even though it
+      // is part of the key — it is derived from the tile's own coordinates,
+      // so every client asking for this tile gets the same one, and folding
+      // it in would split a cell along a line nobody is standing on.
+      tileset: theme,
+      coords,
+      fmt: format,
+      // The key's own two namespacing parts, spelled the way the key above
+      // spells them — `version` folds the style and recipe numbers into one,
+      // and there is no third part to name. Describing them instead
+      // (`style-9`) would put a string in the ledger that appears in no
+      // cache key, and okibi could not match a change against what it
+      // invalidated.
+      epoch: { source: date, algo: String(version) },
+    },
   });
   // What this isolate's renderer is holding. Stamped on cache hits too —
   // the value describes the isolate right now, not the cached tile.
@@ -461,6 +478,19 @@ async function handlePaint(
     cacheVersion: version,
     contentType: format === "webp" ? "image/webp" : "image/png",
     attribution: style.attribution,
+    demand: {
+      tileset: style.name,
+      coords,
+      fmt: format,
+      // As above: the parts of `version`, which is what the key is
+      // namespaced by. The style revision and the runtime version are
+      // separate strings here because the key keeps them separate.
+      epoch: {
+        source: `${date}/${style.sourceVersion || "-"}`,
+        algo: `r${PAINT_RUNTIME_VERSION}`,
+        param: `${style.rev}${params.canonical ? `-${params.canonical}` : ""}`,
+      },
+    },
     // The default picture earns the global R2 layer outright: a paint
     // render is brushes, noise fields and a padded canvas — seconds of
     // WASM CPU where a themed tile costs a fraction of one — and every

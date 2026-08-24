@@ -191,6 +191,15 @@ export async function handleBlackmarbleTile(
     contentType: fmt === "png" ? "image/png" : "image/webp",
     attribution: BLACKMARBLE_ATTRIBUTION,
     persist,
+    demand: {
+      tileset: "blackmarble",
+      coords,
+      fmt,
+      // A mirrored raster is namespaced by one number, and that number is
+      // the whole of its epoch: the archive behind it does not move, so
+      // nothing else in the key can change without this changing too.
+      epoch: { algo: String(TILE_CACHE_VERSION) },
+    },
     render: async () => {
       const rgba = await renderTileRGBA(env, coords);
       // Lossy WebP q=85 — Black Marble is a photographic RGB nightscape,
