@@ -10,6 +10,8 @@
 // R2 layer. Configured per dataset in tilesets.ts via the `persist`
 // argument each handler forwards here.
 
+import { type Demand, writeDemand } from "./okibi.js";
+
 /** Make an attribution safe to put in a response header.
  *
  *  `x-attribution` carries the same HTML the TileJSON does, and that HTML
@@ -51,6 +53,13 @@ export interface RenderedTileOptions {
    *  (left uncached; MapLibre's raster source marks the tile errored
    *  and fills the hole with the nearest loaded ancestor). */
   render: () => Promise<Uint8Array | null>;
+  /** What okibi records about this request, if anything.
+   *
+   *  This is the one place that knows all three parts of an event at
+   *  once: which layer answered, how long the render took, and how many
+   *  bytes went out. Split across the callers it would be three
+   *  measurements of a thing that happened here. */
+  demand?: Demand;
 }
 
 export async function serveRenderedTile(
@@ -59,6 +68,17 @@ export async function serveRenderedTile(
   ctx: ExecutionContext,
   o: RenderedTileOptions,
 ): Promise<Response> {
+  // Both cache layers are hits as far as demand goes: what okibi is counting
+  // is that somebody wanted this tile, and where the bytes came from is not
+  // what makes it worth warming.
+  const record = (
+    status: "hit" | "miss",
+    genMs: number,
+    bytes: number,
+  ): void => {
+    if (o.demand) writeDemand(env, request, o.demand, status, genMs, bytes);
+  };
+
   const cache = caches.default;
   const cacheReq = edgeCacheRequest(request, o.cacheVersion);
   const edge = await cache.match(cacheReq);
@@ -68,6 +88,7 @@ export async function serveRenderedTile(
     // apart.
     const response = new Response(edge.body, edge);
     response.headers.set("x-cache", "edge-hit");
+    record("hit", 0, Number(response.headers.get("content-length") ?? 0));
     return response;
   }
 
@@ -83,14 +104,21 @@ export async function serveRenderedTile(
         },
       });
       ctx.waitUntil(cache.put(cacheReq, response.clone()));
+      record("hit", 0, cached.size);
       return response;
     }
   }
 
+  const startedAt = Date.now();
   const encoded = await o.render();
+  const genMs = Date.now() - startedAt;
   if (!encoded) {
+    // A tile with no data behind it is not demand for a tile: nothing here
+    // could ever be warmed, and counting it would put a cell in the ledger
+    // that no plan can act on.
     return new Response("no data", { status: 404 });
   }
+  record("miss", genMs, encoded.byteLength);
 
   const response = new Response(encoded, {
     headers: {

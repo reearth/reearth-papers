@@ -5,6 +5,17 @@ compatibility_date = "2026-01-09"
 [observability]
 enabled = true
 
+# Tile-demand events, one per tile request, read by okibi so that something
+# outside this worker can warm what people actually ask for after a version
+# constant moves. A paint render is seconds of CPU and every tile goes out
+# immutable — the cache does not decay, it dies at once, and the next visitor
+# to each tile pays the whole render.
+#
+# See https://github.com/reearth/okibi and okibi.epochs.json.
+[[analytics_engine_datasets]]
+binding = "TILE_DEMAND"
+dataset = "tile_demand_1"
+
 # WebP encoder for the ESA WorldCover tile pipeline (@jsquash/webp).
 # Importing the `.wasm` resolves to a `WebAssembly.Module` instead of
 # triggering a runtime fetch, which is the only path that works inside
