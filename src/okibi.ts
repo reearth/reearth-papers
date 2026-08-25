@@ -18,6 +18,7 @@
 
 import { quadkeyForTile } from "@reearth/okibi";
 import {
+  type CacheLayer,
   type Epoch,
   type TileDemand,
   createWriter,
@@ -60,13 +61,14 @@ export function writeDemand(
   request: Request,
   demand: Demand,
   cacheStatus: "hit" | "miss",
+  layer: CacheLayer | undefined,
   genMs: number,
   bytes: number,
 ): void {
   if (!env.TILE_DEMAND) return;
 
   try {
-    writeChecked(env, request, demand, cacheStatus, genMs, bytes);
+    writeChecked(env, request, demand, cacheStatus, layer, genMs, bytes);
   } catch (error) {
     // Projection refuses a tile that is off its grid, and building an event
     // is not worth a failed tile: this runs on the response path, and the
@@ -80,6 +82,7 @@ function writeChecked(
   request: Request,
   demand: Demand,
   cacheStatus: "hit" | "miss",
+  layer: CacheLayer | undefined,
   genMs: number,
   bytes: number,
 ): void {
@@ -90,6 +93,10 @@ function writeChecked(
     id: `${demand.coords.z}/${demand.coords.x}/${demand.coords.y}`,
     qk,
     cacheStatus,
+    // Which layer had the bytes does not change whether the tile is worth
+    // warming, but it does change what serving it cost: the edge is free and
+    // an R2 read is a priced operation.
+    cacheLayer: layer,
     epoch: demand.epoch,
     fmt: demand.fmt,
     // Unforgeable on purpose: a bare marker anyone could send would let

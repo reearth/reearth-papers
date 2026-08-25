@@ -80,10 +80,11 @@ export async function serveRenderedTile(
   // what makes it worth warming.
   const record = (
     status: "hit" | "miss",
+    layer: "edge" | "store" | undefined,
     genMs: number,
     bytes: number,
   ): void => {
-    if (o.demand) writeDemand(env, request, o.demand, status, genMs, bytes);
+    if (o.demand) writeDemand(env, request, o.demand, status, layer, genMs, bytes);
   };
 
   const cache = caches.default;
@@ -95,7 +96,7 @@ export async function serveRenderedTile(
     // apart.
     const response = new Response(edge.body, edge);
     response.headers.set("x-cache", "edge-hit");
-    record("hit", 0, Number(response.headers.get("content-length") ?? 0));
+    record("hit", "edge", 0, Number(response.headers.get("content-length") ?? 0));
     return response;
   }
 
@@ -111,7 +112,7 @@ export async function serveRenderedTile(
         },
       });
       ctx.waitUntil(cache.put(cacheReq, response.clone()));
-      record("hit", 0, cached.size);
+      record("hit", "store", 0, cached.size);
       return response;
     }
   }
@@ -149,7 +150,7 @@ export async function serveRenderedTile(
       try {
         await Promise.all(puts);
       } finally {
-        record("miss", Date.now() - startedAt, encoded.byteLength);
+        record("miss", undefined, Date.now() - startedAt, encoded.byteLength);
       }
     })(),
   );
