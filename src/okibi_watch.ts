@@ -74,9 +74,16 @@ export async function watch(env: Env, now: string): Promise<Watched> {
 
   const digests = await readDigests(env, now);
   let queued = 0;
+  let allHandedOver = true;
 
   for (const invalidation of events) {
-    const warm = plan({
+    const warm: { entries: { url: string }[]; stats: Record<string, number> } & Record<
+      string,
+      // The plan document, which this only reads a few fields of and passes
+      // on whole.
+      // biome-ignore lint/suspicious/noExplicitAny: the shape is the spec's
+      any
+    > = plan({
       digests,
       invalidation,
       manifests: [manifest],
@@ -100,15 +107,81 @@ export async function watch(env: Env, now: string): Promise<Watched> {
     // makes neither worth much.
     await env.R2.put(`${PLAN_PREFIX}/${now}-${invalidation.tileset}.json`, JSON.stringify(warm));
 
+    // Before handing it over, because nobody is going to read it. A plan
+    // whose URLs do not exist looks exactly like one whose URLs do — ordered
+    // entries, a coverage, a price — and the only place that shows is the
+    // origin. This has caught a real one: ids written before they carried the
+    // format extension rebuild URLs that all answer 404.
+    const wrong = await sample(warm.entries, env.OKIBI_WARM_SECRET);
+    if (wrong.length > 0) {
+      console.warn("okibi: not handing over a plan whose URLs do not exist", {
+        tileset: invalidation.tileset,
+        checked: SAMPLE,
+        wrong,
+      });
+      allHandedOver = false;
+      continue;
+    }
+
     queued += await handOver(env, warm);
   }
 
-  // Only now. Recording the change as seen before it has been handed over
-  // would mean a failure here is never retried: nothing would ever warm what
-  // was already marked as noticed.
-  await env.R2.put(STATE_KEY, JSON.stringify(after));
+  // Only once everything has been handed over. Recording the change as seen
+  // before that would mean a failure is never retried: nothing would ever warm
+  // what was already marked as noticed.
+  //
+  // A refused plan counts as not handed over, and deliberately so. Its URLs
+  // are wrong because of what okibi knows, not because the epoch did not move
+  // — a digest written before the ids carried their format extension, say —
+  // and the next digest fixes it. Remembering the move now would mean the run
+  // that could have warmed it never happens.
+  if (allHandedOver) {
+    await env.R2.put(STATE_KEY, JSON.stringify(after));
+  } else {
+    console.warn("okibi: leaving the move unrecorded, so the next tick tries again");
+  }
 
   return { first: false, invalidations: events.length, queued };
+}
+
+/** How many of a plan's URLs to ask about before running the rest. */
+const SAMPLE = 3;
+
+/**
+ * Ask the origin whether a few of the plan's URLs exist.
+ *
+ * Spread through the plan rather than taken from its head: the head is the
+ * hottest cell, and a template that happens to work there can be wrong three
+ * zoom levels down.
+ *
+ * A 4xx is the plan being wrong — a template, an id or an epoch that rebuilds
+ * somewhere that is not there. A 5xx is the origin having a bad minute, and an
+ * origin is allowed one without a warm run being cancelled over it.
+ *
+ * The warm header goes on, because a verification counted as demand is demand
+ * okibi invented.
+ */
+async function sample(
+  entries: { url: string }[],
+  secret: string | undefined,
+): Promise<string[]> {
+  const wrong: string[] = [];
+  const stride = Math.max(1, Math.ceil(entries.length / SAMPLE));
+
+  for (let i = 0; i < entries.length && wrong.length < SAMPLE; i += stride) {
+    const url = entries[i]?.url;
+    if (!url) continue;
+    try {
+      const response = await fetch(url, {
+        method: "HEAD",
+        headers: secret ? { "X-Okibi-Warm": secret } : {},
+      });
+      if (response.status >= 400 && response.status < 500) wrong.push(`${response.status} ${url}`);
+    } catch {
+      // No answer is not an answer about the URL.
+    }
+  }
+  return wrong;
 }
 
 /**
