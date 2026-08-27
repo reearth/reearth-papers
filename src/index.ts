@@ -84,6 +84,7 @@ import {
 } from "./paint_styles.js";
 import { dayBefore, takeDigest } from "./okibi-digest.js";
 import { handleOkibiEpochs } from "./okibi_epochs.js";
+import { watch } from "./okibi_watch.js";
 import { readMirrorPointer } from "./pmtiles.js";
 import { headerSafeHtml, serveRenderedTile } from "./render_cache.js";
 import { handleSprite } from "./sprites.js";
@@ -171,9 +172,20 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<void> {
+    const now = new Date(controller.scheduledTime).toISOString();
+
     ctx.waitUntil(
       takeDigest(env, dayBefore(controller.scheduledTime)).catch((err) => {
         console.warn("okibi: digest failed", err);
+      }),
+    );
+
+    // Independent of the digest. One failing is not a reason for the other
+    // not to run, and the watch is the half that notices a cache key moving
+    // with nobody deploying — which nothing else here would ever see.
+    ctx.waitUntil(
+      watch(env, now).catch((err) => {
+        console.warn("okibi: watch failed", err);
       }),
     );
   },

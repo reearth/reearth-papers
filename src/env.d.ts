@@ -30,4 +30,12 @@ interface Env {
   //
   //   wrangler secret put OKIBI_ACCOUNT_ID
   OKIBI_ACCOUNT_ID?: string;
+
+  // Where okibi's executor takes a warm plan, and what it is called with.
+  // Absent means the watch still notices and still keeps the plan; what it
+  // does not do is warm, which is the safe half to lose.
+  //
+  //   wrangler secret put OKIBI_EXECUTOR_TOKEN
+  OKIBI_EXECUTOR_URL?: string;
+  OKIBI_EXECUTOR_TOKEN?: string;
 }
