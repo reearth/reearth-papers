@@ -81,6 +81,7 @@ import {
   paintStyle,
   readParams,
 } from "./paint_styles.js";
+import { dayBefore, takeDigest } from "./okibi-digest.js";
 import { readMirrorPointer } from "./pmtiles.js";
 import { headerSafeHtml, serveRenderedTile } from "./render_cache.js";
 import { handleSprite } from "./sprites.js";
@@ -156,6 +157,25 @@ const FONT_RE = /^\/fonts\/([^/]+)\/(\d+-\d+\.pbf)$/;
 const SPRITE_RE = /^\/sprites\/(.+)$/;
 
 export default {
+  /**
+   * The daily demand digest.
+   *
+   * Aggregating a day is not part of serving tiles, and a digest that fails
+   * is a digest missing for a day — so it is logged rather than thrown, which
+   * would only retry the same failing query on the same finished day.
+   */
+  async scheduled(
+    controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    ctx.waitUntil(
+      takeDigest(env, dayBefore(controller.scheduledTime)).catch((err) => {
+        console.warn("okibi: digest failed", err);
+      }),
+    );
+  },
+
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // CORS preflight. Browser clients send one before any request with
     // a non-safelisted header — notably `Range`, which geotiff.js and
