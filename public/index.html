@@ -31,13 +31,18 @@
       --ink-soft: #8a8273;
       --accent: #b4490e;
       --card: #fffdf9;
+      /* One stack per role, named once: the panel, the modals and the
+         map popups all pick from these three and nowhere else. */
+      --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+      --font-sans: system-ui, -apple-system, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
     body {
       display: grid;
       grid-template-columns: 248px 1fr;
-      font: 13px/1.45 system-ui, -apple-system, sans-serif;
+      font: 13px/1.45 var(--font-sans);
       color: var(--ink);
       background: var(--paper);
     }
@@ -53,7 +58,7 @@
       top: 10px;
       left: 10px;
       z-index: 3;
-      font: 600 10px/1 ui-monospace, Menlo, monospace;
+      font: 600 10px/1 var(--font-mono);
       letter-spacing: .12em;
       text-transform: uppercase;
       color: var(--accent);
@@ -83,7 +88,7 @@
     }
     #panel h1 {
       margin: 0;
-      font: 600 16px/1.2 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+      font: 600 16px/1.2 var(--font-display);
       letter-spacing: .01em;
     }
     #panel .brand {
@@ -98,7 +103,7 @@
       padding: 0;
       display: grid;
       place-items: center;
-      font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font: 600 11px/1 var(--font-mono);
       color: var(--accent);
       background: none;
       border: 1px solid var(--accent);
@@ -106,12 +111,13 @@
       cursor: pointer;
     }
     #open-help:hover { background: var(--accent); color: var(--card); }
-    #panel .sub {
-      margin: 2px 0 0;
-      font-size: 11px;
-      letter-spacing: .14em;
-      text-transform: uppercase;
-      color: var(--ink-soft);
+    /* The favicon, at title size. Its own ground is the same paper the
+       panel is on, so it needs no plate or border of its own. */
+    #panel .mark {
+      flex: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 3px;
     }
 
     /* -- tabs (one per catalog category) ------------------------------ */
@@ -123,7 +129,7 @@
     }
     #tabs .tab {
       flex: 1 1 auto;
-      font: 500 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font: 500 10px/1 var(--font-mono);
       letter-spacing: .08em;
       text-transform: uppercase;
       color: var(--ink-soft);
@@ -206,7 +212,7 @@
     .thumb .mvt {
       position: absolute; inset: 0;
       display: grid; place-items: center;
-      font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font: 600 11px/1 var(--font-mono);
       letter-spacing: .2em;
       color: var(--ink-soft);
     }
@@ -226,7 +232,7 @@
     }
     .card .kind {
       flex: none;
-      font: 500 9.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font: 500 9.5px/1 var(--font-mono);
       letter-spacing: .08em;
       text-transform: uppercase;
       color: var(--ink-soft);
@@ -249,7 +255,7 @@
        are what a visitor came to press. */
     #actions button {
       width: 100%;
-      font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font: 600 11px/1 var(--font-mono);
       letter-spacing: .08em;
       text-transform: uppercase;
       padding: 9px 10px;
@@ -305,9 +311,8 @@
         border-bottom: none;
       }
       #panel h1 { font-size: 14px; white-space: nowrap; }
-      /* The strip is one line: title, help, tabs. The subtitle is the
-         thing worth losing to keep them there. */
-      #panel .sub { display: none; }
+      /* The strip is one line: mark, title, help, tabs. */
+      #panel .mark { width: 16px; height: 16px; }
       /* Inline in the header row (pushed to the right) so the tabs cost
          no extra vertical space on the mobile strip. */
       #tabs { margin: 0 0 0 auto; flex: none; }
@@ -348,7 +353,7 @@
     #attr-modal .inner { padding: 16px 18px; }
     #attr-modal h2 {
       margin: 0 0 6px;
-      font: 600 15px/1.25 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+      font: 600 15px/1.25 var(--font-display);
     }
     #attr-modal p {
       margin: 0 0 10px;
@@ -412,10 +417,10 @@
     }
     #help-modal h2 {
       margin: 0;
-      font: 600 16px/1.2 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+      font: 600 16px/1.2 var(--font-display);
     }
     #help-close {
-      font: 400 20px/1 system-ui, sans-serif;
+      font: 400 20px/1 var(--font-sans);
       color: var(--ink-soft);
       background: none;
       border: none;
@@ -429,7 +434,7 @@
     }
     #help-modal h3 {
       margin: 18px 0 6px;
-      font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font: 600 10px/1 var(--font-mono);
       letter-spacing: .12em;
       text-transform: uppercase;
       color: var(--accent);
@@ -440,7 +445,7 @@
     #help-modal li { margin-bottom: 5px; }
     #help-modal a { color: var(--accent); }
     #help-modal code {
-      font: 11.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font: 11.5px/1.4 var(--font-mono);
       color: var(--accent);
     }
     #help-modal .note { font-size: 11.5px; color: var(--ink-soft); }
@@ -452,7 +457,7 @@
       border: 1px dashed #c9c2b2;
       border-radius: 6px;
       background: var(--paper);
-      font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font: 11.5px/1.5 var(--font-mono);
       /* Code scrolls rather than wraps: a wrapped URL reads as two lines
          you can't paste. */
       white-space: pre;
@@ -497,12 +502,12 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
-      font: 600 12px/1.2 'Iowan Old Style', Palatino, Georgia, serif;
+      font: 600 12px/1.2 var(--font-display);
       background: var(--card);
       border-bottom: 1px solid var(--paper-edge);
     }
     #layers .all {
-      font: 500 10px/1 ui-monospace, Menlo, monospace;
+      font: 500 10px/1 var(--font-mono);
       letter-spacing: .05em;
       text-transform: uppercase;
       color: var(--ink-soft);
@@ -554,12 +559,12 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
-      font: 600 12px/1.2 'Iowan Old Style', Palatino, Georgia, serif;
+      font: 600 12px/1.2 var(--font-display);
       background: var(--card);
       border-bottom: 1px solid var(--paper-edge);
     }
     #params .reset {
-      font: 500 10px/1 ui-monospace, Menlo, monospace;
+      font: 500 10px/1 var(--font-mono);
       letter-spacing: .05em;
       text-transform: uppercase;
       color: var(--ink-soft);
@@ -572,7 +577,7 @@
        costs seconds of real work. Without a sign of it the panel looks
        broken while the old tiles sit there. */
     #params .busy {
-      font: 500 10px/1 ui-monospace, Menlo, monospace;
+      font: 500 10px/1 var(--font-mono);
       letter-spacing: .05em;
       text-transform: uppercase;
       color: var(--accent);
@@ -589,13 +594,13 @@
       gap: 6px;
     }
     #params .nm {
-      font: 500 11px/1.2 ui-monospace, Menlo, monospace;
+      font: 500 11px/1.2 var(--font-mono);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     #params .val {
-      font: 500 10px/1 ui-monospace, Menlo, monospace;
+      font: 500 10px/1 var(--font-mono);
       color: var(--ink-soft);
       flex: none;
     }
@@ -609,7 +614,7 @@
     #params input.hex {
       width: 9ch;
       flex: none;
-      font: 500 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font: 500 11px/1.4 var(--font-mono);
       color: var(--ink);
       background: #fff;
       border: 1px solid var(--paper-edge);
@@ -647,7 +652,7 @@
       align-items: baseline;
       justify-content: space-between;
       gap: 8px;
-      font: 600 10px/1.2 ui-monospace, Menlo, monospace;
+      font: 600 10px/1.2 var(--font-mono);
       letter-spacing: .05em;
       text-transform: uppercase;
     }
@@ -672,7 +677,7 @@
     }
     #tiles.cold .bar i { background: var(--accent); }
     #tiles .note {
-      font: 11px/1.35 system-ui, -apple-system, sans-serif;
+      font: 11px/1.35 var(--font-sans);
       color: var(--ink-soft);
     }
     #tiles .note b { font-weight: 600; color: var(--ink); }
@@ -681,7 +686,7 @@
       #tiles { width: 176px; }
     }
 
-    .maplibregl-popup-content { font: 12px/1.4 system-ui, -apple-system, sans-serif; }
+    .maplibregl-popup-content { font: 12px/1.4 var(--font-sans); }
     .ne-pop .h {
       font-weight: 600;
       color: var(--accent);
@@ -699,12 +704,12 @@
   <aside id="panel">
     <header>
       <div class="brand">
+        <img class="mark" src="/icon-512.png" alt="" width="20" height="20" />
         <h1>Re:Earth Papers</h1>
         <button id="open-help" type="button"
                 title="About Re:Earth Papers"
                 aria-label="About Re:Earth Papers">?</button>
       </div>
-      <p class="sub">tileset preview</p>
       <!-- One tab per category present in /catalog.json, built at load
            time: a tileset shelf that appears server-side shows up here
            without an edit. -->

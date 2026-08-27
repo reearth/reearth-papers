@@ -107,20 +107,36 @@ export async function watch(env: Env, now: string): Promise<Watched> {
     // makes neither worth much.
     await env.R2.put(`${PLAN_PREFIX}/${now}-${invalidation.tileset}.json`, JSON.stringify(warm));
 
-    // Before handing it over, because nobody is going to read it. A plan
-    // whose URLs do not exist looks exactly like one whose URLs do — ordered
+    // Before handing it over, because nobody is going to read it. A plan whose
+    // URLs do not exist looks exactly like one whose URLs do — ordered
     // entries, a coverage, a price — and the only place that shows is the
-    // origin. This has caught a real one: ids written before they carried the
-    // format extension rebuild URLs that all answer 404.
-    const wrong = await sample(warm.entries, env.OKIBI_WARM_SECRET);
+    // origin.
+    const { wrong, answered } = await sample(warm.entries, env.OKIBI_WARM_SECRET);
     if (wrong.length > 0) {
       console.warn("okibi: not handing over a plan whose URLs do not exist", {
         tileset: invalidation.tileset,
-        checked: SAMPLE,
         wrong,
       });
       allHandedOver = false;
       continue;
+    }
+
+    // Nothing answered, which is what happens whenever the URLs are this
+    // worker's own: a Worker asking for its own hostname goes out to the edge
+    // and comes back 522. So this is not a plan that passed, it is a plan
+    // nothing could check, and saying otherwise would make a check that
+    // cannot fail look like one that did not.
+    //
+    // Handed over anyway, because the executor asks for every one of these
+    // URLs from outside and says what they answered — `okibi: warmed a batch`
+    // carries the statuses. Refusing here would trade a plan that reports its
+    // own failure for one that never runs.
+    if (answered === 0) {
+      console.warn("okibi: handing over a plan nothing here could verify", {
+        tileset: invalidation.tileset,
+        entries: warm.stats.total,
+        why: "a Worker cannot ask its own origin; read the executor's statuses",
+      });
     }
 
     queued += await handOver(env, warm);
@@ -147,6 +163,13 @@ export async function watch(env: Env, now: string): Promise<Watched> {
 /** How many of a plan's URLs to ask about before running the rest. */
 const SAMPLE = 3;
 
+interface Sampled {
+  /** URLs the origin said are not there. The plan's fault. */
+  wrong: string[];
+  /** How many of the asks came back as an answer about the URL at all. */
+  answered: number;
+}
+
 /**
  * Ask the origin whether a few of the plan's URLs exist.
  *
@@ -155,8 +178,15 @@ const SAMPLE = 3;
  * zoom levels down.
  *
  * A 4xx is the plan being wrong — a template, an id or an epoch that rebuilds
- * somewhere that is not there. A 5xx is the origin having a bad minute, and an
- * origin is allowed one without a warm run being cancelled over it.
+ * somewhere that is not there. A 5xx or a refused connection is not an answer
+ * about the URL, and is counted separately rather than read as a pass: a check
+ * that cannot fail is not a check.
+ *
+ * It usually cannot answer from here, and that is the point of counting.
+ * A Worker asking for its own hostname goes back out to the edge and comes
+ * back 522, so every ask this makes about `papers.reearth.land` is a timeout
+ * rather than a verdict. Which means this cannot be the whole of the check —
+ * see where it is used.
  *
  * The warm header goes on, because a verification counted as demand is demand
  * okibi invented.
@@ -164,8 +194,9 @@ const SAMPLE = 3;
 async function sample(
   entries: { url: string }[],
   secret: string | undefined,
-): Promise<string[]> {
+): Promise<Sampled> {
   const wrong: string[] = [];
+  let answered = 0;
   const stride = Math.max(1, Math.ceil(entries.length / SAMPLE));
 
   for (let i = 0; i < entries.length && wrong.length < SAMPLE; i += stride) {
@@ -176,12 +207,14 @@ async function sample(
         method: "HEAD",
         headers: secret ? { "X-Okibi-Warm": secret } : {},
       });
-      if (response.status >= 400 && response.status < 500) wrong.push(`${response.status} ${url}`);
+      if (response.status >= 500) continue;
+      answered++;
+      if (response.status >= 400) wrong.push(`${response.status} ${url}`);
     } catch {
-      // No answer is not an answer about the URL.
+      // Not an answer about the URL either.
     }
   }
-  return wrong;
+  return { wrong, answered };
 }
 
 /**
