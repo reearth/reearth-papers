@@ -77,6 +77,26 @@ export function writeDemand(
   }
 }
 
+/**
+ * The identifier okibi rebuilds this request's URL from.
+ *
+ * Taken from the request rather than composed from the coordinates, because
+ * this worker serves the same kind of tile at two different shapes —
+ * `/styles/{theme}/tile/{z}/{x}/{y}.{ext}` for themes and paint styles,
+ * `/{id}/{z}/{x}/{y}.{ext}` for the registered tilesets — and a paint style's
+ * parameters are part of its cache key and live in the query string. Anything
+ * assembled here would be a second way of spelling a URL that already exists,
+ * and okibi's contract is that the id and the manifest's template rebuild the
+ * original URL *exactly*. A composed one did not: it dropped the format
+ * extension, and every URL a warm plan contained answered 404.
+ *
+ * The leading slash goes, so that `url_template` can end in `/{id}`.
+ */
+function idOf(request: Request): string {
+  const url = new URL(request.url);
+  return `${url.pathname.slice(1)}${url.search}`;
+}
+
 function writeChecked(
   env: Env,
   request: Request,
@@ -90,7 +110,7 @@ function writeChecked(
   const event: TileDemand = {
     tileset: demand.tileset,
     kind: "content",
-    id: `${demand.coords.z}/${demand.coords.x}/${demand.coords.y}`,
+    id: idOf(request),
     qk,
     cacheStatus,
     // Which layer had the bytes does not change whether the tile is worth

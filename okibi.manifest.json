@@ -1,7 +1,7 @@
 {
   "manifest": "okibi-service/1",
   "service": "papers",
-  "url_template": "https://papers.reearth.land/styles/{tileset}/tile/{id}",
+  "url_template": "https://papers.reearth.land/{id}",
   "cost": {
     "default_gen_ms": 1491,
     "default_bytes": 124208,
