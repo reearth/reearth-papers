@@ -88,9 +88,13 @@ python3 scripts/og.py [--out public] [--font path/to/EB_Garamond.ttf]
 Needs Pillow and numpy, neither of which the worker depends on.
 
 **Typeface: [EB Garamond](https://fonts.google.com/specimen/EB+Garamond)**
-(SIL OFL 1.1), from Google Fonts. Only its rasterised output is
-committed, so nothing is redistributed — but the `.ttf` has to be on
-disk to redraw the card. Point `--font` at it, or set `OG_FONT`.
+(SIL OFL 1.1), from Google Fonts. The `.ttf` is not committed — it has
+to be on disk to redraw the card. Point `--font` at it, or set
+`OG_FONT`. The same face is set live on the two HTML pages, from the
+woff2 subsets in `public/webfont/` (redistributed under the OFL, whose
+text is committed beside them); the card and the pages therefore share
+one wordmark, and changing the type here means changing
+`--font-display` there too.
 
 The card is a `paint-sumi` render of the Bay of Naples. Two things in it
 are deliberate and easy to undo by accident:

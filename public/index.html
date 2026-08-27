@@ -24,6 +24,31 @@
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css" />
   <style>
+    /* EB Garamond (SIL OFL 1.1) — the face the social card is set in
+       (scripts/og.py), so the page and the card share one wordmark.
+       Self-hosted next to the tiles rather than pulled from a CDN, the
+       same call the glyph PBFs make (mirror/fonts/). Variable 400-700;
+       latin-ext only downloads if a tileset name reaches for it. */
+    @font-face {
+      font-family: 'EB Garamond';
+      font-style: normal;
+      font-weight: 400 700;
+      font-display: swap;
+      src: url(/webfont/ebgaramond-latin.woff2) format('woff2');
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+        U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+        U+2212, U+2215, U+FEFF, U+FFFD;
+    }
+    @font-face {
+      font-family: 'EB Garamond';
+      font-style: normal;
+      font-weight: 400 700;
+      font-display: swap;
+      src: url(/webfont/ebgaramond-latin-ext.woff2) format('woff2');
+      unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+        U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+        U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+    }
     :root {
       --paper: #f7f4ee;
       --paper-edge: #e3ded3;
@@ -33,7 +58,7 @@
       --card: #fffdf9;
       /* One stack per role, named once: the panel, the modals and the
          map popups all pick from these three and nowhere else. */
-      --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+      --font-display: 'EB Garamond', 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
       --font-sans: system-ui, -apple-system, sans-serif;
       --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
@@ -88,8 +113,11 @@
     }
     #panel h1 {
       margin: 0;
-      font: 600 16px/1.2 var(--font-display);
-      letter-spacing: .01em;
+      /* The wordmark, set as the social card sets it: EB Garamond at
+         its regular weight, tracked out (the card's 3px at 112px). 18px
+         because Garamond's small x-height reads a size down. */
+      font: 400 18px/1.2 var(--font-display);
+      letter-spacing: .027em;
     }
     #panel .brand {
       display: flex;
@@ -310,7 +338,7 @@
         padding: 8px 12px 6px;
         border-bottom: none;
       }
-      #panel h1 { font-size: 14px; white-space: nowrap; }
+      #panel h1 { font-size: 15.5px; white-space: nowrap; }
       /* The strip is one line: mark, title, help, tabs. */
       #panel .mark { width: 16px; height: 16px; }
       /* Inline in the header row (pushed to the right) so the tabs cost
@@ -353,7 +381,7 @@
     #attr-modal .inner { padding: 16px 18px; }
     #attr-modal h2 {
       margin: 0 0 6px;
-      font: 600 15px/1.25 var(--font-display);
+      font: 500 17px/1.25 var(--font-display);
     }
     #attr-modal p {
       margin: 0 0 10px;
@@ -417,7 +445,7 @@
     }
     #help-modal h2 {
       margin: 0;
-      font: 600 16px/1.2 var(--font-display);
+      font: 500 18px/1.2 var(--font-display);
     }
     #help-close {
       font: 400 20px/1 var(--font-sans);
@@ -502,7 +530,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
-      font: 600 12px/1.2 var(--font-display);
+      font: 500 13.5px/1.2 var(--font-display);
       background: var(--card);
       border-bottom: 1px solid var(--paper-edge);
     }
@@ -559,7 +587,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
-      font: 600 12px/1.2 var(--font-display);
+      font: 500 13.5px/1.2 var(--font-display);
       background: var(--card);
       border-bottom: 1px solid var(--paper-edge);
     }

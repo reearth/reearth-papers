@@ -73,25 +73,41 @@ function groupHtml(id: CreditGroupId, g: CreditGroup, ids: string[]): string {
 }
 
 const PAGE_CSS = `
-:root { --paper:#f7f4ee; --edge:#e3ded3; --ink:#1f1c17; --soft:#8a8273; --accent:#b4490e; --card:#fffdf9; }
+/* EB Garamond (SIL OFL 1.1), self-hosted under /webfont/ — the same
+   face the preview page and the social card are set in, so the wordmark
+   is one wordmark. See public/index.html for the pair of subsets. */
+@font-face { font-family:'EB Garamond'; font-style:normal; font-weight:400 700;
+  font-display:swap; src:url(/webfont/ebgaramond-latin.woff2) format('woff2');
+  unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,
+    U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,
+    U+FEFF,U+FFFD; }
+@font-face { font-family:'EB Garamond'; font-style:normal; font-weight:400 700;
+  font-display:swap; src:url(/webfont/ebgaramond-latin-ext.woff2) format('woff2');
+  unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,
+    U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,
+    U+2113,U+2C60-2C7F,U+A720-A7FF; }
+:root { --paper:#f7f4ee; --edge:#e3ded3; --ink:#1f1c17; --soft:#8a8273; --accent:#b4490e; --card:#fffdf9;
+        --font-display:'EB Garamond','Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;
+        --font-sans:system-ui,-apple-system,sans-serif;
+        --font-mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
 * { box-sizing:border-box; }
 body { margin:0; padding:32px 20px 64px; background:var(--paper); color:var(--ink);
-       font:14px/1.6 system-ui,-apple-system,sans-serif; }
+       font:14px/1.6 var(--font-sans); }
 main { max-width:760px; margin:0 auto; }
-h1 { margin:0 0 4px; font:600 24px/1.2 'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif; }
+h1 { margin:0 0 4px; font:400 27px/1.2 var(--font-display); letter-spacing:.027em; }
 .sub { margin:0 0 24px; color:var(--soft); font-size:12px; letter-spacing:.14em; text-transform:uppercase; }
 .lede { margin:0 0 28px; }
 a { color:var(--accent); }
 section { margin:0 0 22px; padding:14px 16px; background:var(--card);
           border:1px solid var(--edge); border-radius:10px; }
-h2 { margin:0 0 2px; font:600 15px/1.3 'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif; }
-.ids { margin:0 0 10px; font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+h2 { margin:0 0 2px; font:500 17px/1.3 var(--font-display); }
+.ids { margin:0 0 10px; font:11px/1.5 var(--font-mono);
        color:var(--soft); overflow-wrap:anywhere; }
 ul { margin:0; padding:0; list-style:none; }
 li { padding:8px 0; border-top:1px solid var(--edge); }
 .src { font-weight:600; }
 .lic { display:block; font-size:12px; color:var(--soft); }
-.tag { margin-left:8px; font:600 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+.tag { margin-left:8px; font:600 9px/1 var(--font-mono);
        letter-spacing:.1em; text-transform:uppercase; color:var(--accent);
        border:1px solid var(--accent); border-radius:4px; padding:3px 5px; vertical-align:2px; }
 .note { margin:4px 0 0; font-size:12px; color:var(--soft); }
