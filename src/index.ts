@@ -506,6 +506,9 @@ async function handlePaint(
       tileset: style.name,
       coords,
       fmt: format,
+      // The same string the cache key is namespaced by, so a warm request
+      // asks for the picture that was cached rather than for the default one.
+      search: params.canonical || undefined,
       // The parts of `version`, which is what the key is namespaced by, kept
       // apart because they move apart: the paint runtime, the style's own
       // revision, and the snapshot it was drawn from.

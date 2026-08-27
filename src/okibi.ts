@@ -48,6 +48,18 @@ export interface Demand {
   coords: TileCoords;
   fmt: string;
   epoch: Epoch;
+  /**
+   * The query string that is part of this tile's cache key, canonically
+   * spelled, for the routes that have one.
+   *
+   * Not the request's own query. A client may append anything — a
+   * cache-buster, a smoke-test stamp — and none of it changes the picture;
+   * carrying it would split one tile into as many ids as people invent, and
+   * put URLs in a warm plan that differ from the cached ones by noise. What
+   * belongs here is what the cache key was built from, which is the same
+   * string, spelled the same way.
+   */
+  search?: string;
 }
 
 /**
@@ -80,21 +92,24 @@ export function writeDemand(
 /**
  * The identifier okibi rebuilds this request's URL from.
  *
- * Taken from the request rather than composed from the coordinates, because
- * this worker serves the same kind of tile at two different shapes —
+ * The path is the request's own rather than composed from the coordinates,
+ * because this worker serves the same kind of tile at two different shapes —
  * `/styles/{theme}/tile/{z}/{x}/{y}.{ext}` for themes and paint styles,
- * `/{id}/{z}/{x}/{y}.{ext}` for the registered tilesets — and a paint style's
- * parameters are part of its cache key and live in the query string. Anything
- * assembled here would be a second way of spelling a URL that already exists,
- * and okibi's contract is that the id and the manifest's template rebuild the
- * original URL *exactly*. A composed one did not: it dropped the format
- * extension, and every URL a warm plan contained answered 404.
+ * `/{id}/{z}/{x}/{y}.{ext}` for the registered tilesets — and a manifest has
+ * one template. Anything assembled here would be a second way of spelling a
+ * URL that already exists, and okibi's contract is that the id and the
+ * template rebuild the original request *exactly*. A composed one did not: it
+ * dropped the format extension, and every URL in a warm plan answered 404.
+ *
+ * The query is not the request's own. Only what the cache key was built from
+ * belongs in a tile's identity; anything else a client appends would split
+ * one picture into as many ids as people invent.
  *
  * The leading slash goes, so that `url_template` can end in `/{id}`.
  */
-function idOf(request: Request): string {
-  const url = new URL(request.url);
-  return `${url.pathname.slice(1)}${url.search}`;
+function idOf(request: Request, search: string | undefined): string {
+  const path = new URL(request.url).pathname.slice(1);
+  return search ? `${path}?${search}` : path;
 }
 
 function writeChecked(
@@ -110,7 +125,7 @@ function writeChecked(
   const event: TileDemand = {
     tileset: demand.tileset,
     kind: "content",
-    id: idOf(request),
+    id: idOf(request, demand.search),
     qk,
     cacheStatus,
     // Which layer had the bytes does not change whether the tile is worth
