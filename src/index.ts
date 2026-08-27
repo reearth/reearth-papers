@@ -26,6 +26,7 @@
  *   /fonts/{fontstack}/{range}.pbf       — mirrored glyph PBFs
  *   /sprites/{version}/{name}.{png,json} — mirrored Protomaps sprites
  *   /catalog.json                        — index of all tilesets
+ *   /okibi/epochs.json                   — the cache-key epochs now in use
  *   /                                    — the viewer (public/index.html)
  *   /viewer                              — 302 → / (where the viewer used to live)
  *
@@ -82,6 +83,7 @@ import {
   readParams,
 } from "./paint_styles.js";
 import { dayBefore, takeDigest } from "./okibi-digest.js";
+import { handleOkibiEpochs } from "./okibi_epochs.js";
 import { readMirrorPointer } from "./pmtiles.js";
 import { headerSafeHtml, serveRenderedTile } from "./render_cache.js";
 import { handleSprite } from "./sprites.js";
@@ -243,6 +245,12 @@ async function dispatch(
   // that ever followed this holding a cached redirect to it.
   if (url.pathname === "/viewer" || url.pathname === "/viewer/") {
     return Response.redirect(`${url.origin}/`, 302);
+  }
+
+  // What okibi reads to notice a cache key that moved with nothing pushed.
+  // See src/okibi_epochs.ts, and spec/tile-demand.md in reearth/okibi.
+  if (url.pathname === "/okibi/epochs.json") {
+    return handleOkibiEpochs(env);
   }
 
   if (url.pathname === "/catalog.json") {
