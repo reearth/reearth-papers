@@ -64,6 +64,11 @@
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
+    /* Safety net for narrow phones: nothing in the panel or the map's
+       floating widgets should push the page wider than the viewport,
+       but if it ever does, clip rather than hand the whole document a
+       horizontal scrollbar. */
+    html, body { overflow-x: hidden; }
     body {
       display: grid;
       grid-template-columns: 248px 1fr;
@@ -334,16 +339,27 @@
       #panel header {
         display: flex;
         align-items: baseline;
-        gap: 8px;
+        /* Wrap when the brand + a full row of tabs doesn't fit the
+           viewport: at ~375px a four-tab shelf plus the wordmark is
+           wider than the screen, and without wrap the whole page
+           takes a horizontal scrollbar. */
+        flex-wrap: wrap;
+        gap: 6px 8px;
         padding: 8px 12px 6px;
         border-bottom: none;
       }
       #panel h1 { font-size: 15.5px; white-space: nowrap; }
       /* The strip is one line: mark, title, help, tabs. */
       #panel .mark { width: 16px; height: 16px; }
-      /* Inline in the header row (pushed to the right) so the tabs cost
-         no extra vertical space on the mobile strip. */
-      #tabs { margin: 0 0 0 auto; flex: none; }
+      /* Prefer the one-line layout: tabs sit to the right when there's
+         room. When there isn't, they wrap to the next row (via the
+         header's flex-wrap) rather than pushing the panel wider than
+         the viewport. min-width:0 keeps a shrinkable tabs container so
+         even a very narrow phone can wrap the tabs themselves. */
+      #tabs { margin: 0 0 0 auto; flex: 0 1 auto; min-width: 0; }
+      /* Keep the tabs at their intrinsic size (no desktop-style stretch);
+         wrapping is what handles the narrow case, not shrinking each
+         tab into an unreadable stub. */
       #tabs .tab { flex: none; }
       #gallery {
         display: flex;
@@ -421,7 +437,13 @@
     /* -- help modal --------------------------------------------------- */
     #help-modal {
       width: min(560px, calc(100vw - 32px));
+      /* vh over-counts on mobile browsers where the URL bar is shown
+         (100vh is the largest viewport, not the current one), so a
+         dialog centered against 100vh has its top pushed off-screen
+         and the close button goes with it. dvh is the actually-visible
+         viewport, with vh kept as a fallback for older engines. */
       max-height: calc(100vh - 64px);
+      max-height: calc(100dvh - 32px);
       padding: 0;
       /* The body scrolls, not the dialog, so the title bar stays put. */
       display: flex;
@@ -505,6 +527,20 @@
     }
     #help-modal .copy:hover { background: #f3efe6; }
     #help-modal .copy.copied { background: #e4f3df; border-color: #8fbf80; }
+    @media (max-width: 720px) {
+      /* Tighter side padding and a wider dialog so the visible viewport
+         area is spent on the content, and a bigger tap target on the
+         close ×. The height cap is already dvh above, so at this point
+         only chrome comes off, not the close button. */
+      #help-modal { width: calc(100vw - 16px); }
+      #help-modal header { padding: 10px 14px 8px; }
+      #help-modal .body { padding: 12px 14px 16px; }
+      #help-close {
+        font-size: 24px;
+        padding: 4px 8px;
+        margin: -4px -4px -4px 0;
+      }
+    }
 
     /* -- vector inspector (layer panel + attribute popup) ------------- */
     #layers {
