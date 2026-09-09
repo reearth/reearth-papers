@@ -74,6 +74,11 @@ tilesets with no data yet still produce a valid PNG instead of failing.
 
 ## og.py
 
+**Archived.** The committed `public/og.png` is a hand-kerned edit on
+top of this script's render; running it with `--out public` overwrites
+that. Keep it as the record of how the card was made, not as a build
+step.
+
 Draws the two pieces of artwork this site shows of itself: the social
 card (`public/og.png`, 1200×630) and the favicon
 (`public/favicon.ico`, `icon-512.png`, `apple-touch-icon.png`). Both are

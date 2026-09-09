@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """Draw the social card and the favicon.
 
+ARCHIVED — do not run this against public/. The committed public/og.png
+is no longer this script's output: its title was kerned by hand in an
+image editor on top of a render from here, and running this again with
+`--out public` overwrites that hand-tuned card with the machine one.
+The script is kept as the record of how the render was made (framing,
+type, ink); if the card ever needs regenerating, render to another
+directory and redo the kerning by hand.
+
 Both are artwork, not build output: they are rendered once, committed,
 and served as static files. This script exists so that "once" is
 repeatable — the framing, the type and the ink are parameters here
