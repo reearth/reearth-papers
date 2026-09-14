@@ -167,27 +167,32 @@ export default {
    * is a digest missing for a day — so it is logged rather than thrown, which
    * would only retry the same failing query on the same finished day.
    */
-  async scheduled(
-    controller: ScheduledController,
-    env: Env,
-    ctx: ExecutionContext,
-  ): Promise<void> {
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     const now = new Date(controller.scheduledTime).toISOString();
 
-    ctx.waitUntil(
-      takeDigest(env, dayBefore(controller.scheduledTime)).catch((err) => {
-        console.warn("okibi: digest failed", err);
-      }),
-    );
+    // Awaited rather than handed to `ctx.waitUntil`. Work passed to waitUntil
+    // runs *after* the invocation ends, and only for as long as the runtime
+    // is willing to keep an ended invocation alive — which is not long enough
+    // for this. Both of these read megabytes out of R2 and the watch plans a
+    // dozen tilesets from them; handed to waitUntil, the run was cut off
+    // partway through with `waitUntil() tasks did not complete within the
+    // allowed time`, having warmed some tilesets, none of the rest, and
+    // recorded nothing. Awaiting keeps the invocation open until they finish.
+    //
+    // Settled together rather than in sequence, because one failing is not a
+    // reason for the other not to run: the digest is a day of evidence and
+    // the watch is the only thing that notices a cache key moving with nobody
+    // deploying.
+    const [digest, watched] = await Promise.allSettled([
+      takeDigest(env, dayBefore(controller.scheduledTime)),
+      watch(env, now),
+    ]);
 
-    // Independent of the digest. One failing is not a reason for the other
-    // not to run, and the watch is the half that notices a cache key moving
-    // with nobody deploying — which nothing else here would ever see.
-    ctx.waitUntil(
-      watch(env, now).catch((err) => {
-        console.warn("okibi: watch failed", err);
-      }),
-    );
+    // Logged rather than thrown. A failure here is a day missing or a move
+    // unrecorded, and throwing would only retry the same failing query
+    // against the same finished day.
+    if (digest.status === "rejected") console.warn("okibi: digest failed", digest.reason);
+    if (watched.status === "rejected") console.warn("okibi: watch failed", watched.reason);
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
