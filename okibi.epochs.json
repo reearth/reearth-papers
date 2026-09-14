@@ -1,4 +1,12 @@
 {
   "service": "papers",
-  "tilesets": {}
+  "tilesets": {
+    "blackmarble": { "algo": "1" },
+    "esa-worldcover": { "algo": "3" },
+    "grayearth": { "algo": "1" },
+    "hypso": { "algo": "1" },
+    "ne1": { "algo": "1" },
+    "ne2": { "algo": "1" },
+    "oceanbottom": { "algo": "1" }
+  }
 }

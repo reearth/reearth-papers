@@ -19,6 +19,7 @@
 //
 // Build pipeline: see `mirror/blackmarble/scripts/`.
 
+import epochs from "../okibi.epochs.json";
 import { attributionOf } from "./credits.js";
 import { fromCustomClient } from "geotiff";
 import { pixelToLonLat, R2GeoTiffClient, TILE_SIZE } from "./cog.js";
@@ -165,9 +166,17 @@ async function renderTileRGBA(
 
 // -- cache + handler -------------------------------------------------------
 
-// Bump to invalidate cached renders after a sampling / encoder change.
-// The 2016 mosaic itself is immutable, so no date component is needed.
-const TILE_CACHE_VERSION = 1;
+// Bump — in okibi.epochs.json — to invalidate cached renders after a sampling
+// or encoder change. The 2016 mosaic itself is immutable, so no date
+// component is needed.
+//
+// Read from that file rather than written here, because this number is the
+// whole of this tileset's cache key beyond the tile's own coordinates, and it
+// is what okibi reports as the `algo` epoch. Two copies are two strings that
+// agree until somebody edits one — after which okibi matches an invalidation
+// against tiles that never had that key. Editing the file is also what turns
+// a bump into a warm plan on the pull request that makes it.
+const TILE_CACHE_VERSION = epochs.tilesets.blackmarble.algo;
 
 function cacheKey(coords: TileCoords, fmt: BlackmarbleFormat): string {
   return `cache/blackmarble/v${TILE_CACHE_VERSION}/${fmt}/${coords.z}/${coords.x}/${coords.y}.${fmt}`;
@@ -198,7 +207,7 @@ export async function handleBlackmarbleTile(
       // A mirrored raster is namespaced by one number, and that number is
       // the whole of its epoch: the archive behind it does not move, so
       // nothing else in the key can change without this changing too.
-      epoch: { algo: String(TILE_CACHE_VERSION) },
+      epoch: { algo: TILE_CACHE_VERSION },
     },
     render: async () => {
       const rgba = await renderTileRGBA(env, coords);

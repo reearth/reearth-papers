@@ -15,6 +15,7 @@
 //
 // Output formats: PNG (always) and WebP (via @jsquash/webp).
 
+import epochs from "../okibi.epochs.json";
 import { attributionOf } from "./credits.js";
 import { fromCustomClient } from "geotiff";
 import { pixelToLonLat, R2GeoTiffClient, TILE_SIZE } from "./cog.js";
@@ -359,7 +360,13 @@ function isFullyEmpty(rgba: Uint8Array): boolean {
 //     image; bumping orphans the previously-cached transparents.
 // v3: z<8 now renders from overview.tif instead of 404. (No cached
 //     content existed for z<8, but bumping keeps versions aligned.)
-const TILE_CACHE_VERSION = 3;
+//
+// Bumped in okibi.epochs.json, and read back from it: this number is the
+// whole of the tileset's cache key beyond the tile's own coordinates, and it
+// is what okibi reports as the `algo` epoch. A second copy is a string that
+// agrees with the key until somebody edits one. Editing the file is also what
+// turns a bump into a warm plan on the pull request that makes it.
+const TILE_CACHE_VERSION = epochs.tilesets["esa-worldcover"].algo;
 
 function cacheKey(coords: TileCoords, fmt: EsaFormat): string {
   return `cache/esa_worldcover/v${TILE_CACHE_VERSION}/${fmt}/${coords.z}/${coords.x}/${coords.y}.${fmt}`;
@@ -390,7 +397,7 @@ export async function handleEsaWorldcoverTile(
       // A mirrored raster is namespaced by one number, and that number is
       // the whole of its epoch: the archive behind it does not move, so
       // nothing else in the key can change without this changing too.
-      epoch: { algo: String(TILE_CACHE_VERSION) },
+      epoch: { algo: TILE_CACHE_VERSION },
     },
     render: async () => {
       const rgba =
