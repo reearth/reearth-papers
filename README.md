@@ -3,10 +3,10 @@
 A tile service for beautiful, openly-licensed maps of the world:
 OpenStreetMap rendered into a curated set of raster styles, plus a
 growing shelf of global basemaps and thematic layers (Natural Earth,
-NASA, ESA, Stamen) mirrored into R2 and served — or rendered on the
-fly from COGs — at the edge.
+Overture, NASA, ESA, Stamen) mirrored into R2 and served — or rendered
+on the fly from COGs — at the edge.
 
-Browse everything at **<https://papers.reearth.land/viewer>**.
+Browse everything at **<https://papers.reearth.land>**.
 
 ## Endpoints
 
@@ -17,15 +17,18 @@ are listed in the table below):
 |---|---|
 | `/catalog.json` | Machine-readable index of every tileset: TileJSON URL, MapLibre style (themes), and the `source` archive URL where one exists. |
 | `/{id}/tilejson.json` | TileJSON 3.0.0 (`?format=png\|webp` on multi-format rasters; default `webp`). Vector entries carry `vector_layers`. |
-| `/{id}/style.json` | MapLibre style, for vector tilesets that ship their own cartography (e.g. `naturalearth_vector`). |
+| `/{id}/style.json` | MapLibre style, for vector tilesets that ship their own cartography (e.g. `naturalearth_physical`). |
 | `/{id}/{z}/{x}/{y}.{ext}` | XYZ tiles in the tileset's format(s). |
 | `/{id}.{tif,pmtiles}` | The underlying single-file archive, with HTTP Range support — see [Direct archive access](#direct-archive-access). |
 | `/styles/{theme}/tile/{z}/{x}/{y}.{webp,png}` | Rendered OSM raster tile. `{theme}` ∈ `papers-light papers-dark protomaps-light protomaps-dark protomaps-white protomaps-black protomaps-grayscale` (the old unprefixed stock ids 301 here). |
 | `/styles/{theme}/tilejson.json` | TileJSON for a rendered theme (`?format=webp\|png`; default `webp`). |
 | `/styles/{theme}/style.json` | The theme's full MapLibre style, for client-side vector rendering. |
+| `/styles/{paint}/tile/{z}/{x}/{y}.{webp,png}` | Paint style tile — an ezu-native painterly render (`{paint}` ∈ `paint-pencil-sketch paint-pixel-art paint-voltage paint-sumi paint-wash`). |
+| `/styles/{paint}/tilejson.json` | TileJSON for a paint style (`?format=webp\|png`). |
 | `/fonts/{fontstack}/{range}.pbf` | Glyph PBFs the styles reference — Protomaps' stacks with the CJK gap filled. |
 | `/sprites/{version}/{name}.{png,json}` | Protomaps sprite sheets, mirrored. |
-| `/viewer` | Interactive preview of all of the above. |
+| `/attribution` | Credits page: every tileset's sources and licences (`/attribution.json` for the machine-readable form). |
+| `/` | Interactive preview of all of the above. |
 
 All responses are CORS-open (`access-control-allow-origin: *`).
 
@@ -33,7 +36,8 @@ All responses are CORS-open (`access-control-allow-origin: *`).
 
 | `{id}` | Dataset | Format | Native max zoom | Archive | License |
 |---|---|---|---|---|---|
-| `styles/{theme}` | OpenStreetMap via Protomaps, 7 rendered themes: the two house styles (Papers Light / Papers Dark — a label-free greyscale basemap meant to sit under data overlays) plus 5 stock Protomaps themes | `png` | 15 | — | © OpenStreetMap contributors |
+| `styles/{theme}` | OpenStreetMap via Protomaps, 7 rendered themes: the two house styles (Papers Light / Papers Dark — a label-free greyscale basemap meant to sit under data overlays) plus 5 stock Protomaps themes | `webp` `png` | 22 (rendered; the vector source stops at 15) | — | © OpenStreetMap contributors |
+| `styles/paint-{name}` | Painterly renders of the same OSM data, each from a hand-authored ezu style: `paint-pencil-sketch` (graphite on paper), `paint-pixel-art` (sprite-artist tile map), `paint-voltage` (neon night), `paint-sumi` (ink wash), `paint-wash` (watercolour built from noise). The four that shade terrain read [Re:Earth Terrain](https://terrain.reearth.land/), reprojected from its own z14 where the tile is deeper. | `webp` `png` | 19 (rendered) | — | © OpenStreetMap contributors, Mapterhorn |
 | `protomaps` | Protomaps daily basemap, mirrored monthly | `mvt` | 15 | `protomaps.pmtiles` | © OpenStreetMap contributors |
 | `naturalearth_physical` | Natural Earth physical layers (coastline, land/ocean, lakes, rivers, ice, reefs, islands, regions) | `mvt` | 8 | `naturalearth_physical.pmtiles` | public domain |
 | `naturalearth_admin` | Natural Earth admin layers (countries, units, states, counties, boundary lines) | `mvt` | 8 | `naturalearth_admin.pmtiles` | public domain |
@@ -41,6 +45,11 @@ All responses are CORS-open (`access-control-allow-origin: *`).
 | `naturalearth_landuse` | Natural Earth land use (urban areas, parks & protected lands) | `mvt` | 8 | `naturalearth_landuse.pmtiles` | public domain |
 | `naturalearth_transport` | Natural Earth transport (roads, railroads, airports, ports, time zones) | `mvt` | 10 | `naturalearth_transport.pmtiles` | public domain |
 | `naturalearth_bathymetry` | Natural Earth ocean-bottom bathymetry (depth bands) | `mvt` | 6 | `naturalearth_bathymetry.pmtiles` | public domain |
+| `overture_base` | Overture Maps base (land, land cover/use, water, bathymetry, infrastructure) | `mvt` | 13 | — | ODbL / CDLA-Permissive-2.0 (per theme) |
+| `overture_buildings` | Overture Maps buildings (footprints + 3D parts) | `mvt` | 14 | — | ODbL |
+| `overture_places` | Overture Maps places (POI points) | `mvt` | 14 | — | CDLA-Permissive-2.0 |
+| `overture_transportation` | Overture Maps transportation (road/rail/path segments, connectors) | `mvt` | 14 | — | ODbL |
+| `overture_divisions` | Overture Maps divisions (division points, areas, boundaries) | `mvt` | 12 | — | ODbL |
 | `watercolor` | Stamen Watercolor (frozen historical set) | `jpg` | 18 | `watercolor.pmtiles` | CC BY 4.0 |
 | `esa_worldcover_2021` | ESA WorldCover 2021 v200 — 10 m land cover | `webp` `png` | 13 | — | CC BY 4.0 |
 | `blackmarble` | NASA Black Marble 2016 — Earth at night | `webp` `png` | 8 | `blackmarble.tif` | public domain |
@@ -52,9 +61,17 @@ All responses are CORS-open (`access-control-allow-origin: *`).
 | `bluemarble` | NASA Blue Marble — passthrough to NASA GIBS WMTS | `jpeg` (upstream) | 8 | — | public domain |
 | `s2cloudless_2016` | EOX Sentinel-2 cloudless 2016 — passthrough to EOX WMTS | `jpg` (upstream) | 14 | — | CC BY 4.0 |
 
-Clients overzoom past each native max zoom automatically. Passthrough
-tilesets are TileJSON-only: the tiles are served by the upstream
-provider, not by us.
+Clients overzoom past each native max zoom automatically. The rendered
+themes are the exception: past the vector source's z15 the renderer
+reprojects that z15 ancestor into the deeper frame, so a z18 tile is a
+fresh render rather than a stretched bitmap. Those tiles are true 512 px
+(the TileJSON says so; don't hardcode `tileSize: 256` on the source).
+
+Passthrough tilesets are TileJSON-only: the tiles are served by the
+upstream provider, not by us. The `overture_*` entries sit in between —
+we range-read Overture's official PMTiles from S3 on demand and re-serve
+the tiles from our origin, storing nothing, so there is no archive URL
+of ours to hand out.
 
 The registry behind this table lives in
 [`src/tilesets.ts`](src/tilesets.ts) — adding a dataset is one entry
@@ -79,9 +96,27 @@ pmtiles://https://papers.reearth.land/watercolor.pmtiles
 
 Each tileset carries its required attribution in the TileJSON / style
 `attribution` field — most map clients render it automatically. If
-yours doesn't, display the attribution for the tilesets you use (e.g.
-for the rendered themes: *Re:Earth Papers · Protomaps ·
-© OpenStreetMap contributors*).
+yours doesn't, display the attribution for the tilesets you use.
+
+Those credits are deliberately short, and that is a licence question
+rather than a design one. A licence that requires its notice on the
+*produced work* keeps its name in the credit — ODbL does, which is why
+`© OpenStreetMap contributors` survives on every OSM-derived tileset.
+CC BY 4.0 allows the required information to be given "by providing a
+URI or hyperlink to a resource that includes the required information"
+(§3(a)(2)), so those credits sit one click away, behind the
+*Re:Earth Papers* link that every credit carries. Public-domain and
+open-government sources are listed there too, for the reader rather
+than for a licence.
+
+That link goes to [`/attribution`](https://papers.reearth.land/attribution)
+(and `/attribution.json`). Sources and licences come from
+[`src/credits.ts`](src/credits.ts); which tilesets sit under each of them
+is read back off the registries that serve them — the `credits` field on
+a tileset, the theme list, the paint manifest — so a tileset can't be
+served without being named there, which is the condition under which its
+sources may be folded out of the map credit at all. Paint styles publish
+their own credit with the style rather than from this registry.
 
 ## Status
 

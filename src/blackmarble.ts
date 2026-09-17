@@ -19,6 +19,8 @@
 //
 // Build pipeline: see `mirror/blackmarble/scripts/`.
 
+import epochs from "../okibi.epochs.json";
+import { attributionOf } from "./credits.js";
 import { fromCustomClient } from "geotiff";
 import { pixelToLonLat, R2GeoTiffClient, TILE_SIZE } from "./cog.js";
 import { encodePngRGBA, encodeWebpRGBA } from "./raster_encode.js";
@@ -63,10 +65,7 @@ function pickOverviewLevel(z: number): number {
   return 7;              // z=0,1 → 1.875 (or coarsest available)
 }
 
-export const BLACKMARBLE_ATTRIBUTION =
-  '<a href="https://papers.reearth.land">Re:Earth Papers</a> · ' +
-  '<a href="https://science.nasa.gov/earth/earth-observatory/earth-at-night/maps">NASA Earth Observatory</a> · ' +
-  "Suomi NPP VIIRS · Black Marble 2016";
+export const BLACKMARBLE_ATTRIBUTION = attributionOf("blackmarble");
 
 // R2 transport + coordinate helpers shared with esa_worldcover.ts and
 // naturalearth.ts — see src/cog.ts.
@@ -167,9 +166,17 @@ async function renderTileRGBA(
 
 // -- cache + handler -------------------------------------------------------
 
-// Bump to invalidate cached renders after a sampling / encoder change.
-// The 2016 mosaic itself is immutable, so no date component is needed.
-const TILE_CACHE_VERSION = 1;
+// Bump — in okibi.epochs.json — to invalidate cached renders after a sampling
+// or encoder change. The 2016 mosaic itself is immutable, so no date
+// component is needed.
+//
+// Read from that file rather than written here, because this number is the
+// whole of this tileset's cache key beyond the tile's own coordinates, and it
+// is what okibi reports as the `algo` epoch. Two copies are two strings that
+// agree until somebody edits one — after which okibi matches an invalidation
+// against tiles that never had that key. Editing the file is also what turns
+// a bump into a warm plan on the pull request that makes it.
+const TILE_CACHE_VERSION = epochs.tilesets.blackmarble.algo;
 
 function cacheKey(coords: TileCoords, fmt: BlackmarbleFormat): string {
   return `cache/blackmarble/v${TILE_CACHE_VERSION}/${fmt}/${coords.z}/${coords.x}/${coords.y}.${fmt}`;
@@ -193,6 +200,15 @@ export async function handleBlackmarbleTile(
     contentType: fmt === "png" ? "image/png" : "image/webp",
     attribution: BLACKMARBLE_ATTRIBUTION,
     persist,
+    demand: {
+      tileset: "blackmarble",
+      coords,
+      fmt,
+      // A mirrored raster is namespaced by one number, and that number is
+      // the whole of its epoch: the archive behind it does not move, so
+      // nothing else in the key can change without this changing too.
+      epoch: { algo: TILE_CACHE_VERSION },
+    },
     render: async () => {
       const rgba = await renderTileRGBA(env, coords);
       // Lossy WebP q=85 — Black Marble is a photographic RGB nightscape,

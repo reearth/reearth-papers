@@ -16,14 +16,14 @@
 // the tippecanoe build (`scripts/_lib.sh`'s LAYERS table), the TileJSON
 // `vector_layers` we advertise, and the generated MapLibre style.
 
+import { attributionOf } from "./credits.js";
 import { PMTiles, type RangeResponse, type Source } from "pmtiles";
+
+import { headerSafeHtml } from "./render_cache.js";
 
 // Public domain — no attribution required; we credit Natural Earth
 // anyway, matching the raster side (src/naturalearth.ts).
-export const NE_VECTOR_ATTRIBUTION =
-  '<a href="https://papers.reearth.land">Re:Earth Papers</a> · ' +
-  '<a href="https://www.naturalearthdata.com">Natural Earth</a> · ' +
-  "public domain";
+export const NE_VECTOR_ATTRIBUTION = attributionOf("naturalEarth");
 
 /** Render geometry of a layer kind — drives the viewer's per-layer
  *  inspector (one fill / line / circle layer of the right type) and is
@@ -426,7 +426,7 @@ export async function handleNeVectorTile(
       // moderate TTL with SWR lets a fresh build reach clients within a
       // day instead of being pinned for a year.
       "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
-      "x-attribution": NE_VECTOR_ATTRIBUTION,
+      "x-attribution": headerSafeHtml(NE_VECTOR_ATTRIBUTION),
     },
   });
 }

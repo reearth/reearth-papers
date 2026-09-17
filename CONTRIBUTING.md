@@ -163,6 +163,8 @@ workers.dev hostname can't be abused as a free Protomaps tile CDN.
   - `cjk_flavor.ts` — region-priority Han variant selection.
   - `render_cache.ts` — Cache API + optional R2 layer for rendered tiles.
   - `cache.ts` — `STYLE_VERSION` (cartography version).
+  - `paint_styles.ts` — the R2 shelf of ezu paint styles: manifest,
+    documents, assets, and param validation.
   - `style.ts` — generated MapLibre style per theme.
   - `tilejson.ts` — TileJSON for raster + vector endpoints.
   - `pmtiles.ts` — R2-backed PMTiles vector tile reader.
@@ -177,9 +179,91 @@ workers.dev hostname can't be abused as a free Protomaps tile CDN.
 
 ## Local development
 
-Local iteration of the **renderer container** under plain Docker is
-the fastest loop. The image hash on CF and local is identical, so
-behaviour matches end-to-end.
+Everything public renders in-worker (ezu), so `wrangler dev` is the
+whole loop — no Docker needed for the paths that actually serve
+traffic:
+
+```bash
+npm install
+npx wrangler dev
+curl 'http://localhost:8787/styles/protomaps-light/tile/0/0/0.webp' -o tile.webp
+```
+
+`.png` works on the same route if you want a lossless byte to diff;
+`.webp` is what the TileJSON advertises and what clients get.
+
+**For the viewer, pass `--local-upstream`.** With a `custom_domain`
+route configured, `wrangler dev` rewrites the request host to that
+route, so `new URL(request.url).origin` — which is what every TileJSON,
+catalog link and tile template is built from — comes out as
+`papers.reearth.land` even though you are on localhost. The page then
+loads production, and anything not deployed yet 404s:
+
+```bash
+npm run dev:viewer      # wrangler dev --port 8787 --local-upstream localhost:8787
+open http://localhost:8787
+```
+
+The viewer also pins its own fetches to the origin it was served from,
+which covers the workers.dev hostname; the URLs *inside* a TileJSON can
+only come from the worker, hence the flag.
+
+### Paint styles
+
+The paint styles (`/styles/paint-sumi/…` and friends) are ezu documents
+published to an R2 shelf, which this worker reads at request time
+(`src/paint_styles.ts`). Publishing one adds a tileset with no deploy
+here — that is the point of the shelf, and it is why these documents are
+not bundled the way the themed rasters' recipes are.
+
+What this side relies on:
+
+- `${PAINT_STYLES_PREFIX}/latest.json` — the manifest, written last so a
+  half-uploaded revision is never a visible one. It carries each style's
+  id, `rev`, display text, attribution, tile size, max zoom and params
+  schema, so serving the catalog, a TileJSON or `params.json` is one
+  memoised read.
+- `{id}/{rev}/style.json` — the document as strict JSON (comments
+  blanked on the way in, so no JSONC parser lives in the worker).
+- `{id}/{rev}/assets/…` — the brushes and images the document names with
+  `file:` paths.
+
+`rev` is a content hash of the document plus its assets, and every cache
+downstream keys on it, so publishing a change orphans exactly that
+style's tiles. There is no version constant to bump.
+
+A paint style has no `style.json`: an ezu document is a node graph, and
+no MapLibre style means the same thing.
+
+### Tuning a paint style (unreleased)
+
+Each style declares its own parameters, and the tile route takes them:
+
+```
+/styles/paint-pencil-sketch/tile/12/3637/1612.webp?grain=0.9&paper=%23e8f0ff
+```
+
+`/styles/{id}/params.json` serves the schema ezu derives from the
+document — types, defaults, ranges — and the viewer generates a panel
+from it at **`/?params=1`**. Both are deliberately quiet: the
+switch has no affordance in the UI and the catalog does not advertise the
+schema, because this is here to demo rather than to ship. Making it a
+feature is putting the `params` link back in the catalog entry
+(`src/catalog.ts`).
+
+Two things follow from that being a demo:
+
+- **Tuned tiles are not persisted.** Every distinct set of knobs is its
+  own cache namespace, so R2 would fill with pictures nobody asks for
+  twice; they live in the per-PoP edge cache only. The default picture —
+  what every client actually requests — still gets the global layer.
+- Out-of-range or malformed values are refused with a 400 rather than
+  clamped, so one URL cannot mean two pictures. Unknown query keys are
+  ignored, because tile URLs collect cache-busters in the wild.
+
+Only when you're touching the **comparison renderer** do you need the
+container. Plain Docker is the fastest loop there — the image hash on
+CF and local is identical, so behaviour matches end-to-end:
 
 ```bash
 cd container
@@ -190,12 +274,12 @@ docker run --rm --platform linux/amd64 -p 8080:8080 \
 curl 'http://localhost:8080/tile/0/0/0' -o tile.png
 ```
 
-For the **worker + container chain** locally (needs Docker):
+For the **worker → container chain** locally (needs Docker), drive the
+comparison-only route:
 
 ```bash
-npm install
 npx wrangler dev
-curl 'http://localhost:8787/styles/light/tile/0/0/0.png' -o tile.png
+curl 'http://localhost:8787/styles/protomaps-light/native/0/0/0.png' -o tile.png
 ```
 
 For the **mirror worker** locally:
@@ -314,14 +398,16 @@ remember to re-attach secrets afterwards (`wrangler secret put ...`).
 
 ### 4. Nested style URLs need URL encoding
 
-When testing with an explicit style override:
+`?style=` is the **container's** query parameter, not a public one — the
+worker builds that inner URL itself (`renderNativeTile` in
+`src/index.ts`), so this only bites when you drive a container directly:
 
 ```bash
 # WRONG — the inner `?` ends the outer query
-curl 'https://papers.reearth.land/tile/0/0/0.png?style=https://x/style.json?theme=dark'
+curl 'http://localhost:8080/tile/0/0/0?style=https://x/style.json?theme=dark'
 
 # RIGHT — encode the inner URL
-curl 'https://papers.reearth.land/tile/0/0/0.png?style=https%3A%2F%2Fx%2Fstyle.json%3Ftheme%3Ddark'
+curl 'http://localhost:8080/tile/0/0/0?style=https%3A%2F%2Fx%2Fstyle.json%3Ftheme%3Ddark'
 ```
 
 The container's axum router silently treats the unencoded form as a
@@ -421,6 +507,29 @@ active++;   // no await between the check and the increment, so it's atomic here
 A promise chain backed by another request's in-flight I/O (ezu's
 per-state `lock`) does work — it's the bare resolver handover that
 doesn't.
+
+### 9. Overture releases roll out of the bucket; don't pin one
+
+Overture's public S3 bucket keeps a **rolling window** of releases —
+usually two — and deletes what falls out of it. A pinned release is a
+dated bomb: `2026-06-17.0` was simply gone one morning and all five
+`/overture_*` routes returned 500.
+
+So `src/overture.ts` resolves the release instead. `currentRelease`
+lists the bucket, takes the newest, and caches it for an hour per
+isolate; the route path doesn't change when the release does, and tiles
+go out `max-age=3600` with SWR, so a new release reaches clients within
+the day on its own. `x-overture-release` on a tile says which release
+served it.
+
+`OVERTURE_RELEASE` is still in the file, but only as the release its
+layer metadata was read from (and the fallback if the bucket can't be
+listed). That metadata does drift — `building`'s minzoom went 6 → 4 in
+`2026-08-19.0` — and it is compiled in, because the catalog and the
+TileJSON describe the tiles before anyone asks for one. Refresh it with
+`node scripts/overture-release.mjs --bump`, which reads the live
+archives and writes the numbers back. Skipping it costs a slightly wrong
+`vector_layers`, not an outage.
 
 ## Other notes
 

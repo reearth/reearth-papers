@@ -1,0 +1,2009 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Re:Earth Papers — preview</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <!-- This page is `/`, so this is the card anyone sharing the site
+       gets. The wording tracks the About panel below, which is where a
+       visitor reads the same claim at length — if one changes, so does
+       the other. Absolute URLs: crawlers do not resolve relative ones. -->
+  <meta name="description" content="An open tile service: a growing shelf of openly-licensed map data — basemaps, painterly styles, satellite, vector — served ready to use from one origin." />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Re:Earth Papers" />
+  <meta property="og:title" content="Re:Earth Papers" />
+  <meta property="og:description" content="An open tile service: a growing shelf of openly-licensed map data — basemaps, painterly styles, satellite, vector — served ready to use from one origin." />
+  <meta property="og:url" content="https://papers.reearth.land/" />
+  <meta property="og:image" content="https://papers.reearth.land/og.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="The Bay of Naples rendered in the paint-sumi style — ink on paper — titled Re:Earth Papers." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" href="/icon-512.png" sizes="512x512" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css" />
+  <style>
+    /* EB Garamond (SIL OFL 1.1) — the face the social card is set in
+       (scripts/og.py), so the page and the card share one wordmark.
+       Self-hosted next to the tiles rather than pulled from a CDN, the
+       same call the glyph PBFs make (mirror/fonts/). Variable 400-700;
+       latin-ext only downloads if a tileset name reaches for it. */
+    @font-face {
+      font-family: 'EB Garamond';
+      font-style: normal;
+      font-weight: 400 700;
+      font-display: swap;
+      src: url(/webfont/ebgaramond-latin.woff2) format('woff2');
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+        U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+        U+2212, U+2215, U+FEFF, U+FFFD;
+    }
+    @font-face {
+      font-family: 'EB Garamond';
+      font-style: normal;
+      font-weight: 400 700;
+      font-display: swap;
+      src: url(/webfont/ebgaramond-latin-ext.woff2) format('woff2');
+      unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+        U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+        U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+    }
+    :root {
+      --paper: #f7f4ee;
+      --paper-edge: #e3ded3;
+      --ink: #1f1c17;
+      --ink-soft: #8a8273;
+      --accent: #b4490e;
+      --card: #fffdf9;
+      /* One stack per role, named once: the panel, the modals and the
+         map popups all pick from these three and nowhere else. */
+      --font-display: 'EB Garamond', 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+      --font-sans: system-ui, -apple-system, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    /* Safety net for narrow phones: nothing in the panel or the map's
+       floating widgets should push the page wider than the viewport,
+       but if it ever does, clip rather than hand the whole document a
+       horizontal scrollbar. */
+    html, body { overflow-x: hidden; }
+    body {
+      display: grid;
+      grid-template-columns: 248px 1fr;
+      font: 13px/1.45 var(--font-sans);
+      color: var(--ink);
+      background: var(--paper);
+    }
+    #map { height: 100%; }
+
+    /* -- hidden ezu comparison (?compare=ezu) ------------------------- */
+    body.compare { grid-template-columns: 248px 1fr 1fr; }
+    body.compare #map { border-right: 2px solid var(--accent); }
+    #map2 { height: 100%; position: relative; }
+    #map2[hidden] { display: none; }
+    .engine-badge {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 3;
+      font: 600 10px/1 var(--font-mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--card);
+      border: 1px solid var(--accent);
+      border-radius: 5px;
+      padding: 4px 7px;
+      pointer-events: none;
+    }
+
+    /* -- panel ------------------------------------------------------- */
+    #panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      /* As a grid item, min-width:auto would let the mobile strip's
+         content width blow the whole page out sideways. */
+      min-width: 0;
+      background:
+        repeating-linear-gradient(0deg, transparent 0 23px, rgba(31,28,23,.025) 23px 24px),
+        var(--paper);
+      border-right: 1px solid var(--paper-edge);
+    }
+    #panel header {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--paper-edge);
+    }
+    #panel h1 {
+      margin: 0;
+      /* The wordmark, set as the social card sets it: EB Garamond at
+         its regular weight, tracked out (the card's 3px at 112px). 18px
+         because Garamond's small x-height reads a size down. */
+      font: 400 18px/1.2 var(--font-display);
+      letter-spacing: .027em;
+    }
+    #panel .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #open-help {
+      flex: none;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      display: grid;
+      place-items: center;
+      font: 600 11px/1 var(--font-mono);
+      color: var(--accent);
+      background: none;
+      border: 1px solid var(--accent);
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    #open-help:hover { background: var(--accent); color: var(--card); }
+    /* The favicon, at title size. Its own ground is the same paper the
+       panel is on, so it needs no plate or border of its own. */
+    #panel .mark {
+      flex: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 3px;
+    }
+
+    /* -- tabs (one per catalog category) ------------------------------ */
+    #tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 10px;
+    }
+    #tabs .tab {
+      flex: 1 1 auto;
+      font: 500 10px/1 var(--font-mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      background: none;
+      border: 1px solid var(--paper-edge);
+      border-radius: 5px;
+      padding: 5px 8px;
+      cursor: pointer;
+      transition: color .15s, border-color .15s;
+    }
+    #tabs .tab:hover { color: var(--ink); border-color: #c9c2b2; }
+    #tabs .tab[aria-selected="true"] {
+      color: var(--accent);
+      border-color: var(--accent);
+      box-shadow: inset 0 0 0 1px var(--accent);
+    }
+
+    /* -- gallery ------------------------------------------------------ */
+    #gallery {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 12px;
+      display: grid;
+      /* max-content, not auto: Chrome collapses auto rows holding
+         <button> items to their min-content height (~one line). */
+      grid-auto-rows: max-content;
+      gap: 10px;
+      align-content: start;
+    }
+    /* Author `display:block` on .card would defeat the plain [hidden]
+       attribute (author origin beats the UA rule), so hide filtered-out
+       cards with a higher-specificity author rule. */
+    .card[hidden] { display: none; }
+    .card {
+      display: block;
+      width: 100%;
+      padding: 0;
+      text-align: left;
+      font: inherit;
+      color: inherit;
+      background: var(--card);
+      border: 1px solid var(--paper-edge);
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color .15s, box-shadow .15s, transform .15s;
+    }
+    .card:hover {
+      border-color: #c9c2b2;
+      transform: translateY(-1px);
+      box-shadow: 0 3px 10px rgba(31,28,23,.08);
+    }
+    .card.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent), 0 3px 10px rgba(180,73,14,.14);
+    }
+    .card:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .thumb {
+      display: block;
+      height: 76px;
+      overflow: hidden;
+      position: relative;
+      /* Vector / not-yet-loaded placeholder: faint contour-line sketch. */
+      background:
+        repeating-linear-gradient(115deg, transparent 0 9px, rgba(31,28,23,.07) 9px 10px),
+        repeating-linear-gradient(25deg, transparent 0 14px, rgba(31,28,23,.05) 14px 15px),
+        #efeadf;
+    }
+    .thumb img {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: transform .25s;
+    }
+    .card:hover .thumb img { transform: scale(1.04); }
+    .thumb .mvt {
+      position: absolute; inset: 0;
+      display: grid; place-items: center;
+      font: 600 11px/1 var(--font-mono);
+      letter-spacing: .2em;
+      color: var(--ink-soft);
+    }
+    .card .label {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 7px 10px 8px;
+    }
+    .card .name {
+      font-weight: 550;
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card .kind {
+      flex: none;
+      font: 500 9.5px/1 var(--font-mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+    .card.selected .kind { color: var(--accent); }
+
+    /* -- actions ------------------------------------------------------ */
+    /* Grid, not flex: these are the two things the panel is for, and
+       auto-width let them wrap into a ragged pair of different sizes.
+       One column each, full width, so they read as a matched pair and
+       stay put when the label swaps to "Copied!". */
+    #actions {
+      padding: 10px 12px;
+      border-top: 1px solid var(--paper-edge);
+      display: grid;
+      gap: 6px;
+    }
+    /* Same tiny uppercase mono as the tabs, but in the accent and a
+       size up: the panel's other controls are for browsing, and these
+       are what a visitor came to press. */
+    #actions button {
+      width: 100%;
+      font: 600 11px/1 var(--font-mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding: 9px 10px;
+      color: var(--accent);
+      background: var(--card);
+      border: 1px solid var(--accent);
+      border-radius: 5px;
+      cursor: pointer;
+      transition: color .15s, background .15s, border-color .15s;
+    }
+    #actions button:hover:not(:disabled) {
+      background: var(--accent);
+      color: var(--card);
+    }
+    /* Disabled until a tileset is picked, which is most of the first
+       few seconds — so it recedes to the browsing controls' weight
+       rather than sitting there as a dead accent. */
+    #actions button:disabled {
+      color: var(--ink-soft);
+      background: none;
+      border-color: var(--paper-edge);
+      cursor: default;
+    }
+    #actions button.copied,
+    #actions button.copied:hover {
+      color: #3f7a2e;
+      background: #e4f3df;
+      border-color: #8fbf80;
+    }
+    #gallery .pending {
+      color: var(--ink-soft);
+      font-style: italic;
+      padding: 4px 2px;
+    }
+
+    /* -- mobile: gallery becomes a horizontal strip below the map ----- */
+    @media (max-width: 720px) {
+      body {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr auto;
+      }
+      #map { order: 0; }
+      #panel {
+        order: 1;
+        border-right: none;
+        border-top: 1px solid var(--paper-edge);
+      }
+      #panel header {
+        display: flex;
+        align-items: baseline;
+        /* Wrap when the brand + a full row of tabs doesn't fit the
+           viewport: at ~375px a four-tab shelf plus the wordmark is
+           wider than the screen, and without wrap the whole page
+           takes a horizontal scrollbar. */
+        flex-wrap: wrap;
+        gap: 6px 8px;
+        padding: 8px 12px 6px;
+        border-bottom: none;
+      }
+      #panel h1 { font-size: 15.5px; white-space: nowrap; }
+      /* The strip is one line: mark, title, help, tabs. */
+      #panel .mark { width: 16px; height: 16px; }
+      /* Prefer the one-line layout: tabs sit to the right when there's
+         room. When there isn't, they wrap to the next row (via the
+         header's flex-wrap) rather than pushing the panel wider than
+         the viewport. min-width:0 keeps a shrinkable tabs container so
+         even a very narrow phone can wrap the tabs themselves. */
+      #tabs { margin: 0 0 0 auto; flex: 0 1 auto; min-width: 0; }
+      /* Keep the tabs at their intrinsic size (no desktop-style stretch);
+         wrapping is what handles the narrow case, not shrinking each
+         tab into an unreadable stub. */
+      #tabs .tab { flex: none; }
+      #gallery {
+        display: flex;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 4px 12px 10px;
+        gap: 8px;
+        -webkit-overflow-scrolling: touch;
+      }
+      .card { flex: 0 0 132px; }
+      .thumb { height: 60px; }
+      .card .label { padding: 5px 8px 6px; }
+      .card .kind { display: none; }
+      /* Side by side here: the panel is a strip above the map, and two
+         stacked full-width buttons would cost the map a band of its
+         height for nothing — the width is going spare instead. */
+      #actions {
+        padding: 8px 12px;
+        border-top: none;
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    /* -- attribution modal -------------------------------------------- */
+    #attr-modal {
+      width: min(440px, calc(100vw - 32px));
+      padding: 0;
+      border: 1px solid var(--paper-edge);
+      border-radius: 10px;
+      background: var(--card);
+      color: var(--ink);
+      box-shadow: 0 8px 32px rgba(31,28,23,.25);
+    }
+    #attr-modal::backdrop { background: rgba(31,28,23,.35); }
+    #attr-modal .inner { padding: 16px 18px; }
+    #attr-modal h2 {
+      margin: 0 0 6px;
+      font: 500 17px/1.25 var(--font-display);
+    }
+    #attr-modal p {
+      margin: 0 0 10px;
+      font-size: 12px;
+      color: var(--ink-soft);
+    }
+    #attr-modal .credit {
+      padding: 10px 12px;
+      border: 1px dashed #c9c2b2;
+      border-radius: 6px;
+      background: var(--paper);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    #attr-modal .credit a { color: var(--accent); }
+    #attr-modal .btns {
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+      margin-top: 12px;
+    }
+    #attr-modal .btns button {
+      font: inherit;
+      font-size: 12px;
+      padding: 4px 10px;
+      border: 1px solid #c9c2b2;
+      background: var(--card);
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #attr-modal .btns button:hover { background: #f3efe6; }
+    #attr-modal .btns .primary {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* -- help modal --------------------------------------------------- */
+    #help-modal {
+      width: min(560px, calc(100vw - 32px));
+      /* vh over-counts on mobile browsers where the URL bar is shown
+         (100vh is the largest viewport, not the current one), so a
+         dialog centered against 100vh has its top pushed off-screen
+         and the close button goes with it. dvh is the actually-visible
+         viewport, with vh kept as a fallback for older engines. */
+      max-height: calc(100vh - 64px);
+      max-height: calc(100dvh - 32px);
+      padding: 0;
+      /* The body scrolls, not the dialog, so the title bar stays put. */
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--paper-edge);
+      border-radius: 10px;
+      background: var(--card);
+      color: var(--ink);
+      box-shadow: 0 8px 32px rgba(31,28,23,.25);
+    }
+    #help-modal[open] { display: flex; }
+    #help-modal:not([open]) { display: none; }
+    #help-modal::backdrop { background: rgba(31,28,23,.35); }
+    #help-modal header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 13px 18px 11px;
+      border-bottom: 1px solid var(--paper-edge);
+    }
+    #help-modal h2 {
+      margin: 0;
+      font: 500 18px/1.2 var(--font-display);
+    }
+    #help-close {
+      font: 400 20px/1 var(--font-sans);
+      color: var(--ink-soft);
+      background: none;
+      border: none;
+      padding: 0 2px;
+      cursor: pointer;
+    }
+    #help-close:hover { color: var(--ink); }
+    #help-modal .body {
+      padding: 14px 18px 18px;
+      overflow-y: auto;
+    }
+    #help-modal h3 {
+      margin: 18px 0 6px;
+      font: 600 10px/1 var(--font-mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    #help-modal h3:first-child { margin-top: 0; }
+    #help-modal p { margin: 0 0 10px; font-size: 12.5px; }
+    #help-modal ul { margin: 0 0 10px; padding-left: 18px; font-size: 12.5px; }
+    #help-modal li { margin-bottom: 5px; }
+    #help-modal a { color: var(--accent); }
+    #help-modal code {
+      font: 11.5px/1.4 var(--font-mono);
+      color: var(--accent);
+    }
+    #help-modal .note { font-size: 11.5px; color: var(--ink-soft); }
+    #help-modal .codeblock { position: relative; margin: 0 0 10px; }
+    #help-modal pre {
+      margin: 0;
+      /* Right padding keeps the text clear of the parked copy button. */
+      padding: 10px 62px 10px 12px;
+      border: 1px dashed #c9c2b2;
+      border-radius: 6px;
+      background: var(--paper);
+      font: 11.5px/1.5 var(--font-mono);
+      /* Code scrolls rather than wraps: a wrapped URL reads as two lines
+         you can't paste. */
+      white-space: pre;
+      overflow-x: auto;
+    }
+    #help-modal .copy {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      font: inherit;
+      font-size: 11px;
+      padding: 2px 8px;
+      border: 1px solid #c9c2b2;
+      background: var(--card);
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #help-modal .copy:hover { background: #f3efe6; }
+    #help-modal .copy.copied { background: #e4f3df; border-color: #8fbf80; }
+    @media (max-width: 720px) {
+      /* Tighter side padding and a wider dialog so the visible viewport
+         area is spent on the content, and a bigger tap target on the
+         close ×. The height cap is already dvh above, so at this point
+         only chrome comes off, not the close button. */
+      #help-modal { width: calc(100vw - 16px); }
+      #help-modal header { padding: 10px 14px 8px; }
+      #help-modal .body { padding: 12px 14px 16px; }
+      #help-close {
+        font-size: 24px;
+        padding: 4px 8px;
+        margin: -4px -4px -4px 0;
+      }
+    }
+
+    /* -- vector inspector (layer panel + attribute popup) ------------- */
+    #layers {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 210px;
+      max-height: calc(100% - 20px);
+      overflow-y: auto;
+      z-index: 2;
+      background: var(--card);
+      border: 1px solid var(--paper-edge);
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(31,28,23,.15);
+      font-size: 12px;
+    }
+    #layers h2 {
+      position: sticky;
+      top: 0;
+      margin: 0;
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font: 500 13.5px/1.2 var(--font-display);
+      background: var(--card);
+      border-bottom: 1px solid var(--paper-edge);
+    }
+    #layers .all {
+      font: 500 10px/1 var(--font-mono);
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+    #layers .all:hover { color: var(--accent); }
+    #layers .lyr {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 4px 10px;
+      cursor: pointer;
+    }
+    #layers .lyr:hover { background: #f3efe6; }
+    #layers .lyr input { margin: 0; flex: none; }
+    #layers .sw {
+      width: 11px;
+      height: 11px;
+      border-radius: 2px;
+      flex: none;
+      border: 1px solid rgba(0,0,0,.15);
+    }
+    #layers .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* -- params panel (paint styles) ---------------------------------- */
+    /* Same slot as #layers: a paint style is a raster, so the vector
+       inspector is never up at the same time. */
+    #params {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 232px;
+      max-height: calc(100% - 20px);
+      overflow-y: auto;
+      z-index: 2;
+      background: var(--card);
+      border: 1px solid var(--paper-edge);
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(31,28,23,.15);
+      font-size: 12px;
+    }
+    #params h2 {
+      position: sticky;
+      top: 0;
+      margin: 0;
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font: 500 13.5px/1.2 var(--font-display);
+      background: var(--card);
+      border-bottom: 1px solid var(--paper-edge);
+    }
+    #params .reset {
+      font: 500 10px/1 var(--font-mono);
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+    #params .reset:hover { color: var(--accent); }
+    /* A tuned tile is rendered on demand and not persisted, so a knob
+       costs seconds of real work. Without a sign of it the panel looks
+       broken while the old tiles sit there. */
+    #params .busy {
+      font: 500 10px/1 var(--font-mono);
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: var(--accent);
+      display: none;
+    }
+    #params.busy .busy { display: inline; }
+    #params.busy .reset { display: none; }
+    #params .p { padding: 6px 10px; }
+    #params .p + .p { border-top: 1px solid #efece3; }
+    #params .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    #params .nm {
+      font: 500 11px/1.2 var(--font-mono);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #params .val {
+      font: 500 10px/1 var(--font-mono);
+      color: var(--ink-soft);
+      flex: none;
+    }
+    #params input[type=range] { width: 100%; margin: 5px 0 0; accent-color: var(--accent); }
+    #params input[type=color] {
+      width: 28px; height: 18px; padding: 0; flex: none;
+      border: 1px solid var(--paper-edge); border-radius: 3px; background: none;
+    }
+    /* The hex beside the swatch — there to be read and copied, so it gets
+       a monospace face and selects on focus (see the script). */
+    #params input.hex {
+      width: 9ch;
+      flex: none;
+      font: 500 11px/1.4 var(--font-mono);
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid var(--paper-edge);
+      border-radius: 3px;
+      padding: 1px 4px;
+      text-align: right;
+    }
+    #params input.hex:focus { outline: 1px solid var(--accent); outline-offset: 0; }
+    /* Half-typed value: marked, and changing nothing until it parses. */
+    #params input.hex.bad { border-color: #c0392b; color: #c0392b; }
+    #params .pending { color: var(--ink-soft); padding: 8px 10px; margin: 0; }
+    @media (max-width: 720px) {
+      #params { top: auto; bottom: 10px; right: 10px; max-height: 45%; width: 200px; }
+    }
+
+    /* -- tile progress ------------------------------------------------ */
+    /* Top-left, the one corner nothing else claims: the nav controls sit
+       top-right, the inspector and params panels under them. */
+    #tiles {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 2;
+      width: 208px;
+      padding: 7px 9px 8px;
+      background: var(--card);
+      border: 1px solid var(--paper-edge);
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(31,28,23,.15);
+      pointer-events: none;
+    }
+    #tiles[hidden] { display: none; }
+    #tiles .hd {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      font: 600 10px/1.2 var(--font-mono);
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    #tiles .what { color: var(--ink-soft); }
+    #tiles.cold .what { color: var(--accent); }
+    #tiles .elapsed { color: var(--ink-soft); font-weight: 500; flex: none; }
+    /* The bar is the answer to "how much is left" — done over the whole
+       burst, so it only ever grows within one wait. */
+    #tiles .bar {
+      height: 3px;
+      margin: 6px 0 5px;
+      border-radius: 2px;
+      background: #ece7dc;
+      overflow: hidden;
+    }
+    #tiles .bar i {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: var(--ink-soft);
+      transition: width .2s linear;
+    }
+    #tiles.cold .bar i { background: var(--accent); }
+    #tiles .note {
+      font: 11px/1.35 var(--font-sans);
+      color: var(--ink-soft);
+    }
+    #tiles .note b { font-weight: 600; color: var(--ink); }
+    #tiles .bad { color: #c0392b; }
+    @media (max-width: 720px) {
+      #tiles { width: 176px; }
+    }
+
+    .maplibregl-popup-content { font: 12px/1.4 var(--font-sans); }
+    .ne-pop .h {
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+    .ne-pop table { border-collapse: collapse; display: block; max-height: 240px; overflow: auto; }
+    .ne-pop td { border-top: 1px solid #eee; padding: 1px 8px 1px 0; vertical-align: top; }
+    .ne-pop td.k { color: var(--ink-soft); white-space: nowrap; }
+    @media (max-width: 720px) {
+      #layers { top: auto; bottom: 10px; right: 10px; max-height: 45%; width: 180px; }
+    }
+  </style>
+</head>
+<body>
+  <aside id="panel">
+    <header>
+      <div class="brand">
+        <img class="mark" src="/icon-512.png" alt="" width="20" height="20" />
+        <h1>Re:Earth Papers</h1>
+        <button id="open-help" type="button"
+                title="About Re:Earth Papers"
+                aria-label="About Re:Earth Papers">?</button>
+      </div>
+      <!-- One tab per category present in /catalog.json, built at load
+           time: a tileset shelf that appears server-side shows up here
+           without an edit. -->
+      <div id="tabs" role="tablist" aria-label="Tileset category"></div>
+    </header>
+    <nav id="gallery" aria-label="Tilesets">
+      <p class="pending">loading /catalog.json…</p>
+    </nav>
+    <div id="actions">
+      <button id="copy-tilejson" disabled type="button">Copy TileJSON URL</button>
+      <button id="copy-xyz" disabled type="button">Copy XYZ URL</button>
+    </div>
+  </aside>
+  <div id="map"></div>
+  <!-- Hidden comparison mode (?compare=ezu): the tiles everyone gets on
+       the left, maplibre-native's take on the same view on the right,
+       synced. No UI affordance on purpose. -->
+  <div id="map2" hidden>
+    <span class="engine-badge">maplibre-native</span>
+  </div>
+  <!-- Shown after copying a raw XYZ URL: unlike TileJSON, it carries no
+       attribution metadata, so the consumer has to display the credit
+       themselves. -->
+  <dialog id="attr-modal">
+    <div class="inner">
+      <h2>Please display this attribution</h2>
+      <p>
+        The XYZ URL is copied — but unlike a TileJSON URL, it carries no
+        attribution metadata, so map clients can't show the credit
+        automatically. Please display it on your map:
+      </p>
+      <div class="credit" id="attr-credit"></div>
+      <div class="btns">
+        <button type="button" id="attr-copy" class="primary">Copy attribution HTML</button>
+        <button type="button" id="attr-close">Close</button>
+      </div>
+    </div>
+  </dialog>
+  <!-- Help: what the service is, how to point a client at it, and the
+       policy it runs under. Opened from the panel; never auto-opened —
+       most visitors arrive knowing what they came for. -->
+  <dialog id="help-modal" aria-labelledby="help-title">
+    <header>
+      <h2 id="help-title">About Re:Earth Papers</h2>
+      <button type="button" id="help-close" aria-label="Close">&times;</button>
+    </header>
+    <div class="body">
+      <p>
+        Re:Earth Papers is an open tile service: a growing shelf of
+        openly-licensed map data, served ready to use from one origin.
+        Raster basemaps and painterly styles rendered here from vector
+        data; satellite and thematic imagery from NASA, ESA, Natural
+        Earth and Stamen; vector tilesets from Overture and Natural Earth
+        for you to style yourself. Everything you see in this preview is
+        a live endpoint — point any map client at it.
+      </p>
+
+      <h3>Endpoints</h3>
+      <ul>
+        <li><code>/catalog.json</code> — machine-readable index of every tileset.</li>
+        <li><code>/{id}/tilejson.json</code> — TileJSON 3.0.0, attribution included.</li>
+        <li><code>/{id}/{z}/{x}/{y}.{ext}</code> — XYZ tiles.</li>
+        <li><code>/styles/{theme}/tilejson.json</code> — a rendered basemap theme, e.g. <code>papers-light</code>.</li>
+        <li><code>/attribution</code> — every tileset's sources and licences (<code>.json</code> too).</li>
+      </ul>
+      <p class="note">
+        Pick a tileset in the gallery and the Copy buttons hand you its
+        exact URLs. Every response is CORS-open.
+      </p>
+
+      <h3>Reading the gallery</h3>
+      <p>
+        Every card is tagged with what a client gets — <code>raster</code>
+        or <code>vector</code> — and, where it applies, a suffix for where
+        the bytes come from. Vector tilesets have no picture to preview,
+        so their thumbnail shows <code>MVT</code> instead. Four
+        arrangements sit behind those tags:
+      </p>
+      <ul>
+        <li>
+          <strong>Rendered on demand</strong> (<code>raster</code>) — the
+          basemap themes and the paint styles. Nothing is stored per
+          theme: each tile is drawn in the Worker from the mirrored vector
+          data when you ask for it, then cached.
+        </li>
+        <li>
+          <strong>Served from our mirror</strong> (<code>raster</code>,
+          <code>vector</code>) — the datasets we copy into R2 as a COG or
+          PMTiles archive. Fastest, and the archive itself is downloadable.
+        </li>
+        <li>
+          <strong>Proxied</strong> (<code>·px</code>) — we serve the bytes
+          but mirror nothing: the Worker range-reads a remote archive on
+          demand. Overture works this way, so its tiles inherit whatever
+          the upstream release is doing.
+        </li>
+        <li>
+          <strong>Passthrough</strong> (<code>·pt</code>) — the TileJSON
+          points straight at the provider (NASA GIBS, EOX), so your client
+          fetches those tiles from them, not from us. We supply the
+          TileJSON and its attribution; availability is theirs.
+        </li>
+      </ul>
+      <p class="note">
+        Hover a badge to see the same thing spelled out.
+      </p>
+
+      <h3>Sample code (MapLibre)</h3>
+      <div class="codeblock">
+        <pre id="help-sample">import maplibregl from "maplibre-gl";
+
+const map = new maplibregl.Map({
+  container: "map",
+  center: [139.767, 35.681],
+  zoom: 11,
+  style: {
+    version: 8,
+    sources: {
+      papers: {
+        type: "raster",
+        // Any tilejson.json from /catalog.json works here.
+        url: "https://papers.reearth.land/styles/papers-light/tilejson.json",
+      },
+    },
+    layers: [{ id: "papers", type: "raster", source: "papers" }],
+  },
+});</pre>
+        <button class="copy" data-target="help-sample" type="button">Copy</button>
+      </div>
+
+      <h3>Attribution (required)</h3>
+      <p>
+        Each tileset carries its required credit in the
+        <code>attribution</code> field of its TileJSON or style, and most
+        clients render that automatically — which is why a TileJSON URL is
+        the better thing to hand your map. A raw XYZ URL carries no such
+        metadata, so if you use one, display the attribution for each
+        tileset you use; Copy XYZ URL shows you the exact text.
+      </p>
+      <p>
+        Those credits are short because most licences allow it: only a
+        licence that requires its notice on the map itself — ODbL, hence
+        <em>© OpenStreetMap contributors</em> — stays in the line. The rest
+        sit behind the <em>Re:Earth Papers</em> link every credit carries,
+        which goes to
+        <a href="/attribution" target="_blank" rel="noopener noreferrer">/attribution</a>:
+        every source, with its licence, per tileset.
+      </p>
+
+      <h3>Operating policy</h3>
+      <ul>
+        <li>
+          This is a best-effort community service: no SLA, no uptime
+          guarantee, no support commitment. That says what we promise,
+          not how much you may use it — the service is here to be used.
+        </li>
+        <li>
+          It's a shared endpoint, so please be gentle: no bulk crawling or
+          pre-seeding of whole zoom levels. For work at that scale, take
+          the single-file archives instead —
+          <code>/{id}.tif</code> and <code>/{id}.pmtiles</code> support
+          HTTP Range, so GDAL, QGIS and PMTiles clients can read them
+          directly.
+        </li>
+        <li>
+          The cartography is still moving. Styles get retuned and renders
+          are re-versioned, so the same tile URL can return a different
+          picture without notice. Pin your own copy if you need the image
+          to stay put.
+        </li>
+        <li>
+          The vector basemap the styles render from — currently Protomaps'
+          daily OpenStreetMap build — is re-mirrored monthly, so the map
+          follows OSM with roughly that lag; the other datasets are frozen
+          snapshots of their published releases.
+        </li>
+      </ul>
+
+      <h3>Operator</h3>
+      <p>
+        Operated by
+        <a href="https://eukarya.io/" target="_blank" rel="noopener noreferrer">Eukarya Inc.</a>
+        as part of the
+        <a href="https://reearth.io/" target="_blank" rel="noopener noreferrer">Re:Earth</a>
+        ecosystem. Source, architecture notes and the full tileset table
+        live in the
+        <a href="https://github.com/reearth/reearth-papers" target="_blank" rel="noopener noreferrer">repository</a>;
+        bugs and requests are welcome as issues there.
+      </p>
+    </div>
+  </dialog>
+  <script src="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"></script>
+  <script>
+    // Build the preview's tileset gallery from /catalog.json so adding
+    // a new theme or raster source on the server side shows up here
+    // without any HTML edit. Each card carries a live tile thumbnail
+    // fetched through the tileset's own TileJSON.
+    //
+    // Rendering mode is implicit: vector PMTiles tilesets (and only
+    // those) are rendered client-side from a MapLibre style; raster
+    // tilesets always show their served tiles.
+
+    // The whole world at z0, so no region gets top billing — right for a
+    // basemap or a global dataset, where the thumbnail's job is to say
+    // what the colours are.
+    const THUMB = { z: 0, x: 0, y: 0 };
+
+    // Except for the paint styles, whose job it is to look like
+    // something. At z0 every one of them is a beige rectangle with a
+    // coastline in it: the graphite hatching, the neon glow, the ink
+    // bleed and the pixel grid are all street-scale, and a card that
+    // doesn't show them is a card that sells nothing. So they get a
+    // dense city — central Tokyo at z13, where all five have plenty of
+    // road, water and terrain to draw.
+    const THUMB_PAINT = { z: 13, x: 7276, y: 3225 };
+
+    // The catalog links to itself with absolute URLs built from the
+    // origin the worker was *asked* for, which is not always the origin
+    // this page came from: `wrangler dev` rewrites the request host to
+    // the configured route, and the workers.dev subdomain is a second
+    // hostname for the same service. Fetches this page makes are pinned
+    // to its own origin so a preview never quietly reads production.
+    // (Only for what the page loads — the copy buttons hand out the
+    // catalog's own URLs, which are the ones a consumer should use.)
+    const ours = (u) => {
+      if (!u) return u;
+      try {
+        const p = new URL(u, location.href);
+        return location.origin + p.pathname + p.search;
+      } catch (e) {
+        return u;
+      }
+    };
+
+    function rasterStyle(tilejsonUrl) {
+      return {
+        version: 8,
+        sources: {
+          // No tileSize here on purpose: an explicit source option
+          // would take precedence over the TileJSON (see MapLibre's
+          // load_tilejson.ts), and every raster TileJSON we serve
+          // carries the correct value (512 for the themed styles, 256
+          // for the data rasters).
+          raster: { type: 'raster', url: tilejsonUrl },
+        },
+        layers: [{ id: 'raster', type: 'raster', source: 'raster' }],
+      };
+    }
+
+    // -- tile progress -------------------------------------------------
+    // A rendered tile is drawn on demand: the first request for one costs
+    // seconds of work in the Worker, every request after it is a cache
+    // hit. From the outside the two are the same picture — a blank square
+    // — so a map that is busy rendering reads as a map that has hung.
+    // This watches tile traffic and says which of the two is happening,
+    // how many tiles are still out, and how long the wait has run.
+    //
+    // Two sources, because neither is enough alone. MapLibre's per-tile
+    // `dataloading`/`data` events count what the view still wants,
+    // including vector tiles, which are fetched from a worker thread
+    // where wrapping `fetch` cannot see them. Wrapping `fetch` is in turn
+    // the only way to read `x-cache`, and `x-cache: miss` is the server
+    // saying in so many words that it rendered this tile just now.
+    const TILE_PATH = /\/\d+\/\d+\/\d+(\.[a-z0-9]+)?$/i;
+    const traffic = {
+      inflight: new Set(), // { start } per outstanding tile request
+      cold: 0,   // came back `x-cache: miss` — rendered for this request
+      failed: 0, // errored, not counting aborts and empty (404) tiles
+    };
+    (() => {
+      const original = window.fetch;
+      window.fetch = function (input, init) {
+        let path = null;
+        try {
+          path = new URL(
+            typeof input === 'string' ? input : input.url, location.href).pathname;
+        } catch (e) { /* not a URL we can read — leave the call alone */ }
+        if (!path || !TILE_PATH.test(path)) return original.call(this, input, init);
+        const rec = { start: performance.now() };
+        traffic.inflight.add(rec);
+        const settled = () => traffic.inflight.delete(rec);
+        return original.call(this, input, init).then(
+          (res) => {
+            settled();
+            // A raster with no data at this tile answers 404, and
+            // MapLibre fills the hole from an ancestor. Normal, not a
+            // failure. (A cross-origin passthrough tileset doesn't
+            // expose `x-cache` at all; the elapsed-time rule below is
+            // what catches a slow one of those.)
+            if (res.ok) {
+              if (res.headers.get('x-cache') === 'miss') traffic.cold++;
+            } else if (res.status !== 404) traffic.failed++;
+            return res;
+          },
+          (err) => {
+            settled();
+            // Panning away aborts the tiles the old view wanted.
+            if (!err || err.name !== 'AbortError') traffic.failed++;
+            throw err;
+          },
+        );
+      };
+    })();
+
+    const tilesEl = document.createElement('div');
+    tilesEl.id = 'tiles';
+    tilesEl.hidden = true;
+    tilesEl.innerHTML =
+      '<div class="hd"><span class="what"></span><span class="elapsed"></span></div>' +
+      '<div class="bar"><i></i></div><div class="note"></div>';
+    const tilesWhat = tilesEl.querySelector('.what');
+    const tilesElapsed = tilesEl.querySelector('.elapsed');
+    const tilesBar = tilesEl.querySelector('.bar i');
+    const tilesNote = tilesEl.querySelector('.note');
+
+    // One wait, from the first tile the view asks for to `idle`. Counting
+    // per burst is what makes "8 of 14" mean anything: a running total
+    // over the session would only ever say "lots".
+    const waiting = new Set(); // tile objects MapLibre has not resolved
+    let burstStart = 0;
+    let burstDone = 0;
+    let lastArrival = 0;
+
+    function bindTileStatus(m) {
+      const tileOf = (e) => (e.dataType === 'source' ? e.tile : null);
+      m.on('dataloading', (e) => {
+        const tile = tileOf(e);
+        if (!tile) return;
+        // A burst opens on the first tile after the last `idle`. Not on
+        // "nothing is in flight": MapLibre starts the request inside
+        // `_addTile` and fires this event after, so the first tile of a
+        // burst is already out by the time we hear about it.
+        if (!burstStart) {
+          burstStart = performance.now();
+          lastArrival = burstStart;
+        }
+        waiting.add(tile);
+      });
+      const arrived = (e) => {
+        const tile = tileOf(e);
+        if (!tile || !waiting.delete(tile)) return;
+        burstDone++;
+        lastArrival = performance.now();
+      };
+      m.on('data', arrived);
+      m.on('dataabort', (e) => {
+        // Aborted tiles are no longer wanted, so they leave the total
+        // rather than counting as done.
+        const tile = tileOf(e);
+        if (tile) waiting.delete(tile);
+      });
+      // `idle` is the one honest "everything in view has arrived", and it
+      // doubles as the reset: a tile MapLibre served from its own cache
+      // never fires `data`, so the set would otherwise keep a ghost.
+      m.on('idle', () => {
+        waiting.clear();
+        burstStart = 0;
+        burstDone = 0;
+        traffic.cold = traffic.failed = 0;
+      });
+    }
+
+    function updateTileStatus() {
+      const pending = Math.max(waiting.size, traffic.inflight.size);
+      const now = performance.now();
+      // Under half a second nothing is worth saying: a cached view is
+      // done inside that, and a panel that blinks on every pan is noise.
+      if (!pending || !burstStart || now - burstStart < 500) {
+        tilesEl.hidden = true;
+        return;
+      }
+      let oldest = 0;
+      for (const rec of traffic.inflight) oldest = Math.max(oldest, now - rec.start);
+      // Cold either because the server said so, or because no cache hit
+      // takes this long — which is the honest read while the first tile
+      // of a cold view is still out and has told us nothing yet.
+      const cold = traffic.cold > 0 || oldest > 1500;
+      const total = burstDone + pending;
+      const stalled = now - lastArrival > 15000;
+
+      tilesEl.hidden = false;
+      tilesEl.classList.toggle('cold', cold);
+      tilesWhat.textContent = cold ? 'Rendering tiles' : 'Loading tiles';
+      tilesElapsed.textContent = Math.round((now - burstStart) / 1000) + 's';
+      tilesBar.style.width = Math.round((burstDone / total) * 100) + '%';
+
+      let note = '<b>' + burstDone + ' of ' + total + '</b> tiles';
+      if (cold) {
+        note += ' — this view isn\'t cached yet, so each tile is being ' +
+          'drawn now, and cached once it is.';
+      }
+      if (stalled) {
+        note += ' <span class="bad">Nothing has come back in ' +
+          Math.round((now - lastArrival) / 1000) + 's.</span>';
+      }
+      if (traffic.failed) {
+        note += ' <span class="bad">' + traffic.failed +
+          (traffic.failed === 1 ? ' tile failed.' : ' tiles failed.') + '</span>';
+      }
+      tilesNote.innerHTML = note;
+    }
+    // Elapsed seconds tick on their own, so this is a clock rather than
+    // an event handler.
+    setInterval(updateTileStatus, 250);
+
+    let map = null;
+
+    // -- hidden renderer comparison (?compare=ezu) -------------------
+    // The left map is the ordinary raster route, which ezu renders. This
+    // puts maplibre-native's render of the same view beside it. No UI
+    // affordance on purpose — the query param is the switch, and hash
+    // links keep working, so a comparison spot is shareable as a URL.
+    const compareEzu =
+      new URLSearchParams(location.search).get('compare') === 'ezu';
+    // -- hidden params panel (?params=1) ----------------------------
+    // A paint style's tile route takes its declared knobs as query
+    // params, and this page can drive them. It is a demo, not a
+    // published feature: no affordance in the UI, the catalog does not
+    // advertise the schema, and tuned tiles are not persisted server-side
+    // (each set of knobs is its own cache namespace). The query param is
+    // the switch, so a tuned view stays shareable as a URL.
+    const paramsUi =
+      new URLSearchParams(location.search).get('params') === '1';
+    // Every themed raster is renderable both ways; the theme ids match
+    // the catalog entries' `theme` field.
+    const EZU_COMPARE_THEMES = [
+      'papers-light', 'papers-dark',
+      'protomaps-light', 'protomaps-dark',
+      'protomaps-white', 'protomaps-black', 'protomaps-grayscale',
+    ];
+    let map2 = null;
+
+    // maplibre-native, the comparison side. Its route is deliberately
+    // uncached in R2 — nothing but this map asks for it.
+    function ezuStyle(theme) {
+      return {
+        version: 8,
+        sources: {
+          raster: {
+            type: 'raster',
+            tiles: [location.origin + '/styles/' + theme + '/native/{z}/{x}/{y}.png'],
+            tileSize: 512,
+            maxzoom: 22,
+            attribution: 'maplibre-native render',
+          },
+        },
+        layers: [{ id: 'raster', type: 'raster', source: 'raster' }],
+      };
+    }
+
+    function syncMaps(a, b) {
+      let syncing = false;
+      const follow = (src, dst) => () => {
+        if (syncing) return;
+        syncing = true;
+        dst.jumpTo({
+          center: src.getCenter(),
+          zoom: src.getZoom(),
+          bearing: src.getBearing(),
+          pitch: src.getPitch(),
+        });
+        syncing = false;
+      };
+      a.on('move', follow(a, b));
+      b.on('move', follow(b, a));
+    }
+
+    function updateCompare(t) {
+      if (!compareEzu || !map) return;
+      const ok =
+        t && t.type !== 'vector' && EZU_COMPARE_THEMES.includes(t.theme);
+      document.body.classList.toggle('compare', ok);
+      document.getElementById('map2').hidden = !ok;
+      if (ok) {
+        if (!map2) {
+          map2 = new maplibregl.Map({
+            container: 'map2',
+            style: ezuStyle(t.theme),
+            center: map.getCenter(),
+            zoom: map.getZoom(),
+          });
+          syncMaps(map, map2);
+        } else {
+          map2.setStyle(ezuStyle(t.theme));
+        }
+      }
+      map.resize(); // the grid column count just changed
+      if (ok) {
+        // Re-align after both containers settle at their new widths —
+        // resizes keep each map's own centre, which drifts the pair
+        // apart on the first toggle.
+        map2.resize();
+        map2.jumpTo({
+          center: map.getCenter(),
+          zoom: map.getZoom(),
+          bearing: map.getBearing(),
+          pitch: map.getPitch(),
+        });
+      }
+    }
+
+    // -- categories ------------------------------------------------
+    // The shelves a tileset can sit on, in gallery order, with the label
+    // each one gets. A category the viewer has never heard of still gets
+    // a tab (labelled by its own name) rather than vanishing — the
+    // catalog is allowed to grow without this file changing.
+    const CATEGORY_LABELS = {
+      basemap: 'Basemaps',
+      paint: 'Paint',
+      imagery: 'Imagery',
+      vector: 'Vector',
+    };
+    const CATEGORY_ORDER = Object.keys(CATEGORY_LABELS);
+
+    const categoryOf = (t) =>
+      t.category || (t.type === 'vector' ? 'vector' : 'imagery');
+
+    const categoryLabel = (c) => CATEGORY_LABELS[c] || c;
+
+    function flashCopied(btn) {
+      btn.classList.add('copied');
+      const orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => {
+        btn.classList.remove('copied');
+        btn.textContent = orig;
+      }, 1200);
+    }
+
+    // Wired outside init() on purpose: the help text is worth reading
+    // even when /catalog.json is the thing that's broken.
+    function setupHelp() {
+      const modal = document.getElementById('help-modal');
+      document.getElementById('open-help')
+        .addEventListener('click', () => modal.showModal());
+      document.getElementById('help-close')
+        .addEventListener('click', () => modal.close());
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.close(); // backdrop click
+      });
+      for (const btn of modal.querySelectorAll('.copy')) {
+        btn.addEventListener('click', async () => {
+          const pre = document.getElementById(btn.dataset.target);
+          await navigator.clipboard.writeText(pre.textContent);
+          flashCopied(btn);
+        });
+      }
+    }
+
+    async function init() {
+      const gallery = document.getElementById('gallery');
+      const copyTilejson = document.getElementById('copy-tilejson');
+      const copyXyz = document.getElementById('copy-xyz');
+
+      let catalog;
+      try {
+        catalog = await fetch('/catalog.json').then((r) => r.json());
+      } catch (e) {
+        gallery.innerHTML = '<p class="pending">failed to load catalog</p>';
+        return;
+      }
+
+      const tilesets = catalog.tilesets || [];
+      let selected = null;
+
+      // -- cards ----------------------------------------------------
+      gallery.innerHTML = '';
+      const cards = new Map();
+      for (const t of tilesets) {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'card';
+        card.dataset.id = t.id;
+        // Which tab this card belongs to. `category` is what the catalog
+        // groups by; `type` is only the fallback for a catalog that
+        // predates it.
+        card.dataset.tab = categoryOf(t);
+
+        const thumb = document.createElement('span');
+        thumb.className = 'thumb';
+        if (t.type === 'vector') {
+          // MVT has no image form — keep the sketch background and mark it.
+          const mvt = document.createElement('span');
+          mvt.className = 'mvt';
+          mvt.textContent = 'MVT';
+          thumb.appendChild(mvt);
+        } else {
+          const img = document.createElement('img');
+          img.alt = '';
+          img.loading = 'lazy';
+          img.decoding = 'async';
+          // Filled in asynchronously from the TileJSON below; on error
+          // the placeholder background stays visible.
+          img.addEventListener('error', () => img.remove());
+          thumb.appendChild(img);
+        }
+        card.appendChild(thumb);
+
+        const label = document.createElement('span');
+        label.className = 'label';
+        const name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = t.name;
+        name.title = t.name;
+        // Flag how each tileset is sourced: passthrough (·pt) is served
+        // straight from an upstream provider; proxy (·px) is served by us
+        // but range-read from a remote archive we don't mirror. Plain
+        // entries are hosted from our own R2.
+        const kind = document.createElement('span');
+        kind.className = 'kind';
+        const hosting = t.passthrough ? 'passthrough' : t.proxy ? 'proxy' : '';
+        const suffix = t.passthrough ? '·pt' : t.proxy ? '·px' : '';
+        kind.textContent = t.type + suffix;
+        kind.title = hosting ? t.type + ' · ' + hosting : t.type;
+        label.appendChild(name);
+        label.appendChild(kind);
+        card.appendChild(label);
+
+        card.addEventListener('click', () => select(t));
+        gallery.appendChild(card);
+        cards.set(t.id, card);
+      }
+
+      // -- thumbnails (async, best-effort) --------------------------
+      // One TileJSON fetch per raster tileset; the documents are tiny
+      // and edge-cached for 5 minutes.
+      for (const t of tilesets) {
+        if (t.type === 'vector') continue;
+        fetch(ours(t.tilejson))
+          .then((r) => r.json())
+          .then((tj) => {
+            const tpl = tj.tiles && tj.tiles[0];
+            const img = cards.get(t.id)?.querySelector('img');
+            if (!tpl || !img) return;
+            const at = categoryOf(t) === 'paint' ? THUMB_PAINT : THUMB;
+            img.src = tpl
+              .replace('{z}', at.z)
+              .replace('{x}', at.x)
+              .replace('{y}', at.y);
+          })
+          .catch(() => {});
+      }
+
+      // -- vector inspector -----------------------------------------
+      // A vector tileset that advertises `vector_layers` in its
+      // TileJSON gets an "inspector": every source-layer rendered in
+      // its own auto-assigned colour, individually toggleable, with
+      // click-to-select + an attribute popup. Vector tilesets without
+      // `vector_layers` (e.g. protomaps) fall back to a MapLibre style.
+      let popup = null;
+      let neLayers = []; // [{ src, color, geom, ids:[id] }]
+      let selKey = null; // currently selected feature: { sl, id } | null
+      const layersPanel = document.createElement('aside');
+      layersPanel.id = 'layers';
+      layersPanel.hidden = true;
+
+      // Distinct, deterministic colour per layer index (golden-angle hue).
+      const layerColor = (i) => `hsl(${Math.round(i * 137.508) % 360} 65% 45%)`;
+      const esc = (v) =>
+        String(v).replace(/[&<>"]/g, (s) =>
+          ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[s]));
+
+      // Build an inspector style: one style layer per source-layer, of
+      // the geometry the TileJSON declares (so a polyline layer is never
+      // filled like a polygon). Selection is driven by feature-state
+      // (`sel`) baked into each layer's paint, so the whole feature
+      // highlights across every tile it spans — not just the clicked
+      // tile's clipped piece. (Requires feature ids in the tiles, which
+      // the build adds via tippecanoe `--generate-ids`.)
+      function buildInspectorStyle(t, tj) {
+        const SEL = ['boolean', ['feature-state', 'sel'], false];
+        const hl = (selVal, base) => ['case', SEL, selVal, base]; // highlight switch
+        const RED = '#ff3b00';
+        const polys = [], lines = [], points = [];
+        neLayers = tj.vector_layers.map((vl, i) => {
+          const c = layerColor(i);
+          const id = `ne__${vl.id}`;
+          const base = { id, source: 'ne', 'source-layer': vl.id };
+          const geom = vl.geometry || 'polygon';
+          if (geom === 'line') {
+            lines.push({ ...base, type: 'line',
+              paint: { 'line-color': hl(RED, c), 'line-width': hl(3, 1.4) } });
+          } else if (geom === 'point') {
+            points.push({ ...base, type: 'circle',
+              paint: { 'circle-color': hl(RED, c), 'circle-radius': hl(6, 3.5),
+                'circle-stroke-color': '#fff', 'circle-stroke-width': 1 } });
+          } else {
+            polys.push({ ...base, type: 'fill',
+              paint: { 'fill-color': hl(RED, c), 'fill-opacity': hl(0.6, 0.35),
+                'fill-outline-color': hl(RED, c) } });
+          }
+          return { src: vl.id, color: c, geom, ids: [id] };
+        });
+        selKey = null;
+        return {
+          version: 8,
+          glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
+          sources: {
+            ne: { type: 'vector', url: ours(t.tilejson),
+              attribution: tj.attribution || '' },
+          },
+          layers: [
+            { id: 'bg', type: 'background', paint: { 'background-color': '#f3f1ea' } },
+            ...polys, ...lines, ...points,
+          ],
+        };
+      }
+
+      // (Re)build the layer toggle panel from neLayers.
+      function setupInspector() {
+        layersPanel.innerHTML = '';
+        const h = document.createElement('h2');
+        const title = document.createElement('span');
+        title.textContent = 'Layers';
+        const allBtn = document.createElement('button');
+        allBtn.type = 'button';
+        allBtn.className = 'all';
+        allBtn.textContent = 'toggle all';
+        h.append(title, allBtn);
+        layersPanel.appendChild(h);
+
+        const setVis = (layer, on) => {
+          for (const id of layer.ids) {
+            if (map.getLayer(id)) {
+              map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+            }
+          }
+        };
+
+        const boxes = [];
+        for (const layer of neLayers) {
+          const row = document.createElement('label');
+          row.className = 'lyr';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = true;
+          const sw = document.createElement('span');
+          sw.className = 'sw';
+          sw.style.background = layer.color;
+          const nm = document.createElement('span');
+          nm.className = 'nm';
+          nm.textContent = layer.src;
+          nm.title = layer.src;
+          cb.addEventListener('change', () => setVis(layer, cb.checked));
+          row.append(cb, sw, nm);
+          layersPanel.appendChild(row);
+          boxes.push(cb);
+        }
+
+        let allOn = true;
+        allBtn.addEventListener('click', () => {
+          allOn = !allOn;
+          neLayers.forEach((layer, i) => {
+            boxes[i].checked = allOn;
+            setVis(layer, allOn);
+          });
+        });
+        layersPanel.hidden = false;
+      }
+
+      function teardownInspector() {
+        layersPanel.hidden = true;
+        layersPanel.innerHTML = '';
+        neLayers = [];
+        selKey = null; // feature-state is discarded with the old style
+        if (popup) { popup.remove(); popup = null; }
+        if (map) map.getCanvas().style.cursor = '';
+      }
+
+      // Bound once, after the map exists: click → select + attributes,
+      // hover → pointer cursor. No-ops unless an inspector is active.
+      function bindInspector() {
+        document.getElementById('map').appendChild(layersPanel);
+        document.getElementById('map').appendChild(paramsPanel);
+        document.getElementById('map').appendChild(tilesEl);
+        bindTileStatus(map);
+        // The panel says when the map is still fetching. `idle` means
+        // every tile in view has arrived, which for a paint style is the
+        // only honest "done" — a knob turns into seconds of rendering.
+        map.on('dataloading', () => paramsPanel.classList.add('busy'));
+        map.on('idle', () => paramsPanel.classList.remove('busy'));
+        const hitIds = () => neLayers.flatMap((l) => l.ids).filter((id) => map.getLayer(id));
+
+        const clearSel = () => {
+          if (selKey) {
+            map.removeFeatureState({ source: 'ne', sourceLayer: selKey.sl, id: selKey.id });
+            selKey = null;
+          }
+        };
+
+        map.on('click', (e) => {
+          if (!neLayers.length) return;
+          const ids = hitIds();
+          const feats = ids.length ? map.queryRenderedFeatures(e.point, { layers: ids }) : [];
+          clearSel();
+          if (!feats.length) {
+            if (popup) { popup.remove(); popup = null; }
+            return;
+          }
+          const f = feats[0];
+          // Highlight the whole feature across tiles via feature-state.
+          // Needs a feature id (tippecanoe --generate-ids); skip if absent.
+          if (f.id != null) {
+            selKey = { sl: f.sourceLayer, id: f.id };
+            map.setFeatureState({ source: 'ne', sourceLayer: f.sourceLayer, id: f.id }, { sel: true });
+          }
+          const props = f.properties || {};
+          const rows = Object.keys(props).sort().map((k) =>
+            `<tr><td class="k">${esc(k)}</td><td>${esc(props[k])}</td></tr>`).join('');
+          const html = `<div class="ne-pop"><div class="h">${esc(f.sourceLayer)}</div>` +
+            (rows ? `<table>${rows}</table>` : '<em>no attributes</em>') + '</div>';
+          if (popup) popup.remove();
+          popup = new maplibregl.Popup({ maxWidth: '300px' })
+            .setLngLat(e.lngLat).setHTML(html).addTo(map);
+        });
+
+        map.on('mousemove', (e) => {
+          if (!neLayers.length) return;
+          const ids = hitIds();
+          const hit = ids.length && map.queryRenderedFeatures(e.point, { layers: ids }).length;
+          map.getCanvas().style.cursor = hit ? 'pointer' : '';
+        });
+      }
+
+      // -- params (paint styles) ------------------------------------
+      // A paint style declares its own knobs, and the tile route takes
+      // them as query params. The catalog entry links to the schema ezu
+      // derived from the document, so this panel is generated rather
+      // than written: a style that grows a param grows a control here
+      // with no edit, and one that renames a param cannot leave a stale
+      // slider behind.
+      //
+      // Non-default values live in the page URL under `p.<name>` (the
+      // prefix keeps them clear of the viewer's own `id` / `compare`),
+      // so a tuned picture is a shareable link.
+      const paramsPanel = document.createElement('aside');
+      paramsPanel.id = 'params';
+      paramsPanel.hidden = true;
+      // Query string appended to the TileJSON URL — the server folds it
+      // into the `tiles` template, so the copy buttons hand out the
+      // picture on screen rather than the defaults.
+      let paramsQuery = '';
+
+      const tileUrl = (t) => {
+        const base = ours(t.tilejson);
+        return base + (paramsQuery ? (base.includes('?') ? '&' : '?') + paramsQuery : '');
+      };
+
+      // Slider granularity. A declared range gets 100 steps, which is
+      // finer than these knobs read at; an unbounded number falls back
+      // to a hundredth.
+      const stepFor = (prop) =>
+        prop.minimum !== undefined && prop.maximum !== undefined
+          ? Math.max((prop.maximum - prop.minimum) / 100, 0.0001)
+          : 0.01;
+
+      const sameValue = (a, b) => String(a) === String(b);
+
+      /** `#rgb` / `#rrggbb` / `#rrggbbaa` → the form ezu declares
+       *  (`#rrggbb[aa]`, lowercase), or null if it isn't one yet. */
+      const normalizeHex = (raw) => {
+        const v = raw.trim().toLowerCase();
+        if (/^#[0-9a-f]{3}$/.test(v)) {
+          return `#${v[1]}${v[1]}${v[2]}${v[2]}${v[3]}${v[3]}`;
+        }
+        return /^#[0-9a-f]{6}([0-9a-f]{2})?$/.test(v) ? v : null;
+      };
+
+      async function setupParams(t) {
+        paramsQuery = '';
+        paramsPanel.innerHTML = '';
+        if (!paramsUi || categoryOf(t) !== 'paint') {
+          paramsPanel.hidden = true;
+          return;
+        }
+        paramsPanel.hidden = false;
+        paramsPanel.innerHTML = '<p class="pending">loading params…</p>';
+        let schema;
+        try {
+          // Named rather than read off the catalog entry: the catalog
+          // does not advertise tunability yet.
+          schema = await fetch(`/styles/${t.id}/params.json`).then((r) => r.json());
+        } catch (e) {
+          paramsPanel.innerHTML = '<p class="pending">params unavailable</p>';
+          return;
+        }
+        const props = schema.properties || {};
+        const names = Object.keys(props);
+        if (!names.length) {
+          paramsPanel.hidden = true;
+          return;
+        }
+
+        const urlParams = new URLSearchParams(location.search);
+        const current = {}; // name → value as text, defaults included
+
+        // Re-derive `paramsQuery` and the `p.*` keys in the page URL from
+        // `current`. Only non-defaults are carried, so an untouched panel
+        // leaves both exactly as they were.
+        const sync = () => {
+          const changed = names.filter((n) => !sameValue(current[n], props[n].default));
+          paramsQuery = changed
+            .map((n) => `${encodeURIComponent(n)}=${encodeURIComponent(current[n])}`)
+            .join('&');
+          const u = new URL(location.href);
+          for (const k of [...u.searchParams.keys()]) {
+            if (k.startsWith('p.')) u.searchParams.delete(k);
+          }
+          for (const n of changed) u.searchParams.set(`p.${n}`, current[n]);
+          history.replaceState(null, '', u.toString());
+        };
+
+        // Debounced tile reload for a control the user moved. Dragging a
+        // slider would otherwise ask the renderer for a tile per frame,
+        // and each one is seconds of CPU nobody will ask for again.
+        let timer = null;
+        const apply = () => {
+          sync();
+          clearTimeout(timer);
+          timer = setTimeout(() => ensureMap(rasterStyle(tileUrl(t))), 300);
+        };
+
+        const h = document.createElement('h2');
+        const title = document.createElement('span');
+        title.textContent = 'Params';
+        const reset = document.createElement('button');
+        reset.type = 'button';
+        reset.className = 'reset';
+        reset.textContent = 'defaults';
+        const busy = document.createElement('span');
+        busy.className = 'busy';
+        busy.textContent = 'rendering…';
+        h.append(title, busy, reset);
+        paramsPanel.innerHTML = '';
+        paramsPanel.appendChild(h);
+
+        const setters = [];
+        for (const n of names) {
+          const prop = props[n];
+          const fromUrl = urlParams.get(`p.${n}`);
+          current[n] = fromUrl !== null ? fromUrl : String(prop.default);
+
+          const box = document.createElement('div');
+          box.className = 'p';
+          const row = document.createElement('div');
+          row.className = 'row';
+          const nm = document.createElement('span');
+          nm.className = 'nm';
+          nm.textContent = n;
+          nm.title = prop.description || n;
+          row.appendChild(nm);
+          box.appendChild(row);
+
+          if (prop.type === 'number') {
+            const val = document.createElement('span');
+            val.className = 'val';
+            val.textContent = current[n];
+            row.appendChild(val);
+            const input = document.createElement('input');
+            input.type = 'range';
+            if (prop.minimum !== undefined) input.min = prop.minimum;
+            if (prop.maximum !== undefined) input.max = prop.maximum;
+            input.step = stepFor(prop);
+            input.value = current[n];
+            input.addEventListener('input', () => {
+              // Trim the float noise a range slider produces, and match
+              // what the server rounds to for its cache key.
+              current[n] = String(Math.round(Number(input.value) * 1e4) / 1e4);
+              val.textContent = current[n];
+              apply();
+            });
+            box.appendChild(input);
+            setters.push(() => {
+              current[n] = String(prop.default);
+              input.value = prop.default;
+              val.textContent = current[n];
+            });
+          } else if (prop.type === 'boolean') {
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.checked = current[n] === 'true';
+            input.addEventListener('change', () => {
+              current[n] = String(input.checked);
+              apply();
+            });
+            row.appendChild(input);
+            setters.push(() => {
+              current[n] = String(prop.default);
+              input.checked = prop.default === true;
+            });
+          } else {
+            // The only string param ezu declares is a colour, and a
+            // colour is something you want to read off and paste
+            // somewhere — into a style document, into a chat. So the
+            // swatch comes with the hex beside it, editable: the picker
+            // is for finding a colour, the field is for carrying one.
+            const swatch = document.createElement('input');
+            swatch.type = 'color';
+            const hex = document.createElement('input');
+            hex.type = 'text';
+            hex.className = 'hex';
+            hex.spellcheck = false;
+            hex.autocapitalize = 'off';
+            hex.setAttribute('aria-label', `${n} hex`);
+
+            // <input type=color> speaks #rrggbb only, while a document
+            // may carry #rrggbbaa. The text field holds the real value
+            // and the swatch shows its opaque part, so pasting an alpha
+            // colour keeps its alpha instead of being rounded to opaque.
+            const show = (v) => {
+              hex.value = v;
+              swatch.value = v.slice(0, 7);
+              hex.classList.remove('bad');
+            };
+            show(String(current[n]));
+
+            swatch.addEventListener('input', () => {
+              current[n] = swatch.value;
+              show(swatch.value);
+              apply();
+            });
+            // Typed or pasted: accept #rgb as well and expand it, since
+            // that is how a colour is often written down. An unfinished
+            // value marks the field and changes nothing — the map should
+            // not flicker through `#ff` on the way to `#ff8800`.
+            hex.addEventListener('input', () => {
+              const v = normalizeHex(hex.value);
+              if (!v) {
+                hex.classList.add('bad');
+                return;
+              }
+              hex.classList.remove('bad');
+              current[n] = v;
+              swatch.value = v.slice(0, 7);
+              apply();
+            });
+            // Repaint the canonical form once editing stops, so a valid
+            // shorthand settles into what the tile URL actually carries.
+            hex.addEventListener('blur', () => show(String(current[n])));
+            // Click selects the whole value: this field exists to be
+            // copied out as much as typed into.
+            hex.addEventListener('focus', () => hex.select());
+
+            row.append(hex, swatch);
+            setters.push(() => {
+              current[n] = String(prop.default);
+              show(String(prop.default));
+            });
+          }
+          paramsPanel.appendChild(box);
+        }
+
+        reset.addEventListener('click', () => {
+          for (const set of setters) set();
+          apply();
+        });
+
+        // Seed only: `current` already holds whatever the URL carried, and
+        // the caller loads the map right after this — reloading here
+        // would fetch every tile twice on a shared link.
+        sync();
+      }
+
+      // -- selection / map ------------------------------------------
+      const ensureMap = (style) => {
+        if (!map) {
+          map = new maplibregl.Map({
+            container: 'map',
+            style,
+            // Whole-world start so the preview doesn't foreground any
+            // one region; `hash: true` still restores shared links.
+            center: [0, 20],
+            zoom: 0,
+            hash: true,
+          });
+          map.addControl(new maplibregl.NavigationControl());
+          map.addControl(new maplibregl.ScaleControl());
+          bindInspector();
+        } else {
+          map.setStyle(style);
+        }
+      };
+
+      // -- tabs (one per category present) --------------------------
+      // The gallery holds every card; the active tab just filters which
+      // are visible. Switching tabs never changes the map selection.
+      // Only categories the catalog actually served get a tab, in
+      // CATEGORY_ORDER, with anything unrecognised appended after — an
+      // empty tab would be a dead end, and a missing one would hide
+      // tilesets entirely.
+      const tabsEl = document.getElementById('tabs');
+      const present = new Set(tilesets.map(categoryOf));
+      const tabOrder = [
+        ...CATEGORY_ORDER.filter((c) => present.has(c)),
+        ...[...present].filter((c) => !CATEGORY_ORDER.includes(c)),
+      ];
+      const tabBtns = [];
+      for (const c of tabOrder) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'tab';
+        b.setAttribute('role', 'tab');
+        b.dataset.tab = c;
+        b.setAttribute('aria-selected', 'false');
+        b.textContent = categoryLabel(c);
+        b.addEventListener('click', () => applyTab(c));
+        tabsEl.appendChild(b);
+        tabBtns.push(b);
+      }
+      const applyTab = (tab) => {
+        for (const b of tabBtns) {
+          b.setAttribute('aria-selected', String(b.dataset.tab === tab));
+        }
+        for (const card of cards.values()) {
+          card.hidden = card.dataset.tab !== tab;
+        }
+      };
+
+      const select = async (t) => {
+        selected = t;
+        for (const [id, card] of cards) {
+          card.classList.toggle('selected', id === t.id);
+        }
+        // Make sure the tab holding the selected card is the active one,
+        // so the card is visible (and scrollIntoView below can reach it).
+        applyTab(categoryOf(t));
+
+        const u = new URL(location.href);
+        u.searchParams.set('id', t.id);
+        u.searchParams.delete('mode'); // legacy toggle param
+        history.replaceState(null, '', u.toString());
+
+        copyTilejson.disabled = false;
+        copyXyz.disabled = false;
+        cards.get(t.id)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+
+        // Raster: show served tiles, no inspector. Params first — the
+        // panel owns `paramsQuery`, and building the map before it would
+        // request this style's tiles with the previous style's knobs.
+        if (t.type !== 'vector') {
+          teardownInspector();
+          await setupParams(t);
+          ensureMap(rasterStyle(tileUrl(t)));
+          updateCompare(t);
+          return;
+        }
+
+        // Vector: inspector when the TileJSON lists vector_layers,
+        // otherwise fall back to a MapLibre style (protomaps ships
+        // none of its own, so use the light theme).
+        await setupParams(t); // clears the panel: vector tilesets take none
+        let tj = null;
+        try {
+          tj = await fetch(ours(t.tilejson)).then((r) => r.json());
+        } catch (e) {}
+        if (tj && Array.isArray(tj.vector_layers) && tj.vector_layers.length) {
+          ensureMap(buildInspectorStyle(t, tj));
+          setupInspector();
+        } else {
+          teardownInspector();
+          ensureMap(ours(t.style) || '/styles/protomaps-light/style.json');
+        }
+        updateCompare(t);
+      };
+
+      const params = new URLSearchParams(location.search);
+      const initial =
+        tilesets.find((t) => t.id === params.get('id')) || tilesets[0];
+      if (initial) select(initial);
+
+      // -- copy buttons ----------------------------------------------
+      // TileJSON URL comes straight from the catalog entry; the XYZ
+      // URL is read out of the live TileJSON document (so
+      // format-flavoured tilesets like esa_worldcover yield their
+      // default extension automatically).
+      copyTilejson.addEventListener('click', async () => {
+        if (!selected) return;
+        // The catalog's URL, not this page's origin — plus whatever the
+        // params panel is showing, so the link reproduces the picture.
+        const url =
+          selected.tilejson +
+          (paramsQuery
+            ? (selected.tilejson.includes('?') ? '&' : '?') + paramsQuery
+            : '');
+        await navigator.clipboard.writeText(url);
+        flashCopied(copyTilejson);
+      });
+
+      // A raw XYZ URL strips the attribution the TileJSON would have
+      // carried, so a successful copy opens a reminder modal with the
+      // tileset's credit ready to paste.
+      const attrModal = document.getElementById('attr-modal');
+      const attrCredit = document.getElementById('attr-credit');
+      const attrCopy = document.getElementById('attr-copy');
+      document.getElementById('attr-close')
+        .addEventListener('click', () => attrModal.close());
+      attrModal.addEventListener('click', (e) => {
+        if (e.target === attrModal) attrModal.close(); // backdrop click
+      });
+      attrCopy.addEventListener('click', async () => {
+        await navigator.clipboard.writeText(attrCredit.innerHTML.trim());
+        flashCopied(attrCopy);
+      });
+
+      copyXyz.addEventListener('click', async () => {
+        if (!selected) return;
+        copyXyz.disabled = true;
+        try {
+          const tj = await fetch(tileUrl(selected)).then((r) => r.json());
+          const xyz = tj.tiles && tj.tiles[0];
+          if (!xyz) throw new Error('no tiles[] in TileJSON');
+          await navigator.clipboard.writeText(xyz);
+          flashCopied(copyXyz);
+          const credit = tj.attribution || '';
+          if (credit) {
+            // Our own API's attribution HTML (anchor tags intended).
+            attrCredit.innerHTML = credit;
+            attrModal.showModal();
+          }
+        } catch (e) {
+          copyXyz.textContent = 'Failed';
+          setTimeout(() => { copyXyz.textContent = 'Copy XYZ URL'; }, 1500);
+        } finally {
+          copyXyz.disabled = false;
+        }
+      });
+    }
+
+    setupHelp();
+    init();
+  </script>
+</body>
+</html>

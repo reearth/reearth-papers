@@ -16,6 +16,32 @@ red; passthrough tilesets (third-party origins) only warn.
 node scripts/smoke.mjs [--base=https://papers.reearth.land]
 ```
 
+## overture-release.mjs
+
+Refreshes what `src/overture.ts` says about the Overture archives.
+
+The worker doesn't pin a release: Overture keeps a rolling window of
+them in its public S3 bucket and deletes what falls out of it (that is
+how `2026-06-17.0` took all five `/overture_*` routes down), so the
+handler lists the bucket and serves the newest, cached for an hour per
+isolate. `x-overture-release` on a tile says which one it was.
+
+What the file still carries is the metadata the catalog and the TileJSON
+have to state up front — each theme's zoom range, each layer's id and
+minzoom — and those move between releases (`building`'s minzoom went
+6 → 4 in `2026-08-19.0`). This script reads the live archives and, with
+`--bump`, writes the current numbers back. Layer *membership* is
+reported, never rewritten: a new layer needs a description and a
+geometry hint, which only a person can write.
+
+Nothing breaks while it goes unrun — the catalog just describes the
+tiles slightly wrong — so run it when Overture publishes, or when a
+`vector_layers` entry looks off.
+
+```
+node scripts/overture-release.mjs [--bump] [--json]
+```
+
 ## thumbnails.mjs
 
 Generates a thumbnail PNG for every raster tileset listed in the
@@ -45,3 +71,46 @@ node scripts/thumbnails.mjs [options]
 One `{out}/{tileset.id}.png` is written for each `type: "raster"` entry
 in `catalog.json`. Empty tiles (HTTP 204) are left transparent, so
 tilesets with no data yet still produce a valid PNG instead of failing.
+
+## og.py
+
+**Archived.** The committed `public/og.png` is a hand-kerned edit on
+top of this script's render; running it with `--out public` overwrites
+that. Keep it as the record of how the card was made, not as a build
+step.
+
+Draws the two pieces of artwork this site shows of itself: the social
+card (`public/og.png`, 1200×630) and the favicon
+(`public/favicon.ico`, `icon-512.png`, `apple-touch-icon.png`). Both are
+committed and served as static files — nothing at request time runs
+this. The script exists so the framing, the type and the ink are
+parameters rather than a memory of what was done in an image editor.
+
+```
+python3 scripts/og.py [--out public] [--font path/to/EB_Garamond.ttf]
+```
+
+Needs Pillow and numpy, neither of which the worker depends on.
+
+**Typeface: [EB Garamond](https://fonts.google.com/specimen/EB+Garamond)**
+(SIL OFL 1.1), from Google Fonts. The `.ttf` is not committed — it has
+to be on disk to redraw the card. Point `--font` at it, or set
+`OG_FONT`. The same face is set live on the two HTML pages, from the
+woff2 subsets in `public/webfont/` (redistributed under the OFL, whose
+text is committed beside them); the card and the pages therefore share
+one wordmark, and changing the type here means changing
+`--font-display` there too.
+
+The card is a `paint-sumi` render of the Bay of Naples. Two things in it
+are deliberate and easy to undo by accident:
+
+- The field is fetched at **z12 and downsampled** to 1200×630, not
+  fetched at z11. The bay and Vesuvio's pine forest do not both fit in a
+  z12 screenful, and z11 draws the coast too coarsely to read at card
+  size.
+- The title is drawn a glyph at a time, because Pillow has no
+  letter-spacing — and a glyph at a time discards the kerning raqm would
+  otherwise apply. `draw_title` measures the pair adjustments back out of
+  the font (`kern(a,b) = len(a+b) − len(a) − len(b)`) and re-applies them
+  before adding the track. Without that step `Re` and `Pa` sit apart and
+  the whole card reads as a default.

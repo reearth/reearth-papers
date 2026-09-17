@@ -2,14 +2,21 @@
  * papers-tile worker
  *
  * Public routes:
- *   /styles/{theme}/tile/{z}/{x}/{y}.{png,webp}
- *                                        — rendered raster tile (ezu)
- *   /styles/{theme}/ezu/{z}/{x}/{y}.{png,webp}
+ *   /styles/{theme}/tile/{z}/{x}/{y}.{webp,png}
+ *                                        — rendered raster tile (ezu);
+ *                                          webp is the advertised default
+ *   /styles/{theme}/ezu/{z}/{x}/{y}.{webp,png}
  *                                        — same render, pre-cutover path
  *   /styles/{theme}/native/{z}/{x}/{y}.png
  *                                        — maplibre-native, comparison only
  *   /styles/{theme}/tilejson.json        — TileJSON for the above
  *   /styles/{theme}/style.json           — MapLibre style with that theme
+ *   /styles/{paint}/tile/{z}/{x}/{y}.{webp,png}
+ *                                        — paint style, rendered from a
+ *                                          document on the R2 shelf
+ *                                          (?<param>= per its schema)
+ *   /styles/{paint}/tilejson.json        — TileJSON for the above
+ *   /styles/{paint}/params.json          — JSON Schema of that style's params
  *   /{id}/{z}/{x}/{y}.{ext}              — tiles for every registered tileset
  *   /{id}/tilejson.json                  — TileJSON (?format= where multi-format)
  *   /{id}/style.json                     — MapLibre style (vector tilesets that ship cartography)
@@ -19,11 +26,19 @@
  *   /fonts/{fontstack}/{range}.pbf       — mirrored glyph PBFs
  *   /sprites/{version}/{name}.{png,json} — mirrored Protomaps sprites
  *   /catalog.json                        — index of all tilesets
- *   /viewer                              — preview page (public/viewer/index.html)
- *   /                                    — temporary 302 → /viewer (LP TBD)
+ *   /okibi/epochs.json                   — the cache-key epochs now in use
+ *   /                                    — the viewer (public/index.html)
+ *   /viewer                              — 302 → / (where the viewer used to live)
  *
  * `{theme}` is one of papers-light / papers-dark (the house styles) or
- * light / dark / white / black / grayscale (stock Protomaps themes).
+ * protomaps-{light,dark,white,black,grayscale} (stock Protomaps themes).
+ * The old unprefixed stock ids (light, dark, ...) 301 to the prefixed
+ * ones — see `LEGACY_THEMES` in style.ts.
+ * `{paint}` is whatever the R2 shelf currently holds (src/paint_styles.ts)
+ * — `paint-sumi`, `paint-wash`, … — so that set grows by publishing
+ * rather than by deploying. Paint styles have no `style.json`: an ezu
+ * document is a node graph, and there is no MapLibre style that means the
+ * same thing. `params.json` is what a client reads instead.
  * `{id}` and `{ext}` are data-driven from the central tileset registry
  * (src/tilesets.ts) — adding a dataset is one entry there; the tile
  * route, TileJSON route, and catalog entry all derive from it.
@@ -39,26 +54,39 @@ import { Container, getContainer } from "@cloudflare/containers";
 //
 // The render pool is single-threaded per instance (maplibre-native
 // serialises tiles through one Vulkan context), so shards ARE our only
-// render parallelism. Sized to ~a full viewport's tile count so an
-// interactive pan/zoom fans its tiles across distinct instances and
-// renders them concurrently (~1 warm render each) instead of queueing
-// several per instance. Past ~viewport size there's no single-viewport
-// gain — only headroom for concurrent users — and it scatters traffic
-// across more (cold) instances, so don't over-shard.
+// render parallelism. Sized back when this path served the public
+// tiles: ~a full viewport's tile count, so an interactive pan/zoom
+// fanned across distinct instances instead of queueing several per
+// instance. Since the ezu cutover only the viewer's comparison map
+// reaches here, so the number is oversized rather than tuned — left as
+// is because shards cost nothing idle.
 const SHARD_COUNT = 32;
 import { STYLE_VERSION } from "./cache.js";
 import { tileCjkFlavor } from "./cjk_flavor.js";
 import { handleCatalog } from "./catalog.js";
 import {
+  ezuRecipeVersion,
   ezuRenderStats,
   type EzuFormat,
-  EZU_RECIPE_VERSION,
   EZU_THEMES,
+  renderEzuStyleTile,
   renderEzuTile,
 } from "./ezu.js";
 import { handleFont } from "./fonts.js";
+import {
+  PAINT_RUNTIME_VERSION,
+  type PaintFormat,
+  type PaintStyle,
+  paintAsset,
+  paintDocument,
+  paintStyle,
+  readParams,
+} from "./paint_styles.js";
+import { dayBefore, takeDigest } from "./okibi-digest.js";
+import { handleOkibiEpochs } from "./okibi_epochs.js";
+import { watch } from "./okibi_watch.js";
 import { readMirrorPointer } from "./pmtiles.js";
-import { serveRenderedTile } from "./render_cache.js";
+import { headerSafeHtml, serveRenderedTile } from "./render_cache.js";
 import { handleSprite } from "./sprites.js";
 import { handleSourceFile } from "./source_file.js";
 import {
@@ -69,10 +97,12 @@ import {
   type Theme,
 } from "./style.js";
 import {
+  handlePaintTilejson,
   handleRasterTilejson,
   handleTilesetTilejson,
   RENDERED_RASTER_MAXZOOM,
 } from "./tilejson.js";
+import { handleAttribution } from "./attribution.js";
 import {
   PROTOMAPS_ATTRIBUTION,
   TILESETS_BY_ID,
@@ -82,9 +112,10 @@ import {
 export class TileRenderer extends Container<Env> {
   defaultPort = 8080;
   // Cold starts are the expensive event for this container (image pull +
-  // maplibre Vulkan init). Keep it warm longer between requests — at
-  // 30 min idle, a single tile during business hours pays for the
-  // wake-up amortized over the next half hour of traffic.
+  // maplibre Vulkan init) and, since the ezu cutover, nearly every
+  // request here is one: only the viewer's comparison map reaches this
+  // path. 30 min idle keeps a reviewer's second and third tile warm
+  // without paying for a renderer nobody is looking at.
   sleepAfter = "30m";
 }
 
@@ -98,8 +129,8 @@ export class TileRenderer extends Container<Env> {
 //
 // `.webp` costs the same to encode as an uncompressed render where PNG's
 // deflate adds 30-48ms, is ~17% smaller on the wire, and decodes quicker
-// client-side. The TileJSON still advertises `.png` — that is a public
-// contract with clients we don't control — so `.webp` is opt-in by URL.
+// client-side, so the TileJSON advertises it by default. `.png` stays
+// served on the same route for clients that ask for it (`?format=png`).
 const STYLE_TILE_RE =
   /^\/styles\/([a-z-]+)\/(?:tile|ezu)\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/;
 // maplibre-native, via the renderer container. Comparison only since the
@@ -108,6 +139,11 @@ const STYLE_TILE_RE =
 const STYLE_NATIVE_RE = /^\/styles\/([a-z-]+)\/native\/(\d+)\/(\d+)\/(\d+)\.png$/;
 const STYLE_TILEJSON_RE = /^\/styles\/([a-z-]+)\/tilejson\.json$/;
 const STYLE_STYLE_RE = /^\/styles\/([a-z-]+)\/style\.json$/;
+// Paint styles only: the params schema behind /styles/{name}/params.json.
+// This is the whole of what one publishes about itself — there is no
+// `style.json` for a paint style, an ezu document being a node graph with
+// no MapLibre style that means the same thing.
+const STYLE_PARAMS_RE = /^\/styles\/([a-z-]+)\/params\.json$/;
 // Tile + TileJSON + source-archive shapes for every registered
 // tileset, resolved against the central registry (src/tilesets.ts).
 const TILESET_TILE_RE = /^\/([a-z0-9_]+)\/(\d+)\/(\d+)\/(\d+)\.([a-z]+)$/;
@@ -124,6 +160,41 @@ const FONT_RE = /^\/fonts\/([^/]+)\/(\d+-\d+\.pbf)$/;
 const SPRITE_RE = /^\/sprites\/(.+)$/;
 
 export default {
+  /**
+   * The daily demand digest.
+   *
+   * Aggregating a day is not part of serving tiles, and a digest that fails
+   * is a digest missing for a day — so it is logged rather than thrown, which
+   * would only retry the same failing query on the same finished day.
+   */
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    const now = new Date(controller.scheduledTime).toISOString();
+
+    // Awaited rather than handed to `ctx.waitUntil`. Work passed to waitUntil
+    // runs *after* the invocation ends, and only for as long as the runtime
+    // is willing to keep an ended invocation alive — which is not long enough
+    // for this. Both of these read megabytes out of R2 and the watch plans a
+    // dozen tilesets from them; handed to waitUntil, the run was cut off
+    // partway through with `waitUntil() tasks did not complete within the
+    // allowed time`, having warmed some tilesets, none of the rest, and
+    // recorded nothing. Awaiting keeps the invocation open until they finish.
+    //
+    // Settled together rather than in sequence, because one failing is not a
+    // reason for the other not to run: the digest is a day of evidence and
+    // the watch is the only thing that notices a cache key moving with nobody
+    // deploying.
+    const [digest, watched] = await Promise.allSettled([
+      takeDigest(env, dayBefore(controller.scheduledTime)),
+      watch(env, now),
+    ]);
+
+    // Logged rather than thrown. A failure here is a day missing or a move
+    // unrecorded, and throwing would only retry the same failing query
+    // against the same finished day.
+    if (digest.status === "rejected") console.warn("okibi: digest failed", digest.reason);
+    if (watched.status === "rejected") console.warn("okibi: watch failed", watched.reason);
+  },
+
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // CORS preflight. Browser clients send one before any request with
     // a non-safelisted header — notably `Range`, which geotiff.js and
@@ -183,15 +254,31 @@ async function dispatch(
     return new Response("ok");
   }
 
-  // Temporary: root redirects to the preview viewer until a real
-  // landing page lands. Use 302 (not 301) so we can swap it for the
-  // LP without browsers caching the redirect forever.
-  if (url.pathname === "/" || url.pathname === "/index.html") {
-    return Response.redirect(`${url.origin}/viewer`, 302);
+  // The viewer is the site now: it is served from public/index.html by
+  // the assets binding, which matches before this handler runs, so `/`
+  // never reaches here. What does reach here is the address the viewer
+  // used to have — links to it are already out in the world. 302, not
+  // 301, so a real landing page can take `/` back without every browser
+  // that ever followed this holding a cached redirect to it.
+  if (url.pathname === "/viewer" || url.pathname === "/viewer/") {
+    return Response.redirect(`${url.origin}/`, 302);
+  }
+
+  // What okibi reads to notice a cache key that moved with nothing pushed.
+  // See src/okibi_epochs.ts, and spec/tile-demand.md in reearth/okibi.
+  if (url.pathname === "/okibi/epochs.json") {
+    return handleOkibiEpochs(env);
   }
 
   if (url.pathname === "/catalog.json") {
-    return handleCatalog(request);
+    return handleCatalog(request, env);
+  }
+
+  // The page every tile credit links to. Rendered from src/credits.ts,
+  // so a source folded out of the short credit is still named here —
+  // which is the whole basis on which it may be folded.
+  if (url.pathname === "/attribution" || url.pathname === "/attribution.json") {
+    return handleAttribution(env, url.pathname.endsWith(".json"));
   }
 
   // Registered tilesets (src/tilesets.ts) — TileJSON, then tiles.
@@ -268,19 +355,44 @@ async function dispatch(
   }
   const tilejson = url.pathname.match(STYLE_TILEJSON_RE);
   if (tilejson) {
-    const theme = requireTheme(tilejson[1]);
-    return theme instanceof Response ? theme : handleRasterTilejson(request, theme);
+    // Themes first, then the paint shelf: a bundled theme id can never
+    // be shadowed by something published to R2.
+    if (isTheme(tilejson[1])) return handleRasterTilejson(request, tilejson[1]);
+    const paint = await paintStyle(env, tilejson[1]);
+    if (paint) return handlePaintTilejson(request, paint);
+    return new Response(`unknown style: ${tilejson[1]}`, { status: 404 });
+  }
+  // The params a paint style declares, as JSON Schema — what a UI builds
+  // its sliders and colour pickers from. Derived metadata, not the
+  // document: it names the knobs and their ranges, and carries none of
+  // the cartography that produces the picture.
+  const paintParams = url.pathname.match(STYLE_PARAMS_RE);
+  if (paintParams) {
+    const style = await paintStyle(env, paintParams[1]);
+    if (style) {
+      return new Response(
+        JSON.stringify(style.params ?? { type: "object", properties: {} }),
+        {
+          headers: {
+            "content-type": "application/json",
+            "cache-control": "public, max-age=300",
+            "access-control-allow-origin": "*",
+          },
+        },
+      );
+    }
   }
   const ezu = url.pathname.match(STYLE_TILE_RE);
   if (ezu) {
-    return handleEzu(
-      request,
-      env,
-      ctx,
-      ezu[1],
-      { z: Number(ezu[2]), x: Number(ezu[3]), y: Number(ezu[4]) },
-      ezu[5] as EzuFormat,
-    );
+    const coords = { z: Number(ezu[2]), x: Number(ezu[3]), y: Number(ezu[4]) };
+    if (EZU_THEMES.has(ezu[1])) {
+      return handleEzu(request, env, ctx, ezu[1], coords, ezu[5] as EzuFormat);
+    }
+    const paint = await paintStyle(env, ezu[1]);
+    if (paint) {
+      return handlePaint(request, env, ctx, paint, coords, ezu[5] as PaintFormat);
+    }
+    return new Response(`unknown style: ${ezu[1]}`, { status: 404 });
   }
   const native = url.pathname.match(STYLE_NATIVE_RE);
   if (native) {
@@ -319,7 +431,7 @@ async function handleEzu(
   if (coords.z > RENDERED_RASTER_MAXZOOM) {
     return new Response("zoom above available range", { status: 404 });
   }
-  const version = STYLE_VERSION * 1000 + EZU_RECIPE_VERSION;
+  const version = STYLE_VERSION * 1000 + ezuRecipeVersion(theme);
   // Han variant selection, picked the same way the container path picks it
   // (src/cjk_flavor.ts) so the two renderers agree over the same ground.
   const cjk = tileCjkFlavor(coords) ?? null;
@@ -343,6 +455,27 @@ async function handleEzu(
     attribution: PROTOMAPS_ATTRIBUTION,
     persist: true,
     render: () => renderEzuTile(request, env, ctx, theme, coords, format, cjk),
+    demand: {
+      // The theme is the tileset: it is what a client asks for and what an
+      // invalidation moves. The Han flavor is not part of it even though it
+      // is part of the key — it is derived from the tile's own coordinates,
+      // so every client asking for this tile gets the same one, and folding
+      // it in would split a cell along a line nobody is standing on.
+      tileset: theme,
+      coords,
+      fmt: format,
+      // The key's namespacing parts, split back into the things that move
+      // separately. `version` folds the style and the recipe into one number
+      // for the key's benefit; a query that cannot tell them apart cannot say
+      // what a style bump cost as against a recipe re-bake. Both are read
+      // here from the same constants the line above multiplies, so there is
+      // nothing to drift from.
+      epoch: {
+        source: date,
+        algo: `style-${STYLE_VERSION}`,
+        param: `r${ezuRecipeVersion(theme)}`,
+      },
+    },
   });
   // What this isolate's renderer is holding. Stamped on cache hits too —
   // the value describes the isolate right now, not the cached tile.
@@ -351,6 +484,98 @@ async function handleEzu(
   out.headers.set("x-ezu-heap", String(stats.heapBytes));
   out.headers.set("x-ezu-glyph", String(stats.glyphBytes));
   out.headers.set("x-ezu-store", `${stats.storeGlyphs}/${stats.storeBytes}`);
+  return out;
+}
+
+// One paint tile. Same two-layer cache as the themed rasters and the
+// same permit budget in the renderer, with two things of its own: the
+// document comes from R2 (keyed by its `rev`, which is what makes the
+// cache safe), and the request may carry params.
+async function handlePaint(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  style: PaintStyle,
+  coords: { z: number; x: number; y: number },
+  format: PaintFormat,
+): Promise<Response> {
+  // A style reading terrain stops where that source stops (see
+  // `PaintStyle.maxzoom`) — 404 rather than a tile with a flat DEM
+  // silently baked into it.
+  if (coords.z > style.maxzoom) {
+    return new Response("zoom above available range", { status: 404 });
+  }
+  const url = new URL(request.url);
+  const params = readParams(style, url.searchParams);
+  if (typeof params === "string") {
+    return new Response(params, {
+      status: 400,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+  }
+  // Same reasoning as the themed route: a render is only valid for the
+  // vector snapshot behind it, and these go out `immutable, max-age=1y`.
+  const { date } = await readMirrorPointer(env);
+  const version =
+    `${style.rev}-r${PAINT_RUNTIME_VERSION}-${date}-${style.sourceVersion}` +
+    (params.canonical ? `-${params.canonical}` : "");
+  const served = await serveRenderedTile(request, env, ctx, {
+    cacheKey:
+      `cache/paint/${style.name}/${style.rev}/r${PAINT_RUNTIME_VERSION}` +
+      `/${date}/${style.sourceVersion || "-"}` +
+      `/${params.canonical || "default"}/${coords.z}/${coords.x}/${coords.y}.${format}`,
+    cacheVersion: version,
+    contentType: format === "webp" ? "image/webp" : "image/png",
+    attribution: style.attribution,
+    demand: {
+      tileset: style.name,
+      coords,
+      fmt: format,
+      // The same string the cache key is namespaced by, so a warm request
+      // asks for the picture that was cached rather than for the default one.
+      search: params.canonical || undefined,
+      // The parts of `version`, which is what the key is namespaced by, kept
+      // apart because they move apart: the paint runtime, the style's own
+      // revision, and the snapshot it was drawn from.
+      epoch: {
+        source: `${date}/${style.sourceVersion || "-"}`,
+        algo: `paint-r${PAINT_RUNTIME_VERSION}`,
+        param: `${style.rev}${params.canonical ? `-${params.canonical}` : ""}`,
+      },
+    },
+    // The default picture earns the global R2 layer outright: a paint
+    // render is brushes, noise fields and a padded canvas — seconds of
+    // WASM CPU where a themed tile costs a fraction of one — and every
+    // client asking for a style asks for the same tiles.
+    //
+    // A tuned one does not. Each distinct set of knobs is its own
+    // namespace, so persisting them buys storage for pictures nobody
+    // asks for twice. Tuned tiles stay in the per-PoP edge cache, which
+    // is what someone dragging a slider and then panning actually
+    // re-reads.
+    persist: params.canonical === "",
+    render: async () =>
+      renderEzuStyleTile(
+        request,
+        env,
+        ctx,
+        {
+          // `rev` in the key, so a republished style builds a new
+          // renderer instead of a warm isolate serving the old document.
+          key: `paint:${style.name}:${style.rev}`,
+          doc: await paintDocument(env, style),
+          fetchAsset: (path) => paintAsset(env, style, path),
+        },
+        coords,
+        { format, ...(params.canonical ? { params: params.values } : {}) },
+      ),
+  });
+  const stats = ezuRenderStats();
+  const out = new Response(served.body, served);
+  out.headers.set("x-ezu-heap", String(stats.heapBytes));
+  // What the render actually applied, so a client can tell "the knob did
+  // nothing" from "the knob was never read".
+  out.headers.set("x-ezu-params", params.canonical || "default");
   return out;
 }
 
@@ -436,7 +661,7 @@ async function renderNativeTile(
       "cache-control": "public, max-age=31536000, immutable",
       "x-cache": "miss",
       "x-renderer": "maplibre-native",
-      "x-attribution": PROTOMAPS_ATTRIBUTION,
+      "x-attribution": headerSafeHtml(PROTOMAPS_ATTRIBUTION),
     },
   });
   ctx.waitUntil(cache.put(request, response.clone()));

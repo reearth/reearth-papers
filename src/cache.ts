@@ -1,7 +1,7 @@
 // Cartography version for the rendered raster tiles.
 //
-// It namespaces the ezu tile cache (src/ezu.ts pairs it with
-// EZU_RECIPE_VERSION) and rides in the style URL the maplibre-native
+// It namespaces the ezu tile cache (src/ezu.ts pairs it with the
+// theme's own `ezuRecipeVersion`) and rides in the style URL the maplibre-native
 // container fetches, so a warm container re-reads the style after an
 // edit instead of serving pre-edit renders from its own cache.
 //

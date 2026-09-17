@@ -17,6 +17,8 @@
 // the central tileset registry in src/tilesets.ts) plus one `DATASETS`
 // entry in `mirror/naturalearth/scripts/_lib.sh`.
 
+import epochs from "../okibi.epochs.json";
+import { attributionOf } from "./credits.js";
 import { fromCustomClient } from "geotiff";
 import { pixelToLonLat, R2GeoTiffClient, TILE_SIZE } from "./cog.js";
 import { encodePngRGBA, encodeWebpRGBA } from "./raster_encode.js";
@@ -133,10 +135,7 @@ function pickOverviewLevel(def: NaturalEarthRaster, z: number): number {
   return Math.min(Math.max(def.maxZoom - z, 0), def.overviewCount);
 }
 
-export const NATURAL_EARTH_ATTRIBUTION =
-  '<a href="https://papers.reearth.land">Re:Earth Papers</a> · ' +
-  '<a href="https://www.naturalearthdata.com">Natural Earth</a> · ' +
-  "public domain";
+export const NATURAL_EARTH_ATTRIBUTION = attributionOf("naturalEarth");
 
 // -- rendering -------------------------------------------------------------
 
@@ -243,17 +242,26 @@ async function renderTileRGBA(
 
 // -- cache + handler -------------------------------------------------------
 
-// Bump to invalidate cached renders after a sampling / encoder change.
-// The mirrored rasters themselves are immutable, so no date component
-// is needed.
-const TILE_CACHE_VERSION = 1;
+// Bump — in okibi.epochs.json — to invalidate cached renders after a sampling
+// or encoder change. The mirrored rasters themselves are immutable, so no
+// date component is needed.
+//
+// One version per raster rather than one for all five. The cache key already
+// namespaces by `def.id`, so these were only ever sharing a number, and
+// sharing it meant re-baking four tilesets to fix one. Read from the file
+// because this number is the whole of a tileset's key beyond the tile's own
+// coordinates and is what okibi reports as the `algo` epoch; a second copy is
+// a string that agrees with the key until somebody edits one.
+function cacheVersion(def: NaturalEarthRaster): string {
+  return epochs.tilesets[def.id as keyof typeof epochs.tilesets].algo;
+}
 
 function cacheKey(
   def: NaturalEarthRaster,
   coords: TileCoords,
   fmt: NaturalEarthFormat,
 ): string {
-  return `cache/naturalearth/${def.id}/v${TILE_CACHE_VERSION}/${fmt}/${coords.z}/${coords.x}/${coords.y}.${fmt}`;
+  return `cache/naturalearth/${def.id}/v${cacheVersion(def)}/${fmt}/${coords.z}/${coords.x}/${coords.y}.${fmt}`;
 }
 
 export async function handleNaturalEarthTile(
@@ -271,10 +279,20 @@ export async function handleNaturalEarthTile(
 
   return serveRenderedTile(request, env, ctx, {
     cacheKey: cacheKey(def, coords, fmt),
-    cacheVersion: TILE_CACHE_VERSION,
+    cacheVersion: cacheVersion(def),
     contentType: fmt === "png" ? "image/png" : "image/webp",
     attribution: NATURAL_EARTH_ATTRIBUTION,
     persist,
+    demand: {
+      tileset: def.id,
+      coords,
+      fmt,
+      // A mirrored raster is namespaced by one number, and that number is
+      // the whole of its epoch: the archive behind it does not move, so
+      // nothing else in the key can change without this changing too. Read
+      // from the same place the key above reads it.
+      epoch: { algo: cacheVersion(def) },
+    },
     render: async () => {
       const rgba = await renderTileRGBA(env, def, coords);
       return fmt === "png"
