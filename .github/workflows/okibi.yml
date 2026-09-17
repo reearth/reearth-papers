@@ -43,6 +43,10 @@ jobs:
       contents: read
       pull-requests: write
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 2 # the previous commit's epochs, to diff against
@@ -59,7 +63,6 @@ jobs:
               "reearth-papers/okibi/digests/$date.jsonl" \
               --file "digests/$date.jsonl" --remote || true
           done
-
       - uses: reearth/okibi/actions/plan@cbbc4122a0b72daad42d42a6009dcf2393b51da6 # v0.8.0
         with:
           manifests: okibi.manifest.json
@@ -84,6 +87,10 @@ jobs:
       group: okibi-warm-${{ github.ref }}
       cancel-in-progress: true
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 2
@@ -100,7 +107,6 @@ jobs:
               "reearth-papers/okibi/digests/$date.jsonl" \
               --file "digests/$date.jsonl" --remote || true
           done
-
       - uses: reearth/okibi/actions/plan@cbbc4122a0b72daad42d42a6009dcf2393b51da6 # v0.8.0
         id: plan
         with:
@@ -111,7 +117,6 @@ jobs:
           warm-secret: ${{ secrets.OKIBI_WARM_SECRET }}
           # Warming the tiles people ask for in the morning, before morning.
           deadline: ${{ github.event.repository.pushed_at }}
-
       - uses: reearth/okibi/actions/warm@cbbc4122a0b72daad42d42a6009dcf2393b51da6 # v0.8.0
         if: steps.plan.outputs.plan != ''
         with:
