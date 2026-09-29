@@ -320,6 +320,13 @@ The mirror worker is also triggered monthly by cron
 are available via `POST /runs` with a bearer token
 (`wrangler secret put MIRROR_TOKEN`).
 
+The main worker binds okibi's executor (`okibi-executor`, deployed from
+[reearth/okibi](https://github.com/reearth/okibi/tree/main/workers/executor))
+as a service, and a deploy fails when that Worker is not in the account.
+Deploy the executor first. In a copy that has no executor, delete the
+`[[services]]` block in `wrangler.toml`: the cron still notices a cache
+key moving and keeps the plan in R2, and only the warming is lost.
+
 ## Gotchas
 
 ### 1. maplibre-native HTTP crashes inside CF Workers Containers
@@ -530,6 +537,25 @@ TileJSON describe the tiles before anyone asks for one. Refresh it with
 `node scripts/overture-release.mjs --bump`, which reads the live
 archives and writes the numbers back. Skipping it costs a slightly wrong
 `vector_layers`, not an outage.
+
+### 10. A Worker cannot fetch another Worker on the account by URL
+
+`fetch("https://okibi-executor.reearth.workers.dev/plans")` from this
+worker never reaches the executor. Cloudflare allows Worker-to-Worker
+`fetch` only through a service binding or the
+`global_fetch_strictly_public` compatibility flag, and this worker has
+neither. The cron logs the failure as a warning and exits successfully,
+so the executor's invocation count is where it shows. From 2026-09-01,
+when the monthly mirror moved every tileset's source, the cron wrote the
+first tileset's plan each night, the hand-over failed, and the other
+eleven were never planned. The executor was not called once in four
+weeks.
+
+So the executor is a `[[services]]` binding (`env.OKIBI_EXECUTOR`), and
+the URL in the request is only there because `fetch` needs one. Asking
+for this worker's own hostname fails too (522), which is why the watch
+cannot check its plan's URLs itself and the executor checks them
+instead.
 
 ## Other notes
 
