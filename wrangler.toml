@@ -29,6 +29,19 @@ dataset = "tile_demand_1"
 [triggers]
 crons = ["0 18 * * *"]
 
+# okibi's executor, which the cron's watch hands a warm plan to. A binding
+# rather than the executor's workers.dev URL, because a Worker cannot fetch
+# another Worker on the same account by URL: from 2026-09-01 every hand-over
+# failed that way, and the executor was never called.
+#
+# This makes a deploy depend on `okibi-executor` existing in the account, and
+# a deploy fails when it does not. Deploy it first (reearth/okibi,
+# workers/executor), or delete this block — without it the watch still
+# notices and keeps each plan, and only the warming is lost.
+[[services]]
+binding = "OKIBI_EXECUTOR"
+service = "okibi-executor"
+
 # WebP encoder for the ESA WorldCover tile pipeline (@jsquash/webp).
 # Importing the `.wasm` resolves to a `WebAssembly.Module` instead of
 # triggering a runtime fetch, which is the only path that works inside

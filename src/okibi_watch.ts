@@ -224,14 +224,19 @@ async function sample(
  * tick with a wall-clock budget; the executor is a queue that outlasts both.
  * With no executor configured the plan is still kept, so the run is a record
  * of what should have been warmed rather than nothing at all.
+ *
+ * Through the service binding, not a URL. A Worker cannot fetch another
+ * Worker on the same account by its workers.dev name, so the request never
+ * reached the executor. The hostname below routes nowhere; the binding
+ * carries the request, and the executor reads only the path.
  */
 async function handOver(env: Env, warm: unknown): Promise<number> {
-  if (!env.OKIBI_EXECUTOR_URL || !env.OKIBI_EXECUTOR_TOKEN) {
+  if (!env.OKIBI_EXECUTOR || !env.OKIBI_EXECUTOR_TOKEN) {
     console.warn("okibi: no executor configured, so the plan was kept and not run");
     return 0;
   }
 
-  const response = await fetch(`${env.OKIBI_EXECUTOR_URL}/plans`, {
+  const response = await env.OKIBI_EXECUTOR.fetch("https://okibi-executor/plans", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${env.OKIBI_EXECUTOR_TOKEN}`,
