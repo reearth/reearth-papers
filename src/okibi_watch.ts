@@ -66,7 +66,7 @@ export async function watch(env: Env, now: string): Promise<Watched> {
     return { first: true, invalidations: 0, queued: 0 };
   }
 
-  const before = await stored.json();
+  const before = await stored.json<{ service: string; tilesets: Record<string, unknown> }>();
   const events = invalidationsBetween(before, after, now, null);
   if (events.length === 0) {
     return { first: false, invalidations: 0, queued: 0 };
@@ -74,90 +74,127 @@ export async function watch(env: Env, now: string): Promise<Watched> {
 
   const digests = await readDigests(env, now);
   let queued = 0;
-  let allHandedOver = true;
+  const unrecorded = new Set<string>();
 
+  // One tileset at a time, and one failing is not a reason for the rest not
+  // to run. From 2026-09-01 a hand-over that threw on the first tileset ended
+  // the run there, every night, and the other eleven were never planned.
   for (const invalidation of events) {
-    const warm: { entries: { url: string }[]; stats: Record<string, number> } & Record<
-      string,
-      // The plan document, which this only reads a few fields of and passes
-      // on whole.
-      // biome-ignore lint/suspicious/noExplicitAny: the shape is the spec's
-      any
-    > = plan({
-      digests,
-      invalidation,
-      manifests: [manifest],
-      pricing,
-      epochs: after,
-      options: { budgetUsd: BUDGET_USD },
-    });
-
-    console.log("okibi: an epoch moved", {
-      tileset: invalidation.tileset,
-      axis: invalidation.axis,
-      from: invalidation.epoch_from,
-      to: invalidation.epoch_to,
-      entries: warm.stats.total,
-      coverage: warm.stats.coverage_of_demand,
-      usd: warm.estimate.warm.usd,
-    });
-
-    // The plan is what the estimate was read off, and the measurement it will
-    // be checked against arrives in tomorrow's digest. Keeping one of the pair
-    // makes neither worth much.
-    await env.R2.put(`${PLAN_PREFIX}/${now}-${invalidation.tileset}.json`, JSON.stringify(warm));
-
-    // Before handing it over, because nobody is going to read it. A plan whose
-    // URLs do not exist looks exactly like one whose URLs do — ordered
-    // entries, a coverage, a price — and the only place that shows is the
-    // origin.
-    const { wrong, answered } = await sample(warm.entries, env.OKIBI_WARM_SECRET);
-    if (wrong.length > 0) {
-      console.warn("okibi: not handing over a plan whose URLs do not exist", {
+    try {
+      const handed = await warmOne(env, invalidation, digests, after, now);
+      if (handed === null) unrecorded.add(invalidation.tileset);
+      else queued += handed;
+    } catch (error) {
+      console.warn("okibi: could not warm a tileset", {
         tileset: invalidation.tileset,
-        wrong,
+        error: String(error),
       });
-      allHandedOver = false;
-      continue;
+      unrecorded.add(invalidation.tileset);
     }
-
-    // Nothing answered, which is what happens whenever the URLs are this
-    // worker's own: a Worker asking for its own hostname goes out to the edge
-    // and comes back 522. So this is not a plan that passed, it is a plan
-    // nothing could check, and saying otherwise would make a check that
-    // cannot fail look like one that did not.
-    //
-    // Handed over anyway, because the executor asks for every one of these
-    // URLs from outside and says what they answered — `okibi: warmed a batch`
-    // carries the statuses. Refusing here would trade a plan that reports its
-    // own failure for one that never runs.
-    if (answered === 0) {
-      console.warn("okibi: handing over a plan nothing here could verify", {
-        tileset: invalidation.tileset,
-        entries: warm.stats.total,
-        why: "a Worker cannot ask its own origin; read the executor's statuses",
-      });
-    }
-
-    queued += await handOver(env, warm);
   }
 
-  // Only once everything has been handed over. Recording the change as seen
-  // before that would mean a failure is never retried: nothing would ever warm
-  // what was already marked as noticed.
+  // Recorded per tileset, and only where the move was handed over. Recording
+  // a change as seen before that would mean a failure is never retried:
+  // nothing would ever warm what was already marked as noticed. Recording
+  // nothing until everything succeeded had the opposite fault — one tileset
+  // that kept failing had every other one planned and warmed again each
+  // night.
   //
   // A refused plan counts as not handed over, and deliberately so. Its URLs
   // are wrong because of what okibi knows, not because the epoch did not move
   // — a digest written before the ids carried their format extension, say —
   // and the next digest fixes it. Remembering the move now would mean the run
   // that could have warmed it never happens.
-  if (allHandedOver) {
-    await env.R2.put(STATE_KEY, JSON.stringify(after));
-  } else {
-    console.warn("okibi: leaving the move unrecorded, so the next tick tries again");
+  const tilesets: Record<string, unknown> = {};
+  for (const [tileset, epoch] of Object.entries(after.tilesets)) {
+    tilesets[tileset] = unrecorded.has(tileset) ? before.tilesets[tileset] : epoch;
+  }
+  await env.R2.put(STATE_KEY, JSON.stringify({ ...after, tilesets }));
+  if (unrecorded.size > 0) {
+    console.warn("okibi: leaving these moves unrecorded, so the next tick tries again", {
+      tilesets: [...unrecorded],
+    });
   }
 
   return { first: false, invalidations: events.length, queued };
+}
+
+/**
+ * Plan one invalidation, keep the plan, and hand it over.
+ *
+ * Returns how many entries the executor queued, or null when the plan was
+ * refused here and should be tried again on the next tick.
+ */
+async function warmOne(
+  env: Env,
+  // biome-ignore lint/suspicious/noExplicitAny: the event is the spec's shape
+  invalidation: any,
+  digests: unknown[],
+  after: { service: string; tilesets: unknown },
+  now: string,
+): Promise<number | null> {
+  const warm: { entries: { url: string }[]; stats: Record<string, number> } & Record<
+    string,
+    // The plan document, which this only reads a few fields of and passes
+    // on whole.
+    // biome-ignore lint/suspicious/noExplicitAny: the shape is the spec's
+    any
+  > = plan({
+    digests,
+    invalidation,
+    manifests: [manifest],
+    pricing,
+    epochs: after,
+    options: { budgetUsd: BUDGET_USD },
+  });
+
+  console.log("okibi: an epoch moved", {
+    tileset: invalidation.tileset,
+    axis: invalidation.axis,
+    from: invalidation.epoch_from,
+    to: invalidation.epoch_to,
+    entries: warm.stats.total,
+    coverage: warm.stats.coverage_of_demand,
+    usd: warm.estimate.warm.usd,
+  });
+
+  // The plan is what the estimate was read off, and the measurement it will
+  // be checked against arrives in tomorrow's digest. Keeping one of the pair
+  // makes neither worth much.
+  await env.R2.put(`${PLAN_PREFIX}/${now}-${invalidation.tileset}.json`, JSON.stringify(warm));
+
+  // Before handing it over, because nobody is going to read it. A plan whose
+  // URLs do not exist looks exactly like one whose URLs do — ordered
+  // entries, a coverage, a price — and the only place that shows is the
+  // origin.
+  const { wrong, answered } = await sample(warm.entries, env.OKIBI_WARM_SECRET);
+  if (wrong.length > 0) {
+    console.warn("okibi: not handing over a plan whose URLs do not exist", {
+      tileset: invalidation.tileset,
+      wrong,
+    });
+    return null;
+  }
+
+  // Nothing answered, which is what happens whenever the URLs are this
+  // worker's own: a Worker asking for its own hostname goes out to the edge
+  // and comes back 522. So this is not a plan that passed, it is a plan
+  // nothing could check, and saying otherwise would make a check that
+  // cannot fail look like one that did not.
+  //
+  // Handed over anyway, because the executor asks for every one of these
+  // URLs from outside and says what they answered — `okibi: warmed a batch`
+  // carries the statuses. Refusing here would trade a plan that reports its
+  // own failure for one that never runs.
+  if (answered === 0) {
+    console.warn("okibi: handing over a plan nothing here could verify", {
+      tileset: invalidation.tileset,
+      entries: warm.stats.total,
+      why: "a Worker cannot ask its own origin; read the executor's statuses",
+    });
+  }
+
+  return await handOver(env, warm);
 }
 
 /** How many of a plan's URLs to ask about before running the rest. */
