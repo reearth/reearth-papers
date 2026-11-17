@@ -95,15 +95,29 @@ export const EZU_THEMES = new Set(Object.keys(RECIPES));
  *
  *  Again only the themes that draw text. The papers house styles carry
  *  no `glyphs` source at all (label-free by design), and neither do the
- *  paint styles, so nothing in either can have been reordered. */
+ *  paint styles, so nothing in either can have been reordered.
+ *
+ *  6 (papers-*) and 8 (protomaps-*) are ezu 0.15.0 and the recipes
+ *  re-translated with it. The renderer alone barely moves anything — the
+ *  0.9.0 recipes render under 0.15.0 within a few label pixels of what
+ *  production holds — but the translator moves both families toward
+ *  what gl-js draws: `line-dasharray` scales with the line's width, so
+ *  rail and tunnel dashes come out the length MapLibre gives them; miter
+ *  joins bevel at MapLibre's limit of 2; every line goes through
+ *  `boundary`, which leaves out the edges a tile encoder adds at the
+ *  buffer; and labels honour `text-anchor` (pinned to `left` by
+ *  `tileModeAdjustments`) instead of centring on the point, as
+ *  maplibre-native draws them. scripts/ezu-style-prep.mjs splits the protomaps
+ *  boundaries' zoom-stepped dasharray into constant ones, which the
+ *  translator would otherwise draw solid. */
 const RECIPE_VERSIONS: Record<string, number> = {
-  "papers-light": 5,
-  "papers-dark": 5,
-  "protomaps-light": 7,
-  "protomaps-dark": 7,
-  "protomaps-white": 7,
-  "protomaps-black": 7,
-  "protomaps-grayscale": 7,
+  "papers-light": 6,
+  "papers-dark": 6,
+  "protomaps-light": 8,
+  "protomaps-dark": 8,
+  "protomaps-white": 8,
+  "protomaps-black": 8,
+  "protomaps-grayscale": 8,
 };
 
 /** Cache namespace for one theme's renders. Unknown themes get the

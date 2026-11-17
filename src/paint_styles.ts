@@ -48,11 +48,23 @@
  *  filter reading the pad carried the guess back inside as a seam along
  *  the tile border. Those renders are wrong, not merely different.
  *
+ *  3 is ezu 0.15.0. The renderer changes between 0.9.0 and it reach
+ *  every style on the shelf: `hatch` spacing and the other geometry ops'
+ *  pixel lengths are read as canvas pixels (0.11.0, an eighth of what
+ *  they were on a 512 px tile), `worley` noise is a distance field and
+ *  per-cell tones moved to `cell` (0.11.0), `boundary` closes vector-tile
+ *  rings (0.12.0), and a DEM is sampled at pixel centres (0.13.0). The
+ *  shelf's documents were moved over to keep their look (pencil-sketch's
+ *  `hatch-spacing` rescaled, pixel-art's and wash's `worley` nodes
+ *  remapped onto `cell`), which changes their `rev` too — but a document
+ *  published before that renders under 0.15.0 as well, and those renders
+ *  must not land beside 0.9.0's.
+ *
  *  It is one number for the whole shelf rather than one per style: the
  *  styles that read no terrain get re-rendered for nothing, which for
  *  pencil-sketch is a few dozen tiles, against carrying "reads a DEM"
  *  through the manifest to save them. */
-export const PAINT_RUNTIME_VERSION = 2;
+export const PAINT_RUNTIME_VERSION = 3;
 
 /** Formats the paint route serves, best first (same rationale as the
  *  themed rasters: WebP encodes for free where PNG's deflate costs
