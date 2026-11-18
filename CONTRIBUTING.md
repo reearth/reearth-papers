@@ -583,11 +583,13 @@ library's defaults remember two kinds of failure:
 A retry that lands on another isolate succeeds, which is why this looks
 intermittent from outside.
 
-So `src/archive.ts` is the only place a handle is built. `openArchive`
-gives it a `ResolvedValueCache`, which stores only reads that arrived,
-and the Overture routes read through `WorkerFetchSource`, which clears
-`mustReload` before each read. `test/archive.test.mjs` fails if another
-module calls `new PMTiles(`.
+So `src/archive.ts` is the only place this worker builds a handle.
+`openArchive` gives it a `ResolvedValueCache`, which stores only reads
+that arrived, and the Overture routes read through `WorkerFetchSource`,
+which clears `mustReload` before each read. `test/archive.test.mjs`
+fails if another module under `src/` calls `new PMTiles(`. The mirror
+worker (`mirror/protomaps/src/pmtiles.ts`) builds its own handle and
+still uses the library's default cache.
 
 A read that still fails on an `/overture_*` tile answers 503 with
 `retry-after: 1` and `cache-control: no-store`, and logs one JSON line
