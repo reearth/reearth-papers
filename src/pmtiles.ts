@@ -97,7 +97,7 @@ export async function handleVectorTile(
   }
 
   const tile = await archive.getZxy(match.z, match.x, match.y);
-  if (!tile) return new Response("tile not found", { status: 204 });
+  if (!tile) return new Response(null, { status: 204 });
 
   // The pmtiles library's `getZxy` returns *already-decompressed* tile
   // bytes (it consults the archive's tileCompression header internally).
