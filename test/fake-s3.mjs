@@ -1,3 +1,5 @@
+import { gzipSync } from "node:zlib";
+
 import { zxyToTileId } from "pmtiles";
 
 const HEADER_BYTES = 127;
@@ -14,12 +16,16 @@ function varints(values) {
   return out;
 }
 
-/** A PMTiles v3 archive with no compression, holding `tiles`
- *  (`{ z, x, y, data }`, `data` a string), declaring the zoom range, and
- *  carrying `metadata` as its JSON metadata when given. */
-export function buildArchive(tiles, { minZoom = 0, maxZoom = 1, metadata } = {}) {
+/** A PMTiles v3 archive holding `tiles` (`{ z, x, y, data }`, `data` a
+ *  string or bytes), declaring the zoom range, and carrying `metadata` as
+ *  its JSON metadata when given. Tiles are stored gzipped when `gzip` is
+ *  set and as they are otherwise. */
+export function buildArchive(tiles, { minZoom = 0, maxZoom = 1, metadata, gzip = false } = {}) {
   const entries = tiles
-    .map((t) => ({ id: zxyToTileId(t.z, t.x, t.y), bytes: new TextEncoder().encode(t.data) }))
+    .map((t) => {
+      const raw = typeof t.data === "string" ? new TextEncoder().encode(t.data) : t.data;
+      return { id: zxyToTileId(t.z, t.x, t.y), bytes: gzip ? new Uint8Array(gzipSync(raw)) : raw };
+    })
     .sort((a, b) => a.id - b.id);
   let offset = 0;
   const placed = entries.map((e) => {
@@ -62,7 +68,7 @@ export function buildArchive(tiles, { minZoom = 0, maxZoom = 1, metadata } = {})
   u64(88, placed.length);
   buf[96] = 1; // clustered
   buf[97] = 1; // internal compression: none
-  buf[98] = 1; // tile compression: none
+  buf[98] = gzip ? 2 : 1; // tile compression
   buf[99] = 1; // tile type: mvt
   buf[100] = minZoom;
   buf[101] = maxZoom;
