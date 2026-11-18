@@ -33,7 +33,7 @@
 import type { PMTiles } from "pmtiles";
 
 import { type CreditGroupId, attributionOf } from "./credits.js";
-import { type FilterRules, LITE_RULES } from "./mvt_lite.js";
+import type { FilterRules } from "./mvt_lite.js";
 import {
   BLACKMARBLE_ATTRIBUTION,
   BLACKMARBLE_COG_KEY,
@@ -54,11 +54,11 @@ import {
   NE_VECTOR_TILESETS,
 } from "./naturalearth_vector.js";
 import {
-  handleOvertureLiteTile,
   handleOvertureTile,
   OVERTURE_ATTRIBUTION,
   OVERTURE_TILESETS,
   overtureArchive,
+  overtureLiteFields,
   type OvertureTileset,
 } from "./overture.js";
 import { handleVectorTile, protomapsArchive, readMirrorPointer } from "./pmtiles.js";
@@ -384,22 +384,7 @@ function overtureSpec(d: OvertureTileset): TilesetSpec {
 }
 
 /** The same archive as `overtureSpec(d)`, served through `liteTile`. */
-function overtureLiteSpec(d: OvertureTileset): TilesetSpec {
-  const dropped = [...LITE_RULES.dropKeys].map((k) => `\`${k}\``).join(", ");
-  return {
-    ...overtureSpec(d),
-    id: `${d.id}_lite`,
-    catalogId: `${d.catalogId}-lite`,
-    name: `${d.name} (lite)`,
-    catalogName: `${d.catalogName} Lite`,
-    description:
-      `${d.description} Lite: the same tiles without the ${dropped} properties, ` +
-      "and without `bathymetry` where none of its features has a property " +
-      "(z0–4 in release 2026-11-18.0). For drawing; read the full tileset for provenance.",
-    handleTile: (request, _env, ctx, coords) => handleOvertureLiteTile(request, ctx, d.theme, coords),
-    tileFilter: LITE_RULES,
-  };
-}
+const overtureLiteSpec = (d: OvertureTileset): TilesetSpec => ({ ...overtureSpec(d), ...overtureLiteFields(d) });
 
 export const TILESETS: readonly TilesetDef[] = SPECS.map((spec) => ({
   ...spec,

@@ -28,8 +28,9 @@ import type { PMTiles } from "pmtiles";
 
 import { openArchive, WorkerFetchSource } from "./archive.js";
 import { attributionOf, headerSafeHtml } from "./credits.js";
-import { LITE_VERSION, liteTile } from "./mvt_lite.js";
+import { LITE_RULES, LITE_VERSION, liteTile } from "./mvt_lite.js";
 import { vectorTileResponse } from "./mvt_response.js";
+import type { TilesetDef } from "./tilesets.js";
 
 // Overture ships monthly releases and the version is part of the S3
 // path, but nothing here pins one. Overture holds a rolling window of
@@ -457,6 +458,27 @@ export async function handleOvertureLiteTile(
     }),
   );
   return vectorTileResponse(lite, { ...headers(read.release), "x-cache": "miss" });
+}
+
+type LiteFields = Pick<TilesetDef, "id" | "catalogId" | "name" | "catalogName" | "description"> &
+  Required<Pick<TilesetDef, "handleTile" | "tileFilter">>;
+
+/** What `<id>_lite` changes in the registry entry of `d`; the rest is
+ *  `d`'s own entry. */
+export function overtureLiteFields(d: OvertureTileset): LiteFields {
+  const dropped = [...LITE_RULES.dropKeys].map((k) => `\`${k}\``).join(", ");
+  return {
+    id: `${d.id}_lite`,
+    catalogId: `${d.catalogId}-lite`,
+    name: `${d.name} (lite)`,
+    catalogName: `${d.catalogName} Lite`,
+    description:
+      `${d.description} Lite: the same tiles without the ${dropped} properties, ` +
+      "and without `bathymetry` where none of its features has a property " +
+      "(z0–4 in release 2026-11-18.0). For drawing; read the full tileset for provenance.",
+    handleTile: (request, _env, ctx, coords) => handleOvertureLiteTile(request, ctx, d.theme, coords),
+    tileFilter: LITE_RULES,
+  };
 }
 
 /** One line per failed tile request, for Workers Logs. `stage` is

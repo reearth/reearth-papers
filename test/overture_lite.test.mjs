@@ -207,14 +207,25 @@ test("lite TileJSON fields leave out the dropped keys, and base keeps them", asy
       ],
     },
   }), '"v1"');
-  const { overtureArchive, OVERTURE_TILESETS } = await loadSrc("overture");
-  const { LITE_RULES } = await loadSrc("mvt_lite");
+  const { overtureArchive, overtureLiteFields, OVERTURE_TILESETS } = await loadSrc("overture");
   const { tilesetVectorLayers } = await loadSrc("vector_layers");
   const d = OVERTURE_TILESETS.find((t) => t.lite);
   const def = { id: d.id, minzoom: d.minzoom, maxzoom: d.maxzoom, archive: () => overtureArchive(d.theme) };
   const water = async (spec) =>
     (await tilesetVectorLayers(spec, d.layers, {}, () => {})).layers.find((l) => l.id === "water").fields;
 
-  assert.deepEqual(await water({ ...def, tileFilter: LITE_RULES }), { class: "String" });
+  assert.deepEqual(await water({ ...def, ...overtureLiteFields(d) }), { class: "String" });
   assert.deepEqual(Object.keys(await water(def)), ["id", "class", "sources", "source_tags"]);
+});
+
+test("the lite registry entry serves the filtered tile", async () => {
+  s3.put(`tiles/${NEWEST}/base.pmtiles`, buildArchive([{ ...ZXY, data: TILE }]), '"v1"');
+  const { overtureLiteFields, OVERTURE_TILESETS } = await loadSrc("overture");
+  const spec = overtureLiteFields(OVERTURE_TILESETS.find((t) => t.lite));
+  assert.equal(spec.id, "overture_base_lite");
+
+  const res = await spec.handleTile(new Request(`${ORIGIN}/${spec.id}/0/0/0.mvt`), {}, ctx, ZXY, "mvt");
+  await Promise.all(pending);
+  assert.equal(res.status, 200);
+  assert.deepEqual(properties(new Uint8Array(await res.arrayBuffer())), { class: "lake" });
 });
