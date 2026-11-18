@@ -48,8 +48,10 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          # wrangler 4.x requires Node 22+
-          node-version: 22
+          # wrangler 4.x requires Node 22+. `npm test` loads the .ts
+          # sources directly, which needs type stripping on by default
+          # (22.18+).
+          node-version: 22.18
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -57,6 +59,9 @@ jobs:
 
       - name: TypeScript typecheck
         run: npm run typecheck
+
+      - name: Tests
+        run: npm test
 
       # `wrangler deploy --dry-run` validates the config (bindings, DO
       # migrations, container image path) and bundles the worker —
