@@ -34,6 +34,11 @@ minzoom — and those move between releases (`building`'s minzoom went
 reported, never rewritten: a new layer needs a description and a
 geometry hint, which only a person can write.
 
+A layer's `fields` and zoom range in the TileJSON are not taken from this
+file. The worker reads them from the archive it serves
+(`src/vector_layers.ts`), and the layer minzoom here is used only when
+that read fails.
+
 Nothing breaks while it goes unrun — the catalog just describes the
 tiles slightly wrong — so run it when Overture publishes, or when a
 `vector_layers` entry looks off.

@@ -11,6 +11,7 @@ import {
   type TileFormat,
   type TilesetDef,
 } from "./tilesets.js";
+import { type TileJsonVectorLayer, tilesetVectorLayers } from "./vector_layers.js";
 
 const BOUNDS = [-180, -85.0511, 180, 85.0511];
 const CENTER = [0, 20, 2];
@@ -100,7 +101,12 @@ export function handlePaintTilejson(request: Request, style: PaintStyle): Respon
 // advertise our own tile route in the requested format (?format=,
 // default = the entry's first format); passthrough entries advertise
 // the upstream's URLs directly.
-export function handleTilesetTilejson(request: Request, def: TilesetDef): Response {
+export async function handleTilesetTilejson(
+  request: Request,
+  def: TilesetDef,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
   const url = new URL(request.url);
   let tiles: readonly string[];
   if (def.upstreamTiles) {
@@ -111,6 +117,16 @@ export function handleTilesetTilejson(request: Request, def: TilesetDef): Respon
     const q = url.searchParams.get("format");
     if (q && (formats as readonly string[]).includes(q)) fmt = q as TileFormat;
     tiles = [`${url.origin}/${def.id}/{z}/{x}/{y}.${fmt}`];
+  }
+  let vectorLayers: TileJsonVectorLayer[] | undefined;
+  let maxAge = 300;
+  if (def.vectorLayers) {
+    ({ layers: vectorLayers, maxAge } = await tilesetVectorLayers(
+      def,
+      def.vectorLayers,
+      env,
+      (p) => ctx.waitUntil(p),
+    ));
   }
   return json({
     tilejson: "3.0.0",
@@ -132,27 +148,15 @@ export function handleTilesetTilejson(request: Request, def: TilesetDef): Respon
     ...(def.type === "raster" ? { tileSize: 256 } : {}),
     // Required by TileJSON 3.0 for vector tilesets; lets clients
     // enumerate the MVT layers without parsing a tile first.
-    ...(def.vectorLayers
-      ? {
-          vector_layers: def.vectorLayers.map((l) => ({
-            id: l.id,
-            description: l.description,
-            minzoom: l.minzoom,
-            maxzoom: def.maxzoom,
-            // Non-standard hint consumed by the viewer's inspector.
-            geometry: l.geometry,
-            fields: {},
-          })),
-        }
-      : {}),
-  });
+    ...(vectorLayers ? { vector_layers: vectorLayers } : {}),
+  }, maxAge);
 }
 
-function json(body: unknown): Response {
+function json(body: unknown, maxAge = 300): Response {
   return new Response(JSON.stringify(body), {
     headers: {
       "content-type": "application/json",
-      "cache-control": "public, max-age=300",
+      "cache-control": `public, max-age=${maxAge}`,
       "access-control-allow-origin": "*",
     },
   });
