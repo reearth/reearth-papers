@@ -64,6 +64,7 @@ const SHARD_COUNT = 32;
 import { STYLE_VERSION } from "./cache.js";
 import { tileCjkFlavor } from "./cjk_flavor.js";
 import { handleCatalog } from "./catalog.js";
+import { headerSafeHtml } from "./credits.js";
 import {
   ezuRecipeVersion,
   ezuRenderStats,
@@ -86,7 +87,7 @@ import { dayBefore, takeDigest } from "./okibi-digest.js";
 import { handleOkibiEpochs } from "./okibi_epochs.js";
 import { watch } from "./okibi_watch.js";
 import { readMirrorPointer } from "./pmtiles.js";
-import { headerSafeHtml, serveRenderedTile } from "./render_cache.js";
+import { serveRenderedTile } from "./render_cache.js";
 import { handleSprite } from "./sprites.js";
 import { handleSourceFile } from "./source_file.js";
 import {

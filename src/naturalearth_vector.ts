@@ -16,10 +16,8 @@
 // the tippecanoe build (`scripts/_lib.sh`'s LAYERS table), the TileJSON
 // `vector_layers` we advertise, and the generated MapLibre style.
 
-import { attributionOf } from "./credits.js";
+import { attributionOf, headerSafeHtml } from "./credits.js";
 import { PMTiles, type RangeResponse, type Source } from "pmtiles";
-
-import { headerSafeHtml } from "./render_cache.js";
 
 // Public domain — no attribution required; we credit Natural Earth
 // anyway, matching the raster side (src/naturalearth.ts).

@@ -5,10 +5,8 @@
 // once on EC2 by `mirror/watercolor/builder/`. The key is therefore
 // hardcoded; no pointer indirection.
 
-import { attributionOf } from "./credits.js";
+import { attributionOf, headerSafeHtml } from "./credits.js";
 import { PMTiles, type RangeResponse, type Source } from "pmtiles";
-
-import { headerSafeHtml } from "./render_cache.js";
 
 export const WATERCOLOR_ARCHIVE_KEY = "mirror/watercolor/v1.pmtiles";
 

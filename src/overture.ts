@@ -22,10 +22,8 @@
 // ids + zoom ranges below were read from the live archives' metadata —
 // keep them in sync when bumping OVERTURE_RELEASE.
 
-import { attributionOf } from "./credits.js";
+import { attributionOf, headerSafeHtml } from "./credits.js";
 import { FetchSource, PMTiles } from "pmtiles";
-
-import { headerSafeHtml } from "./render_cache.js";
 
 // Overture ships monthly releases and the version is part of the S3
 // path, but nothing here pins one. Overture holds a rolling window of
