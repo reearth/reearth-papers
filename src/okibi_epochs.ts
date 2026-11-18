@@ -17,17 +17,14 @@
 // dataset name, a customer identifier — that is a sign to rename the epoch,
 // not to add a token.
 
+import type { Epoch } from "@reearth/okibi/writer";
+
 import { STYLE_VERSION } from "./cache.js";
 import { ezuRecipeVersion } from "./ezu.js";
-import { PAINT_RUNTIME_VERSION, paintStyles } from "./paint_styles.js";
+import { paintEpochs } from "./paint_route.js";
 import { readMirrorPointer } from "./pmtiles.js";
 import { THEMES } from "./style.js";
-
-interface Epoch {
-  source?: string;
-  algo?: string;
-  param?: string;
-}
+import { paintSources } from "./tilesets.js";
 
 /**
  * The epochs every tileset is currently serving under.
@@ -36,8 +33,14 @@ interface Epoch {
  * two: what this reports is compared against what the ledger recorded, and a
  * second spelling would make a change look like a change that already
  * happened.
+ *
+ * A paint style whose extra sources cannot be read now reports its epoch in
+ * `recorded`, or is left out (see `paintEpochs`).
  */
-export async function okibiEpochs(env: Env): Promise<Record<string, Epoch>> {
+export async function okibiEpochs(
+  env: Env,
+  recorded?: Readonly<Record<string, Epoch>>,
+): Promise<Record<string, Epoch>> {
   const { date } = await readMirrorPointer(env);
   const tilesets: Record<string, Epoch> = {};
 
@@ -49,18 +52,7 @@ export async function okibiEpochs(env: Env): Promise<Record<string, Epoch>> {
     };
   }
 
-  for (const style of await paintStyles(env)) {
-    // The parameterless picture. A style's parameters are part of its key and
-    // there are unboundedly many of them; what an invalidation moves is the
-    // style, and every parameterisation of it moves with it.
-    tilesets[style.name] = {
-      source: `${date}/${style.sourceVersion || "-"}`,
-      algo: `paint-r${PAINT_RUNTIME_VERSION}`,
-      param: style.rev,
-    };
-  }
-
-  return tilesets;
+  return { ...tilesets, ...(await paintEpochs(env, date, paintSources(env), recorded)) };
 }
 
 export async function handleOkibiEpochs(env: Env): Promise<Response> {

@@ -12,6 +12,10 @@ registerHooks({
       if (!specifier.startsWith(".") || !specifier.endsWith(".js")) throw e;
       resolved = nextResolve(`${specifier.slice(0, -3)}.ts`, context);
     }
+    // The bundler imports JSON without an attribute; Node insists on one.
+    if (new URL(resolved.url).pathname.endsWith(".json")) {
+      return { ...resolved, importAttributes: { type: "json" } };
+    }
     if (new URL(resolved.url).pathname.endsWith(".ts")) {
       return { ...resolved, format: "module-typescript" };
     }

@@ -32,6 +32,7 @@ import protomapsDarkRecipe from "./ezu_recipes/protomaps-dark.json";
 import protomapsGrayscaleRecipe from "./ezu_recipes/protomaps-grayscale.json";
 import protomapsLightRecipe from "./ezu_recipes/protomaps-light.json";
 import protomapsWhiteRecipe from "./ezu_recipes/protomaps-white.json";
+import { archiveTileStream } from "./archive.js";
 import { type CjkFlavor } from "./cjk_flavor.js";
 import { handleFont } from "./fonts.js";
 import {
@@ -42,6 +43,13 @@ import {
   loadStoreSeed,
   serializeStore,
 } from "./glyphs.js";
+import { MvtLimitError, MvtSliceError, sliceLayers } from "./mvt_slice.js";
+import {
+  type ExtraSourcePlan,
+  type PaintSources,
+  PaintSourceError,
+  planVectorSources,
+} from "./paint_sources.js";
 import { handleVectorTile } from "./pmtiles.js";
 import { handleSprite, upstreamSpritePath } from "./sprites.js";
 
@@ -165,9 +173,21 @@ interface AssetSource {
   path: string;
 }
 
+/** An `mvt` source bound from its own tileset's archive (see
+ *  `readExtraSources`), with the offsets the document reads it at. */
+interface ExtraSource extends ExtraSourcePlan {
+  offsets: [number, number][];
+  keepSet: ReadonlySet<string> | null;
+}
+
 interface EzuState {
   renderer: InstanceType<typeof Renderer>;
-  mvtSource: string;
+  /** Bound from the Protomaps archive. Null when the document names no
+   *  source for that role. */
+  mvtSource: string | null;
+  /** Empty for the themed rasters. */
+  extraSources: ExtraSource[];
+  sources: PaintSources | null;
   /** Offsets the recipe wants beyond the centre tile. */
   neighborOffsets: [number, number][];
   /** DEM sources the recipe reads, empty for the themed rasters. */
@@ -406,7 +426,12 @@ export interface EzuStyle {
   key: string;
   doc: Record<string, unknown>;
   fetchAsset?: (path: string) => Promise<Uint8Array | null>;
+  /** Tilesets other `mvt` sources may bind. Absent for the themes, which
+   *  read Protomaps alone. */
+  sources?: PaintSources;
 }
+
+const PROTOMAPS_ONLY: ReadonlySet<string> = new Set(["protomaps"]);
 
 function ensureState(style: EzuStyle): EzuState {
   const key = style.key;
@@ -426,7 +451,6 @@ function ensureState(style: EzuStyle): EzuState {
   renderer.setGlyphBudget(GLYPH_BUDGET_BYTES);
   const sources =
     (recipe as { sources?: Record<string, Record<string, unknown>> }).sources ?? {};
-  let mvtSource = "";
   const glyphStacks = new Map<string, string>();
   const glyphFontstacks = new Map<string, string>();
   let sprite: EzuState["sprite"] = null;
@@ -437,8 +461,8 @@ function ensureState(style: EzuStyle): EzuState {
   // bound the same way DEM is, so they fall through to the warning
   // rather than being silently treated as absent.
   for (const [name, decl] of Object.entries(sources)) {
-    if (decl.type === "mvt") mvtSource = name;
-    else if (decl.type === "glyphs") {
+    if (decl.type === "mvt") continue;
+    if (decl.type === "glyphs") {
       const fontstack = String(decl.fontstack ?? "");
       glyphStacks.set(name, encodeURIComponent(fontstack));
       glyphFontstacks.set(name, fontstack);
@@ -453,10 +477,27 @@ function ensureState(style: EzuStyle): EzuState {
       console.warn(`ezu: ${key} declares unsupported source type ${decl.type}`);
     }
   }
-  if (!mvtSource) throw new Error(`recipe ${key} has no mvt source`);
-  const neighborOffsets = (
-    renderer.requestedNeighborOffsets(mvtSource) as [number, number][]
-  ).filter(([dx, dy]) => dx !== 0 || dy !== 0);
+  const plan = planVectorSources(recipe, style.sources?.readable ?? PROTOMAPS_ONLY);
+  for (const u of plan.unresolved) {
+    console.warn(
+      `ezu: ${key} source ${u.name} (${u.url}) names no Papers vector tileset a style may read; ` +
+        (u.bound ? "bound to Protomaps as the last mvt source" : "left unbound"),
+    );
+  }
+  const mvtSource = plan.primary;
+  if (mvtSource === null && !plan.extras.length) {
+    throw new Error(`recipe ${key} has no mvt source`);
+  }
+  const offsetsOf = (name: string) =>
+    (renderer.requestedNeighborOffsets(name) as [number, number][]).filter(
+      ([dx, dy]) => dx !== 0 || dy !== 0,
+    );
+  const neighborOffsets = mvtSource === null ? [] : offsetsOf(mvtSource);
+  const extraSources: ExtraSource[] = plan.extras.map((e) => ({
+    ...e,
+    offsets: offsetsOf(e.name),
+    keepSet: e.keep === null ? null : new Set(e.keep),
+  }));
   // Asked per source: a document may read neighbour DEM for a shaded
   // relief and only the centre MVT, or the other way round.
   for (const dem of demSources) {
@@ -467,6 +508,8 @@ function ensureState(style: EzuStyle): EzuState {
   st = {
     renderer,
     mvtSource,
+    extraSources,
+    sources: style.sources ?? null,
     neighborOffsets,
     demSources,
     assetSources,
@@ -548,6 +591,123 @@ async function fetchMvt(
   if (res.status !== 200) return null;
   const buf = new Uint8Array(await res.arrayBuffer());
   return buf.length ? buf : null;
+}
+
+/** What one render may keep of its extra sources' tiles, all offsets and
+ *  sources together. Measured with ezu 0.15.0, the wasm heap grows by about
+ *  19 MB per MB of kept MVT, and three renderers share 128 MB. */
+const EXTRA_SOURCE_MAX_BYTES = 512 * 1024;
+
+/** How long a render waits for the isolate's one extra-source read slot. */
+const EXTRA_READ_WAIT_MS = 20_000;
+
+let extraReadBusy = false;
+
+/** Stored tiles whose kept layers passed the byte budget they were cut
+ *  with, keyed by tileset, archive etag, tile and kept layers, with the
+ *  largest such budget (a tile is read only with more than it holds). The cut is deterministic, so a render with no more
+ *  budget left fails at once instead of reading up to 32 MiB again. */
+const overLimit = new Map<string, number>();
+const OVER_LIMIT_ENTRIES = 1024;
+
+function rememberOverLimit(key: string, budget: number): void {
+  overLimit.delete(key);
+  if (overLimit.size >= OVER_LIMIT_ENTRIES) overLimit.delete(overLimit.keys().next().value!);
+  overLimit.set(key, budget);
+}
+
+/** Extra-source reads run one at a time per isolate, since a stored
+ *  Overture tile at low zoom is up to 17 MB before anything is cut from
+ *  it. Polling for the same reason `acquireRenderPermit` polls; unlike
+ *  that permit, this one fails rather than overshoot. */
+async function acquireExtraRead(): Promise<void> {
+  const deadline = Date.now() + EXTRA_READ_WAIT_MS;
+  while (extraReadBusy) {
+    if (Date.now() >= deadline) {
+      throw new PaintSourceError("admission", `no extra-source read slot in ${EXTRA_READ_WAIT_MS} ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, PERMIT_POLL_MS));
+  }
+  extraReadBusy = true;
+}
+
+interface ExtraBinding {
+  name: string;
+  dx: number;
+  dy: number;
+  sourceZoom: number;
+  bytes: Uint8Array;
+}
+
+/**
+ * The tiles of the document's extra sources around `coords`, cut to the
+ * layers the document reads.
+ *
+ * Which tile covers each position is the renderer's answer (`sourceTile`,
+ * from the source's declared `max-zoom`), capped at the archive's own
+ * deepest zoom. Below a source's `min-zoom` nothing is read, since ezu
+ * draws nothing from it there. A tile the archive lacks stays unbound.
+ * Every failure is a `PaintSourceError`, so the route can answer 503
+ * rather than cache a picture missing its data.
+ */
+async function readExtraSources(
+  st: EzuState,
+  coords: { z: number; x: number; y: number },
+): Promise<ExtraBinding[]> {
+  const sources = st.sources;
+  const reading = st.extraSources.filter(
+    (e) => coords.z >= e.minzoom && (e.keepSet === null || e.keepSet.size > 0),
+  );
+  if (!sources || !reading.length) return [];
+
+  await acquireExtraRead();
+  try {
+    let budget = EXTRA_SOURCE_MAX_BYTES;
+    const read = new Map<string, Uint8Array | null>();
+    const bound: ExtraBinding[] = [];
+    for (const e of reading) {
+      const archive = await sources.archive(e.tileset);
+      const { minZoom, maxZoom, etag } = await archive.getHeader();
+      for (const [dx, dy] of [[0, 0] as [number, number], ...e.offsets]) {
+        let at = st.renderer.sourceTile(e.name, coords.z, coords.x + dx, coords.y + dy) as {
+          z: number;
+          x: number;
+          y: number;
+        };
+        if (at.z > maxZoom) {
+          const shift = at.z - maxZoom;
+          at = { z: maxZoom, x: at.x >> shift, y: at.y >> shift };
+        }
+        if (at.z < minZoom || at.y < 0 || at.y >= 2 ** at.z) continue;
+        const key = `${e.name}/${at.z}/${at.x}/${at.y}`;
+        if (!read.has(key)) {
+          const cut = etag && `${e.tileset}@${etag}/${at.z}/${at.x}/${at.y}/${JSON.stringify(e.keep)}`;
+          if (cut && (overLimit.get(cut) ?? -1) >= budget) {
+            throw new PaintSourceError("slice", `slice: ${cut} keeps more than ${budget} bytes, as read before`);
+          }
+          const stream = await archiveTileStream(archive, at);
+          let bytes: Uint8Array | null;
+          try {
+            bytes = stream && (await sliceLayers(stream, e.keepSet, budget));
+          } catch (err) {
+            if (cut && err instanceof MvtLimitError) rememberOverLimit(cut, budget);
+            throw err;
+          }
+          budget -= bytes?.length ?? 0;
+          read.set(key, bytes);
+        }
+        const bytes = read.get(key);
+        if (bytes) bound.push({ name: e.name, dx, dy, sourceZoom: at.z, bytes });
+      }
+    }
+    return bound;
+  } catch (e) {
+    if (e instanceof PaintSourceError) throw e;
+    const stage = e instanceof MvtSliceError ? "slice" : "read";
+    throw new PaintSourceError(stage, `${stage}: ${String(e)}`, { cause: e });
+  } finally {
+    extraReadBusy = false;
+  }
 }
 
 /** Hosts a document may name as a DEM source.
@@ -881,7 +1041,7 @@ async function renderWithState(
     at: ancestorOf(coords.z, coords.x + dx, coords.y + dy),
   }));
   const fetches = new Map<string, Promise<Uint8Array | null>>();
-  for (const w of wanted) {
+  for (const w of st.mvtSource === null ? [] : wanted) {
     const key = `${w.at.z}/${w.at.x}/${w.at.y}`;
     if (!fetches.has(key)) fetches.set(key, fetchMvt(env, w.at.z, w.at.x, w.at.y));
   }
@@ -944,10 +1104,12 @@ async function renderWithState(
     bytes: demBytes.get(`${w.dem.name}/${w.at.z}/${w.at.x}/${w.at.y}`) ?? null,
   }));
 
+  const extras = await readExtraSources(st, coords);
+
   const run = st.lock.then(async () => {
     st.renderer.clearSources();
     for (const m of mvts) {
-      if (!m.bytes) continue;
+      if (!m.bytes || st.mvtSource === null) continue;
       st.renderer.bindSource(st.mvtSource, m.bytes, {
         ...(m.dx || m.dy ? { coord: [m.dx, m.dy] } : {}),
         // The zoom of the tile we actually fetched, not the source's
@@ -955,6 +1117,12 @@ async function renderWithState(
         // `sourceZoom` deeper than the one being rendered is rejected
         // ("overzoom only reprojects downwards").
         sourceZoom: m.sourceZoom,
+      });
+    }
+    for (const x of extras) {
+      st.renderer.bindSource(x.name, x.bytes, {
+        ...(x.dx || x.dy ? { coord: [x.dx, x.dy] } : {}),
+        sourceZoom: x.sourceZoom,
       });
     }
     for (const d of dems) {

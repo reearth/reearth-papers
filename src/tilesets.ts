@@ -59,6 +59,7 @@ import {
   overtureArchive,
 } from "./overture.js";
 import { handleVectorTile, protomapsArchive, readMirrorPointer } from "./pmtiles.js";
+import { PAINT_SOURCE_IDS, type PaintSources } from "./paint_sources.js";
 import type { SourceFile } from "./source_file.js";
 import {
   handleWatercolorTile,
@@ -381,3 +382,16 @@ export const TILESETS: readonly TilesetDef[] = SPECS.map((spec) => ({
 export const TILESETS_BY_ID: ReadonlyMap<string, TilesetDef> = new Map(
   TILESETS.map((t) => [t.id, t]),
 );
+
+export function paintSources(env: Env): PaintSources {
+  return {
+    readable: PAINT_SOURCE_IDS,
+    archive: (tileset) => {
+      const archive = PAINT_SOURCE_IDS.has(tileset)
+        ? TILESETS_BY_ID.get(tileset)?.archive
+        : undefined;
+      if (!archive) return Promise.reject(new Error(`${tileset} is not a paint source`));
+      return archive(env);
+    },
+  };
+}

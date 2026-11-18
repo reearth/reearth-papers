@@ -22,6 +22,7 @@
 
 import { invalidationsBetween, plan } from "@reearth/okibi";
 import pricing from "@reearth/okibi/pricing/cloudflare-2026-08.json";
+import type { Epoch } from "@reearth/okibi/writer";
 
 import manifest from "../okibi.manifest.json";
 import { okibiEpochs } from "./okibi_epochs.js";
@@ -55,10 +56,13 @@ export interface Watched {
 }
 
 export async function watch(env: Env, now: string): Promise<Watched> {
-  const after = { service: "papers", tilesets: await okibiEpochs(env) };
-
   const stored = await env.R2.get(STATE_KEY);
-  if (!stored) {
+  const before = stored
+    ? await stored.json<{ service: string; tilesets: Record<string, Epoch> }>()
+    : null;
+  const after = { service: "papers", tilesets: await okibiEpochs(env, before?.tilesets) };
+
+  if (!before) {
     // Nothing was cached under epochs nobody recorded, so there is nothing to
     // warm — only something to remember for next time.
     await env.R2.put(STATE_KEY, JSON.stringify(after));
@@ -66,7 +70,6 @@ export async function watch(env: Env, now: string): Promise<Watched> {
     return { first: true, invalidations: 0, queued: 0 };
   }
 
-  const before = await stored.json<{ service: string; tilesets: Record<string, unknown> }>();
   const events = invalidationsBetween(before, after, now, null);
   if (events.length === 0) {
     return { first: false, invalidations: 0, queued: 0 };

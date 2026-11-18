@@ -75,14 +75,13 @@ import {
 } from "./ezu.js";
 import { handleFont } from "./fonts.js";
 import {
-  PAINT_RUNTIME_VERSION,
   type PaintFormat,
   type PaintStyle,
   paintAsset,
-  paintDocument,
   paintStyle,
   readParams,
 } from "./paint_styles.js";
+import { servePaintTile } from "./paint_route.js";
 import { dayBefore, takeDigest } from "./okibi-digest.js";
 import { handleOkibiEpochs } from "./okibi_epochs.js";
 import { watch } from "./okibi_watch.js";
@@ -106,6 +105,7 @@ import {
 import { handleAttribution } from "./attribution.js";
 import {
   PROTOMAPS_ATTRIBUTION,
+  paintSources,
   TILESETS_BY_ID,
   type TileFormat,
 } from "./tilesets.js";
@@ -488,10 +488,8 @@ async function handleEzu(
   return out;
 }
 
-// One paint tile. Same two-layer cache as the themed rasters and the
-// same permit budget in the renderer, with two things of its own: the
-// document comes from R2 (keyed by its `rev`, which is what makes the
-// cache safe), and the request may carry params.
+// One paint tile. The cache key, the render and a source failure's 503 are
+// in src/paint_route.ts; this checks the request and stamps the response.
 async function handlePaint(
   request: Request,
   env: Env,
@@ -517,60 +515,31 @@ async function handlePaint(
   // Same reasoning as the themed route: a render is only valid for the
   // vector snapshot behind it, and these go out `immutable, max-age=1y`.
   const { date } = await readMirrorPointer(env);
-  const version =
-    `${style.rev}-r${PAINT_RUNTIME_VERSION}-${date}-${style.sourceVersion}` +
-    (params.canonical ? `-${params.canonical}` : "");
-  const served = await serveRenderedTile(request, env, ctx, {
-    cacheKey:
-      `cache/paint/${style.name}/${style.rev}/r${PAINT_RUNTIME_VERSION}` +
-      `/${date}/${style.sourceVersion || "-"}` +
-      `/${params.canonical || "default"}/${coords.z}/${coords.x}/${coords.y}.${format}`,
-    cacheVersion: version,
-    contentType: format === "webp" ? "image/webp" : "image/png",
-    attribution: style.attribution,
-    demand: {
-      tileset: style.name,
-      coords,
-      fmt: format,
-      // The same string the cache key is namespaced by, so a warm request
-      // asks for the picture that was cached rather than for the default one.
-      search: params.canonical || undefined,
-      // The parts of `version`, which is what the key is namespaced by, kept
-      // apart because they move apart: the paint runtime, the style's own
-      // revision, and the snapshot it was drawn from.
-      epoch: {
-        source: `${date}/${style.sourceVersion || "-"}`,
-        algo: `paint-r${PAINT_RUNTIME_VERSION}`,
-        param: `${style.rev}${params.canonical ? `-${params.canonical}` : ""}`,
-      },
+  const sources = paintSources(env);
+  const served = await servePaintTile(
+    { style, coords, format, params, date },
+    {
+      env,
+      sources,
+      serve: (o) => serveRenderedTile(request, env, ctx, o),
+      render: (doc) =>
+        renderEzuStyleTile(
+          request,
+          env,
+          ctx,
+          {
+            // `rev` in the key, so a republished style builds a new
+            // renderer instead of a warm isolate serving the old document.
+            key: `paint:${style.name}:${style.rev}`,
+            doc,
+            fetchAsset: (path) => paintAsset(env, style, path),
+            sources,
+          },
+          coords,
+          { format, ...(params.canonical ? { params: params.values } : {}) },
+        ),
     },
-    // The default picture earns the global R2 layer outright: a paint
-    // render is brushes, noise fields and a padded canvas — seconds of
-    // WASM CPU where a themed tile costs a fraction of one — and every
-    // client asking for a style asks for the same tiles.
-    //
-    // A tuned one does not. Each distinct set of knobs is its own
-    // namespace, so persisting them buys storage for pictures nobody
-    // asks for twice. Tuned tiles stay in the per-PoP edge cache, which
-    // is what someone dragging a slider and then panning actually
-    // re-reads.
-    persist: params.canonical === "",
-    render: async () =>
-      renderEzuStyleTile(
-        request,
-        env,
-        ctx,
-        {
-          // `rev` in the key, so a republished style builds a new
-          // renderer instead of a warm isolate serving the old document.
-          key: `paint:${style.name}:${style.rev}`,
-          doc: await paintDocument(env, style),
-          fetchAsset: (path) => paintAsset(env, style, path),
-        },
-        coords,
-        { format, ...(params.canonical ? { params: params.values } : {}) },
-      ),
-  });
+  );
   const stats = ezuRenderStats();
   const out = new Response(served.body, served);
   out.headers.set("x-ezu-heap", String(stats.heapBytes));
