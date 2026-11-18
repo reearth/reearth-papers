@@ -539,11 +539,22 @@ served it.
 `OVERTURE_RELEASE` is still in the file, but only as the release its
 layer metadata was read from (and the fallback if the bucket can't be
 listed). That metadata does drift — `building`'s minzoom went 6 → 4 in
-`2026-08-19.0` — and it is compiled in, because the catalog and the
-TileJSON describe the tiles before anyone asks for one. Refresh it with
+`2026-08-19.0` — and it is compiled in, because the catalog describes
+the tiles before anyone asks for one. Refresh it with
 `node scripts/overture-release.mjs --bump`, which reads the live
 archives and writes the numbers back. Skipping it costs a slightly wrong
-`vector_layers`, not an outage.
+theme zoom range, not an outage.
+
+The TileJSON's `vector_layers` does not wait for that. Each layer's
+`fields`, `minzoom` and `maxzoom` are read from the metadata of the
+archive the tile route serves (`src/vector_layers.ts`), for Overture,
+Protomaps and Natural Earth alike, once per archive per isolate. The
+registry still decides which layers are listed, in what order, with
+what description and geometry hint. If the archive can't be read within
+2 s, the TileJSON answers with empty `fields` and the registry's zooms,
+cached for 30 s, and logs `tilejson: <id> archive layers unavailable`.
+The deploy smoke check fails a vector TileJSON whose layers list no
+field.
 
 ### 10. A Worker cannot fetch another Worker on the account by URL
 

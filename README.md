@@ -16,7 +16,7 @@ are listed in the table below):
 | URL | What it is |
 |---|---|
 | `/catalog.json` | Machine-readable index of every tileset: TileJSON URL, MapLibre style (themes), and the `source` archive URL where one exists. |
-| `/{id}/tilejson.json` | TileJSON 3.0.0 (`?format=png\|webp` on multi-format rasters; default `webp`). Vector entries carry `vector_layers`. |
+| `/{id}/tilejson.json` | TileJSON 3.0.0 (`?format=png\|webp` on multi-format rasters; default `webp`). Vector entries carry `vector_layers`, with each layer's `fields` and zoom range read from the archive its tiles are served from. |
 | `/{id}/style.json` | MapLibre style, for vector tilesets that ship their own cartography (e.g. `naturalearth_physical`). |
 | `/{id}/{z}/{x}/{y}.{ext}` | XYZ tiles in the tileset's format(s). |
 | `/{id}.{tif,pmtiles}` | The underlying single-file archive, with HTTP Range support — see [Direct archive access](#direct-archive-access). |
