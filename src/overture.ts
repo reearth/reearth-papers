@@ -461,7 +461,7 @@ export async function handleOvertureLiteTile(
 }
 
 type LiteFields = Pick<TilesetDef, "id" | "catalogId" | "name" | "catalogName" | "description"> &
-  Required<Pick<TilesetDef, "handleTile" | "tileFilter">>;
+  Required<Pick<TilesetDef, "handleTile" | "tileFilter" | "vectorLayers">>;
 
 /** What `<id>_lite` changes in the registry entry of `d`; the rest is
  *  `d`'s own entry. */
@@ -474,10 +474,16 @@ export function overtureLiteFields(d: OvertureTileset): LiteFields {
     catalogName: `${d.catalogName} Lite`,
     description:
       `${d.description} Lite: the same tiles without the ${dropped} properties, ` +
-      "and without `bathymetry` where none of its features has a property " +
-      "(z0–4 in release 2026-11-18.0). For drawing; read the full tileset for provenance.",
+      "and without `bathymetry` where none of its features has a property. " +
+      "For drawing; read the full tileset for provenance.",
     handleTile: (request, _env, ctx, coords) => handleOvertureLiteTile(request, ctx, d.theme, coords),
     tileFilter: LITE_RULES,
+    vectorLayers: d.layers.map((l) => ({
+      ...l,
+      description: LITE_RULES.dropLayersWhenUntagged.has(l.id)
+        ? `${l.description}. Lite leaves the layer out of a tile where no feature has an attribute, so it can be empty at low zooms`
+        : l.description,
+    })),
   };
 }
 

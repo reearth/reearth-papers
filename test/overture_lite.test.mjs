@@ -229,3 +229,14 @@ test("the lite registry entry serves the filtered tile", async () => {
   assert.equal(res.status, 200);
   assert.deepEqual(properties(new Uint8Array(await res.arrayBuffer())), { class: "lake" });
 });
+
+test("lite layers keep the base zooms, and the layers the filter can omit say so", async () => {
+  const { overtureLiteFields, OVERTURE_TILESETS } = await loadSrc("overture");
+  const d = OVERTURE_TILESETS.find((t) => t.lite);
+  const layers = overtureLiteFields(d).vectorLayers;
+
+  assert.deepEqual(layers.map(({ id, minzoom }) => ({ id, minzoom })), d.layers.map(({ id, minzoom }) => ({ id, minzoom })));
+  for (const l of layers) {
+    assert.equal(/can be empty at low zooms/.test(l.description), l.id === "bathymetry", l.id);
+  }
+});
