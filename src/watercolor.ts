@@ -5,8 +5,9 @@
 // once on EC2 by `mirror/watercolor/builder/`. The key is therefore
 // hardcoded; no pointer indirection.
 
+import { openArchive } from "./archive.js";
 import { attributionOf, headerSafeHtml } from "./credits.js";
-import { PMTiles, type RangeResponse, type Source } from "pmtiles";
+import type { PMTiles, RangeResponse, Source } from "pmtiles";
 
 export const WATERCOLOR_ARCHIVE_KEY = "mirror/watercolor/v1.pmtiles";
 
@@ -49,7 +50,7 @@ class R2PmtilesSource implements Source {
 
 function getArchive(env: Env): PMTiles {
   if (archiveCache) return archiveCache;
-  archiveCache = new PMTiles(new R2PmtilesSource(env.R2, WATERCOLOR_ARCHIVE_KEY));
+  archiveCache = openArchive(new R2PmtilesSource(env.R2, WATERCOLOR_ARCHIVE_KEY));
   return archiveCache;
 }
 

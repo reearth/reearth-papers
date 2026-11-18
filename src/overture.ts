@@ -22,8 +22,10 @@
 // ids + zoom ranges below were read from the live archives' metadata —
 // keep them in sync when bumping OVERTURE_RELEASE.
 
+import type { PMTiles } from "pmtiles";
+
+import { openArchive, WorkerFetchSource } from "./archive.js";
 import { attributionOf, headerSafeHtml } from "./credits.js";
-import { FetchSource, PMTiles } from "pmtiles";
 
 // Overture ships monthly releases and the version is part of the S3
 // path, but nothing here pins one. Overture holds a rolling window of
@@ -206,7 +208,7 @@ function getArchive(release: string, theme: string): PMTiles {
   const key = `${release}/${theme}`;
   let pm = archiveCache.get(key);
   if (!pm) {
-    pm = new PMTiles(new FetchSource(archiveUrl(release, theme)));
+    pm = openArchive(new WorkerFetchSource(archiveUrl(release, theme)));
     archiveCache.set(key, pm);
   }
   return pm;

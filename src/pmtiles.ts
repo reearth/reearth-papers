@@ -7,7 +7,9 @@
 // Content-Encoding. The pmtiles library handles directory caching
 // across requests within a worker instance.
 
-import { PMTiles, type RangeResponse, type Source } from "pmtiles";
+import type { PMTiles, RangeResponse, Source } from "pmtiles";
+
+import { openArchive } from "./archive.js";
 
 const POINTER_TTL_MS = 60 * 60 * 1000;
 
@@ -80,7 +82,7 @@ export async function readMirrorPointer(env: Env): Promise<MirrorPointer> {
 async function getArchive(env: Env): Promise<PMTiles> {
   const pointer = await readMirrorPointer(env);
   if (archiveCache && archiveCache.key === pointer.key) return archiveCache.pmtiles;
-  const pmtiles = new PMTiles(new R2PmtilesSource(env.R2, pointer.key));
+  const pmtiles = openArchive(new R2PmtilesSource(env.R2, pointer.key));
   archiveCache = { key: pointer.key, pmtiles };
   return pmtiles;
 }
