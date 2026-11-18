@@ -217,3 +217,23 @@ export function attributionOf(group: CreditGroupId): string {
   const onMap = CREDIT_GROUPS[group].credits.flatMap((c) => (c.onMap ? [c.onMap] : []));
   return [PAPERS, ...onMap].join(" · ");
 }
+
+/** Make an attribution safe to put in a response header.
+ *
+ *  `x-attribution` carries the same HTML the TileJSON does, and that HTML
+ *  is not ASCII — the credits are joined with `·`, and a dataset is free
+ *  to name a rights holder in any script. A header value is bytes, and
+ *  workerd sends UTF-8 with a warning that a browser reading it through
+ *  the Fetch API would raise a `TypeError` instead.
+ *
+ *  Since the payload is HTML, HTML says how to spell those characters in
+ *  ASCII: a numeric character reference. `·` becomes `&#183;`, which
+ *  renders identically wherever the credit is pasted and sits beside the
+ *  `&copy;` the same strings already carry.
+ *
+ *  The `u` flag matters — without it an astral character is two matches
+ *  (its surrogates) and each escapes to a reference for half a
+ *  character. */
+export function headerSafeHtml(html: string): string {
+  return html.replace(/[^\x20-\x7E]/gu, (c) => `&#${c.codePointAt(0)};`);
+}

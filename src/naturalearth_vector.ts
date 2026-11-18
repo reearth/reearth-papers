@@ -16,10 +16,9 @@
 // the tippecanoe build (`scripts/_lib.sh`'s LAYERS table), the TileJSON
 // `vector_layers` we advertise, and the generated MapLibre style.
 
-import { attributionOf } from "./credits.js";
-import { PMTiles, type RangeResponse, type Source } from "pmtiles";
-
-import { headerSafeHtml } from "./render_cache.js";
+import { openArchive } from "./archive.js";
+import { attributionOf, headerSafeHtml } from "./credits.js";
+import type { PMTiles, RangeResponse, Source } from "pmtiles";
 
 // Public domain — no attribution required; we credit Natural Earth
 // anyway, matching the raster side (src/naturalearth.ts).
@@ -392,7 +391,7 @@ class R2PmtilesSource implements Source {
 function getArchive(env: Env, key: string): PMTiles {
   let pm = archiveCache.get(key);
   if (!pm) {
-    pm = new PMTiles(new R2PmtilesSource(env.R2, key));
+    pm = openArchive(new R2PmtilesSource(env.R2, key));
     archiveCache.set(key, pm);
   }
   return pm;

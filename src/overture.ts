@@ -22,10 +22,10 @@
 // ids + zoom ranges below were read from the live archives' metadata —
 // keep them in sync when bumping OVERTURE_RELEASE.
 
-import { attributionOf } from "./credits.js";
-import { FetchSource, PMTiles } from "pmtiles";
+import type { PMTiles } from "pmtiles";
 
-import { headerSafeHtml } from "./render_cache.js";
+import { openArchive, WorkerFetchSource } from "./archive.js";
+import { attributionOf, headerSafeHtml } from "./credits.js";
 
 // Overture ships monthly releases and the version is part of the S3
 // path, but nothing here pins one. Overture holds a rolling window of
@@ -208,7 +208,7 @@ function getArchive(release: string, theme: string): PMTiles {
   const key = `${release}/${theme}`;
   let pm = archiveCache.get(key);
   if (!pm) {
-    pm = new PMTiles(new FetchSource(archiveUrl(release, theme)));
+    pm = openArchive(new WorkerFetchSource(archiveUrl(release, theme)));
     archiveCache.set(key, pm);
   }
   return pm;
@@ -231,9 +231,14 @@ let resolved: { release: string; at: number } | null = null;
  *  Names are `YYYY-MM-DD.N`; compare the date and the number separately
  *  rather than betting that N never reaches double digits. */
 async function newestRelease(): Promise<string | null> {
-  const res = await fetch(`${S3_BUCKET}/?list-type=2&delimiter=/&prefix=tiles%2F`);
-  if (!res.ok) return null;
-  const xml = await res.text();
+  let xml: string;
+  try {
+    const res = await fetch(`${S3_BUCKET}/?list-type=2&delimiter=/&prefix=tiles%2F`);
+    if (!res.ok) return null;
+    xml = await res.text();
+  } catch {
+    return null;
+  }
   const names = [...xml.matchAll(/<Prefix>tiles\/([^<\/]+)\/<\/Prefix>/g)].map((m) => m[1]);
   let best: string | null = null;
   for (const name of names) {
@@ -292,7 +297,65 @@ export async function handleOvertureTile(
   theme: string,
   match: { z: number; x: number; y: number },
 ): Promise<Response> {
-  const { archive, release } = await resolveArchive(theme);
+  // Everything below reads the remote archive, and the library throws
+  // plain Errors for bad upstream data, so where a throw happens is what
+  // says it was a read failure. Uncaught, it would be a 1101 with no
+  // CORS header, which a browser reports as a CORS error.
+  let served: { archive: PMTiles; release: string };
+  try {
+    served = await resolveArchive(theme);
+  } catch (e) {
+    return readFailed("header", theme, resolved?.release ?? OVERTURE_RELEASE, match, e);
+  }
+  try {
+    return await tileResponse(served, match);
+  } catch (e) {
+    return readFailed("tile", theme, served.release, match, e);
+  }
+}
+
+/** One line per failed tile request, for Workers Logs. `stage` is
+ *  "header" when no readable archive was found and "tile" when the
+ *  archive opened but the tile read failed. */
+interface ReadFailedLog {
+  evt: "overture.read_failed";
+  stage: "header" | "tile";
+  theme: string;
+  release: string;
+  z: number;
+  x: number;
+  y: number;
+  error: string;
+}
+
+function readFailed(
+  stage: ReadFailedLog["stage"],
+  theme: string,
+  release: string,
+  match: { z: number; x: number; y: number },
+  e: unknown,
+): Response {
+  const line: ReadFailedLog = {
+    evt: "overture.read_failed",
+    stage,
+    theme,
+    release,
+    z: match.z,
+    x: match.x,
+    y: match.y,
+    error: String(e),
+  };
+  console.error(JSON.stringify(line));
+  return new Response("overture archive read failed", {
+    status: 503,
+    headers: { "retry-after": "1", "cache-control": "no-store" },
+  });
+}
+
+async function tileResponse(
+  { archive, release }: { archive: PMTiles; release: string },
+  match: { z: number; x: number; y: number },
+): Promise<Response> {
   const header = await archive.getHeader();
 
   if (match.z < header.minZoom || match.z > header.maxZoom) {
