@@ -71,7 +71,7 @@ function protomapsEnv(metadata) {
   };
 }
 
-test("a Protomaps tileset lists each layer's fields from its R2 archive", async () => {
+test("a Protomaps tileset lists each layer's fields and zooms from its R2 archive", async () => {
   const { protomapsArchive } = await loadSrc("pmtiles");
   const { tilesetVectorLayers } = await loadSrc("vector_layers");
   const def = { id: "protomaps", minzoom: 0, maxzoom: 15, archive: protomapsArchive };
@@ -83,7 +83,7 @@ test("a Protomaps tileset lists each layer's fields from its R2 archive", async 
   assert.equal(maxAge, 300);
   assert.deepEqual(layers, [
     { id: "earth", description: "Landmass polygons", minzoom: 0, maxzoom: 15, geometry: "polygon", fields: { kind: "String" } },
-    { id: "roads", description: "Roads", minzoom: 0, maxzoom: 15, geometry: "line", fields: { kind: "String", "name:ja": "String", oneway: "Boolean" } },
+    { id: "roads", description: "Roads", minzoom: 3, maxzoom: 15, geometry: "line", fields: { kind: "String", "name:ja": "String", oneway: "Boolean" } },
     { id: "pois", description: "Points of interest", minzoom: 0, maxzoom: 15, geometry: "point", fields: {} },
   ]);
   assert.deepEqual(warnings, []);
@@ -237,6 +237,24 @@ test("a read slower than the budget answers without fields, and still fills the 
   const warm = await tilesetVectorLayers({ ...def, archive: async () => handle }, PROTOMAPS_REGISTRY, {}, waitUntilSpy(), 20);
   assert.equal(warm.maxAge, 300);
   assert.equal(handle.reads, 1);
+});
+
+test("archive zooms are clamped into the tileset's, and an empty range keeps the registry's", async () => {
+  const { mergeVectorLayers } = await loadSrc("vector_layers");
+  const registry = ["wide", "narrow", "inverted", "partial", "absent"].map((id) => ({
+    id, description: id, minzoom: 1, geometry: "polygon",
+  }));
+  const archive = [
+    { id: "wide", fields: {}, minzoom: 0, maxzoom: 16 },
+    { id: "narrow", fields: {}, minzoom: 5, maxzoom: 9 },
+    { id: "inverted", fields: {}, minzoom: 14, maxzoom: 3 },
+    { id: "partial", fields: {}, minzoom: 7 },
+  ];
+
+  const zooms = mergeVectorLayers(registry, archive, { minzoom: 2, maxzoom: 12 })
+    .map((l) => `${l.id} ${l.minzoom}-${l.maxzoom}`);
+
+  assert.deepEqual(zooms, ["wide 2-12", "narrow 5-9", "inverted 1-12", "partial 7-12", "absent 1-12"]);
 });
 
 test("metadata off the spec's shape parses without a throw, keeping what is well formed", async () => {

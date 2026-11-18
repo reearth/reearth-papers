@@ -55,24 +55,41 @@ export function parseArchiveLayers(metadata: unknown): ArchiveLayer[] {
 }
 
 /** The registry's layers, in its order and with its descriptions and
- *  geometry hints, carrying the archive's fields. A layer only the
- *  archive lists is left out: the viewer draws every entry, and only a
- *  person can write its description and geometry hint. */
+ *  geometry hints, carrying the archive's fields and zoom range. A layer
+ *  only the archive lists is left out: the viewer draws every entry, and
+ *  only a person can write its description and geometry hint. */
 export function mergeVectorLayers(
   registry: readonly VectorLayerInfo[],
   archive: readonly ArchiveLayer[],
   tileset: { minzoom: number; maxzoom: number },
 ): TileJsonVectorLayer[] {
   const byId = new Map(archive.map((l) => [l.id, l]));
-  return registry.map((l) => ({
-    id: l.id,
-    description: l.description,
-    minzoom: l.minzoom,
-    maxzoom: tileset.maxzoom,
-    // Non-standard hint consumed by the viewer's inspector.
-    geometry: l.geometry,
-    fields: byId.get(l.id)?.fields ?? {},
-  }));
+  return registry.map((l) => {
+    const found = byId.get(l.id);
+    return {
+      id: l.id,
+      description: l.description,
+      ...layerZooms(l, found, tileset),
+      // Non-standard hint consumed by the viewer's inspector.
+      geometry: l.geometry,
+      fields: found?.fields ?? {},
+    };
+  });
+}
+
+/** TileJSON 3.0 §3.3.4 keeps a layer's zooms inside the tileset's, so
+ *  the archive's are clamped into it. An archive range that is empty
+ *  once clamped is not believed. */
+function layerZooms(
+  registry: VectorLayerInfo,
+  archive: ArchiveLayer | undefined,
+  tileset: { minzoom: number; maxzoom: number },
+): { minzoom: number; maxzoom: number } {
+  const fallback = { minzoom: registry.minzoom, maxzoom: tileset.maxzoom };
+  const clamp = (z: number) => Math.min(tileset.maxzoom, Math.max(tileset.minzoom, z));
+  const minzoom = archive?.minzoom === undefined ? fallback.minzoom : clamp(archive.minzoom);
+  const maxzoom = archive?.maxzoom === undefined ? fallback.maxzoom : clamp(archive.maxzoom);
+  return minzoom > maxzoom ? fallback : { minzoom, maxzoom };
 }
 
 // Keyed by the handle, which the openers replace when the archive
