@@ -192,6 +192,12 @@ curl 'http://localhost:8787/styles/protomaps-light/tile/0/0/0.webp' -o tile.webp
 `.png` works on the same route if you want a lossless byte to diff;
 `.webp` is what the TileJSON advertises and what clients get.
 
+`npm test` runs the tests under `test/` with `node:test`. They import
+the `.ts` sources directly, so they need Node 22.18 or later, and they
+fake S3 and R2 in memory, so they touch no bucket. `wrangler dev` does
+touch one. Its R2 binding is remote, so a local render can write to the
+production bucket.
+
 **For the viewer, pass `--local-upstream`.** With a `custom_domain`
 route configured, `wrangler dev` rewrites the request host to that
 route, so `new URL(request.url).origin` — which is what every TileJSON,
@@ -311,7 +317,8 @@ cd mirror/protomaps && npm run deploy
 ```
 
 CI (`.github/workflows/ci.yml`) runs typecheck and
-`wrangler deploy --dry-run` for each worker on every push, plus a
+`wrangler deploy --dry-run` for each worker on every push, `npm test`
+for the main worker, plus a
 Docker build of the renderer. `.github/workflows/deploy.yml` runs the
 deploy script automatically on pushes to `main`.
 
@@ -556,6 +563,38 @@ the URL in the request is only there because `fetch` needs one. Asking
 for this worker's own hostname fails too (522), which is why the watch
 cannot check its plan's URLs itself and the executor checks them
 instead.
+
+### 11. A PMTiles object kept across requests must not keep a failure
+
+Every route keeps one `PMTiles` handle per archive at module scope, so
+the header and directories are read once per isolate. Whatever that
+handle remembers outlives the request that put it there, and the
+library's defaults remember two kinds of failure:
+
+- The default `SharedPromiseCache` stores a header or directory read as
+  a promise before it settles and keeps it when it rejects. One S3 503
+  on the first header read then fails every later request for that
+  archive on that isolate.
+- After one ETag mismatch, `FetchSource` sets `mustReload` for good and
+  sends `cache: "reload"` on every later read. Workers accepts only
+  `no-store` and `no-cache` and throws a `TypeError` for any other
+  mode, so an archive replaced in place fails every later read.
+
+A retry that lands on another isolate succeeds, which is why this looks
+intermittent from outside.
+
+So `src/archive.ts` is the only place a handle is built. `openArchive`
+gives it a `ResolvedValueCache`, which stores only reads that arrived,
+and the Overture routes read through `WorkerFetchSource`, which clears
+`mustReload` before each read. `test/archive.test.mjs` fails if another
+module calls `new PMTiles(`.
+
+A read that still fails on an `/overture_*` tile answers 503 with
+`retry-after: 1` and `cache-control: no-store`, and logs one JSON line
+with `"evt":"overture.read_failed"`. Its `stage` is `header` when no
+readable archive was found and `tile` when the tile read itself failed,
+and its `error` is the library's message. Search Workers Logs for that
+event before deciding on a retry or a release fallback.
 
 ## Other notes
 

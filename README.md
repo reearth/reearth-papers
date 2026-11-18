@@ -71,7 +71,8 @@ Passthrough tilesets are TileJSON-only: the tiles are served by the
 upstream provider, not by us. The `overture_*` entries sit in between —
 we range-read Overture's official PMTiles from S3 on demand and re-serve
 the tiles from our origin, storing nothing, so there is no archive URL
-of ours to hand out.
+of ours to hand out. When that read fails, an `overture_*` tile answers
+503 with `Retry-After: 1`. The failure is not cached, so retry the tile.
 
 The registry behind this table lives in
 [`src/tilesets.ts`](src/tilesets.ts) — adding a dataset is one entry
