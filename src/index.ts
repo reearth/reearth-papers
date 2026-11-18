@@ -499,9 +499,8 @@ async function handlePaint(
   coords: { z: number; x: number; y: number },
   format: PaintFormat,
 ): Promise<Response> {
-  // A style reading terrain stops where that source stops (see
-  // `PaintStyle.maxzoom`) — 404 rather than a tile with a flat DEM
-  // silently baked into it.
+  // Past the zoom its manifest entry advertises, a style answers 404
+  // rather than a tile nobody has priced (see `PaintStyle.maxzoom`).
   if (coords.z > style.maxzoom) {
     return new Response("zoom above available range", { status: 404 });
   }

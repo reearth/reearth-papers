@@ -373,11 +373,12 @@ The commands below use this document as `style.json`:
    ezu tile --style style.json --tile 20/931441/413107 --out deep.png
    ```
 
-4. Render two neighbouring tiles as one image, and look at the shared
-   edge in the middle of `mosaic.png`:
+4. Render two neighbouring tiles on the same stretch of coast as one
+   image, and look at the shared edge in the middle of `mosaic.png`.
+   Roads, water and shoreline cross that edge, so a seam shows there:
 
    ```bash
-   ezu bbox --style style.json --bbox 139.7571,35.6823,139.7791,35.6859 --zoom 14 --out mosaic.png
+   ezu bbox --style style.json --bbox 139.7471,35.6226,139.789,35.6384 --zoom 14 --out mosaic.png
    ```
 
 5. Repeat steps 2 to 4 with `--param name=value` for the extreme value
@@ -396,7 +397,7 @@ worker logs `paint: skipping malformed entry <name>`.
 | `rev` | Lowercase letters and digits. A new value for every change to the document or its assets. |
 | `title` | Display name in the catalog and the TileJSON. The default is `name`. |
 | `description` | The TileJSON `description`. The default is `""`. |
-| `attribution` | One HTML string. The TileJSON `attribution` carries it as written, and each tile carries it in the `x-attribution` header. |
+| `attribution` | One HTML string. The TileJSON `attribution` carries it as written. Each tile carries it in the `x-attribution` header, with every character outside printable ASCII written as an `&#NNN;` reference. |
 | `tileSize` | An integer: the document's `tile-size`, or 512. |
 | `maxzoom` | An integer from 0 to 24. The tile route answers 404 above it. |
 | `params` | The `params` object from `ezu check --json`, as printed, or `null`. |
