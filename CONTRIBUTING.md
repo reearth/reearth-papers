@@ -639,6 +639,30 @@ outside this repository. `scripts/smoke.mjs` fetches each vector
 tileset's tile with `accept-encoding: gzip` after every deploy and fails
 with "not compressed" if the edge stops compressing it.
 
+### 13. A lite tile is keyed on `LITE_VERSION`
+
+`overture_base_lite` passes each `overture_base` tile through
+`liteTile` (`src/mvt_lite.ts`), which removes the keys in
+`LITE_RULES` by renumbering each layer's keys and values and rewriting
+each feature's tags. Geometry is copied as bytes. The result is stored
+in the Cache API for 30 days under
+`/__lite/<LITE_VERSION>/<release>/<theme>/<z>/<x>/<y>.mvt`, and its
+`ETag` is `W/"lite<LITE_VERSION>-<release>"`.
+
+- Bump `LITE_VERSION` whenever `liteTile` can return other bytes for the
+  same input, or old copies keep being served for up to 30 days.
+  `test/mvt_lite.test.mjs` pins a digest per version and fails until you
+  record the new one.
+- The stored copy carries no `Vary`, so a hit never depends on how
+  `cache.match` treats `Vary: accept-encoding`. The response a client
+  gets is built by `vectorTileResponse` and has it.
+- The registry marks the lite entry with `tileFilter: LITE_RULES`.
+  TileJSON drops those keys from `fields` because of it. Any other code
+  that reads tiles through a tileset's `archive` must apply
+  `tileFilter` too, or it reads bytes that id never serves.
+- `LITE_REAL_TILES=a.mvt,b.mvt npm test` reruns the filter checks on
+  saved tiles and prints the sizes and times.
+
 ## Other notes
 
 - `package-lock.json` is committed. `npm ci` in CI; `npm install` for

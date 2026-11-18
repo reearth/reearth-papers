@@ -16,7 +16,8 @@
 // to S3 us-west-2; the pmtiles library caches the archive's header +
 // directory per isolate. Cloudflare does not cache a Worker's own
 // responses, so the cache-control below reaches browsers and nothing
-// at the edge: every tile request reads S3 again.
+// at the edge: every request for a full tile reads S3 again. Lite tiles
+// (handleOvertureLiteTile) are the exception, kept in the Cache API.
 //
 // Registry-driven, mirroring naturalearth_vector.ts: the central
 // registry (src/tilesets.ts) maps over OVERTURE_TILESETS. The MVT layer
@@ -27,7 +28,7 @@ import type { PMTiles } from "pmtiles";
 
 import { openArchive, WorkerFetchSource } from "./archive.js";
 import { attributionOf, headerSafeHtml } from "./credits.js";
-import { liteTile } from "./mvt_lite.js";
+import { LITE_VERSION, liteTile } from "./mvt_lite.js";
 import { vectorTileResponse } from "./mvt_response.js";
 
 // Overture ships monthly releases and the version is part of the S3
@@ -380,8 +381,49 @@ export async function handleOvertureTile(theme: string, match: Coords): Promise<
   });
 }
 
-/** `<theme>_lite`: the tile without the attributes `liteTile` drops. */
-export async function handleOvertureLiteTile(theme: string, match: Coords): Promise<Response> {
+// A lite tile is a pure function of the filter version, the release and
+// the coordinates. That identity is its ETag and its Cache API key, and
+// the reason a stored copy can outlive the client's one hour.
+const liteEtag = (release: string) => `W/"lite${LITE_VERSION}-${release}"`;
+
+const liteCacheKey = (origin: string, release: string, theme: string, c: Coords) =>
+  new Request(`${origin}/__lite/${LITE_VERSION}/${release}/${theme}/${c.z}/${c.x}/${c.y}.mvt`);
+
+const STORED_CACHE_CONTROL = "public, max-age=2592000";
+
+/** If-None-Match holds `etag`, compared weakly (RFC 9110 §13.1.2): the
+ *  edge may hand the client a weakened copy of a strong tag. */
+function etagMatches(header: string | null, etag: string): boolean {
+  if (!header) return false;
+  const opaque = (t: string) => t.trim().replace(/^W\//, "");
+  return header.split(",").some((t) => opaque(t) === opaque(etag));
+}
+
+/** `<theme>_lite`: the tile without the attributes `liteTile` drops,
+ *  kept in this data center's Cache API under its release. */
+export async function handleOvertureLiteTile(
+  request: Request,
+  ctx: ExecutionContext,
+  theme: string,
+  match: Coords,
+): Promise<Response> {
+  const headers = (release: string) => ({
+    "cache-control": CLIENT_CACHE_CONTROL,
+    "x-overture-release": release,
+    "x-attribution": headerSafeHtml(OVERTURE_ATTRIBUTION),
+    etag: liteEtag(release),
+  });
+
+  // No I/O on a warm isolate. The guess names the cache entry to look
+  // for; what gets stored is keyed on the release the read used.
+  const guess = await currentRelease();
+  if (etagMatches(request.headers.get("if-none-match"), liteEtag(guess))) {
+    return new Response(null, { status: 304, headers: { ...headers(guess), vary: "accept-encoding" } });
+  }
+  const origin = new URL(request.url).origin;
+  const hit = await caches.default.match(liteCacheKey(origin, guess, theme, match));
+  if (hit?.body) return vectorTileResponse(hit.body, { ...headers(guess), "x-cache": "edge-hit" });
+
   const read = await readOvertureTile(theme, match);
   if (read.kind !== "tile") return noTile(read);
   let lite: Uint8Array<ArrayBuffer>;
@@ -389,7 +431,7 @@ export async function handleOvertureLiteTile(theme: string, match: Coords): Prom
     lite = liteTile(new Uint8Array(read.data));
   } catch (e) {
     // Never the unfiltered bytes: a client of this id may rely on their
-    // being smaller.
+    // being smaller, and a cache would keep them.
     console.error(
       JSON.stringify({ evt: "overture.lite_failed", theme, release: read.release, ...match, error: String(e) }),
     );
@@ -398,11 +440,23 @@ export async function handleOvertureLiteTile(theme: string, match: Coords): Prom
       headers: { "cache-control": "no-store" },
     });
   }
-  return vectorTileResponse(lite, {
-    "cache-control": CLIENT_CACHE_CONTROL,
-    "x-overture-release": read.release,
-    "x-attribution": headerSafeHtml(OVERTURE_ATTRIBUTION),
+
+  // Stored without Vary, so whether `match` honours Vary cannot decide
+  // hit or miss. The edge compresses each response it hands a client,
+  // whichever path built it.
+  const stored = new Response(lite, {
+    headers: {
+      ...headers(read.release),
+      "cache-control": STORED_CACHE_CONTROL,
+      "content-type": "application/x-protobuf",
+    },
   });
+  ctx.waitUntil(
+    caches.default.put(liteCacheKey(origin, read.release, theme, match), stored).catch((e: unknown) => {
+      console.warn(`overture lite: cache put failed (${String(e)})`);
+    }),
+  );
+  return vectorTileResponse(lite, { ...headers(read.release), "x-cache": "miss" });
 }
 
 /** One line per failed tile request, for Workers Logs. `stage` is

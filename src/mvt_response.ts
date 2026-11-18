@@ -16,10 +16,13 @@ export interface VectorTileHeaders {
   "cache-control": string;
   "x-attribution"?: string;
   "x-overture-release"?: string;
+  etag?: string;
+  /** Whether a derived tile came from the Cache API: `edge-hit` or `miss`. */
+  "x-cache"?: "edge-hit" | "miss";
 }
 
 export function vectorTileResponse(
-  mvt: ArrayBuffer | Uint8Array<ArrayBuffer>,
+  mvt: ArrayBuffer | Uint8Array<ArrayBuffer> | ReadableStream,
   headers: VectorTileHeaders,
 ): Response {
   return new Response(mvt, {

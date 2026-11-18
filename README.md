@@ -77,8 +77,10 @@ of ours to hand out. When that read fails, an `overture_*` tile answers
 
 `overture_base_lite` serves the same tiles with the provenance
 properties removed: 6/32/22 is 2.4 MB instead of 16.4 MB. Use it to draw
-a map, and `overture_base` when you need `id` or `sources`. A lite tile
-that cannot be filtered answers 502.
+a map, and `overture_base` when you need `id` or `sources`. Lite tiles
+carry an `ETag` and are kept in each Cloudflare data center, so a
+repeat request answers from there (`x-cache: edge-hit`) or with 304. A
+lite tile that cannot be filtered answers 502.
 
 The registry behind this table lives in
 [`src/tilesets.ts`](src/tilesets.ts) — adding a dataset is one entry

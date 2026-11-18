@@ -396,7 +396,7 @@ function overtureLiteSpec(d: OvertureTileset): TilesetSpec {
       `${d.description} Lite: the same tiles without the ${dropped} properties, ` +
       "and without `bathymetry` where none of its features has a property " +
       "(z0–4 in release 2026-11-18.0). For drawing; read the full tileset for provenance.",
-    handleTile: (_request, _env, _ctx, coords) => handleOvertureLiteTile(d.theme, coords),
+    handleTile: (request, _env, ctx, coords) => handleOvertureLiteTile(request, ctx, d.theme, coords),
     tileFilter: LITE_RULES,
   };
 }
