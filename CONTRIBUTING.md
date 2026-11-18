@@ -165,6 +165,9 @@ workers.dev hostname can't be abused as a free Protomaps tile CDN.
   - `cache.ts` — `STYLE_VERSION` (cartography version).
   - `paint_styles.ts` — the R2 shelf of ezu paint styles: manifest,
     documents, assets, and param validation.
+  - `paint_sources.ts` — which tileset each `mvt` source of a paint
+    style binds, and the layers it keeps.
+  - `mvt_slice.ts` — cuts a vector tile stream down to named layers.
   - `style.ts` — generated MapLibre style per theme.
   - `tilejson.ts` — TileJSON for raster + vector endpoints.
   - `pmtiles.ts` — R2-backed PMTiles vector tile reader.
@@ -240,6 +243,50 @@ style's tiles. There is no version constant to bump.
 
 A paint style has no `style.json`: an ezu document is a node graph, and
 no MapLibre style means the same thing.
+
+### Vector sources in a paint style
+
+A document may declare several `mvt` sources. The worker binds each one
+whose `url` names a Papers vector tileset, written exactly as one of:
+
+```text
+https://papers.reearth.land/<tileset>/tilejson.json
+https://papers.reearth.land/<tileset>/{z}/{x}/{y}.mvt
+```
+
+`<tileset>` must be on `PAINT_SOURCE_IDS` in `src/paint_sources.ts`:
+`protomaps`, `overture_base`, and the six `naturalearth_*` vector
+tilesets. Any other URL binds nothing, and the worker logs `names no
+Papers vector tileset a style may read` once per renderer. The worker
+never fetches a URL from a document.
+
+- **The Protomaps source.** The last `mvt` source is bound from Protomaps
+  the way the themed rasters are, unless its URL names another tileset; then
+  the last source naming `protomaps` is. A last source with an unknown URL
+  still gets Protomaps, as before.
+- **Do not give an `mvt` source an integer-like name** such as `"1"`.
+  JavaScript moves those keys to the front of an object, so "last" here
+  differs from "last" in the file and in the ezu CLI. When a document has
+  several `mvt` sources and one has such a name, only a source naming
+  `protomaps` can take the Protomaps role.
+- **Other sources** are read from the tileset's archive. Only the layers
+  that `features` nodes (and any other node carrying `source` and `layer`)
+  name for that source are kept. A source named anywhere else in `nodes`
+  keeps every layer.
+- **Declare `min-zoom` on a heavy source.** ezu draws nothing from a source
+  below its `min-zoom`, and the worker then reads nothing. Overture `base`
+  tiles run to 17 MB stored at z4 to z6. Its `bathymetry` layer alone is
+  1.5 MB at z2, and `water` is most of the tile at z4.
+- **Limits.** One render keeps at most 512 KiB of extra-source layers, a
+  stored tile over 32 MiB is not read, and extra-source reads run one at a
+  time per isolate, with a 20 s wait. Past any of them the tile answers
+  503 with `Retry-After: 1`, uncached, and a `paint.source_unavailable`
+  log line.
+- **Cache key.** A style that binds extra sources has
+  `+<tileset>@<archive etag>` appended to its `sourceVersion` in the tile
+  cache key and the okibi epoch, so a new Overture release or a rebuilt
+  Natural Earth archive re-renders it. A style that binds none keys exactly
+  as before.
 
 ### Tuning a paint style (unreleased)
 

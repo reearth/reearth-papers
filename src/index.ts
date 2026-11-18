@@ -80,9 +80,12 @@ import {
   type PaintStyle,
   paintAsset,
   paintDocument,
+  paintEpochSource,
+  paintSourceVersion,
   paintStyle,
   readParams,
 } from "./paint_styles.js";
+import { PaintSourceError } from "./paint_sources.js";
 import { dayBefore, takeDigest } from "./okibi-digest.js";
 import { handleOkibiEpochs } from "./okibi_epochs.js";
 import { watch } from "./okibi_watch.js";
@@ -106,6 +109,7 @@ import {
 import { handleAttribution } from "./attribution.js";
 import {
   PROTOMAPS_ATTRIBUTION,
+  paintSources,
   TILESETS_BY_ID,
   type TileFormat,
 } from "./tilesets.js";
@@ -517,60 +521,90 @@ async function handlePaint(
   // Same reasoning as the themed route: a render is only valid for the
   // vector snapshot behind it, and these go out `immutable, max-age=1y`.
   const { date } = await readMirrorPointer(env);
-  const version =
-    `${style.rev}-r${PAINT_RUNTIME_VERSION}-${date}-${style.sourceVersion}` +
-    (params.canonical ? `-${params.canonical}` : "");
-  const served = await serveRenderedTile(request, env, ctx, {
-    cacheKey:
-      `cache/paint/${style.name}/${style.rev}/r${PAINT_RUNTIME_VERSION}` +
-      `/${date}/${style.sourceVersion || "-"}` +
-      `/${params.canonical || "default"}/${coords.z}/${coords.x}/${coords.y}.${format}`,
-    cacheVersion: version,
-    contentType: format === "webp" ? "image/webp" : "image/png",
-    attribution: style.attribution,
-    demand: {
-      tileset: style.name,
+  const sources = paintSources(env);
+  let sourceVersion: string;
+  try {
+    sourceVersion = await paintSourceVersion(env, style, sources);
+  } catch (e) {
+    return paintSourceUnavailable(
+      style,
       coords,
-      fmt: format,
-      // The same string the cache key is namespaced by, so a warm request
-      // asks for the picture that was cached rather than for the default one.
-      search: params.canonical || undefined,
-      // The parts of `version`, which is what the key is namespaced by, kept
-      // apart because they move apart: the paint runtime, the style's own
-      // revision, and the snapshot it was drawn from.
-      epoch: {
-        source: `${date}/${style.sourceVersion || "-"}`,
-        algo: `paint-r${PAINT_RUNTIME_VERSION}`,
-        param: `${style.rev}${params.canonical ? `-${params.canonical}` : ""}`,
-      },
-    },
-    // The default picture earns the global R2 layer outright: a paint
-    // render is brushes, noise fields and a padded canvas — seconds of
-    // WASM CPU where a themed tile costs a fraction of one — and every
-    // client asking for a style asks for the same tiles.
-    //
-    // A tuned one does not. Each distinct set of knobs is its own
-    // namespace, so persisting them buys storage for pictures nobody
-    // asks for twice. Tuned tiles stay in the per-PoP edge cache, which
-    // is what someone dragging a slider and then panning actually
-    // re-reads.
-    persist: params.canonical === "",
-    render: async () =>
-      renderEzuStyleTile(
-        request,
-        env,
-        ctx,
-        {
-          // `rev` in the key, so a republished style builds a new
-          // renderer instead of a warm isolate serving the old document.
-          key: `paint:${style.name}:${style.rev}`,
-          doc: await paintDocument(env, style),
-          fetchAsset: (path) => paintAsset(env, style, path),
-        },
+      new PaintSourceError("read", `source version: ${String(e)}`, { cause: e }),
+    );
+  }
+  const readsExtraSources = sourceVersion !== style.sourceVersion;
+  const version =
+    `${style.rev}-r${PAINT_RUNTIME_VERSION}-${date}-${sourceVersion}` +
+    (params.canonical ? `-${params.canonical}` : "");
+  let served: Response;
+  try {
+    served = await serveRenderedTile(request, env, ctx, {
+      cacheKey:
+        `cache/paint/${style.name}/${style.rev}/r${PAINT_RUNTIME_VERSION}` +
+        `/${date}/${sourceVersion || "-"}` +
+        `/${params.canonical || "default"}/${coords.z}/${coords.x}/${coords.y}.${format}`,
+      cacheVersion: version,
+      contentType: format === "webp" ? "image/webp" : "image/png",
+      attribution: style.attribution,
+      demand: {
+        tileset: style.name,
         coords,
-        { format, ...(params.canonical ? { params: params.values } : {}) },
-      ),
-  });
+        fmt: format,
+        // The same string the cache key is namespaced by, so a warm request
+        // asks for the picture that was cached rather than for the default one.
+        search: params.canonical || undefined,
+        // The parts of `version`, which is what the key is namespaced by, kept
+        // apart because they move apart: the paint runtime, the style's own
+        // revision, and the snapshot it was drawn from.
+        epoch: {
+          source: paintEpochSource(date, sourceVersion),
+          algo: `paint-r${PAINT_RUNTIME_VERSION}`,
+          param: `${style.rev}${params.canonical ? `-${params.canonical}` : ""}`,
+        },
+      },
+      // The default picture earns the global R2 layer outright: a paint
+      // render is brushes, noise fields and a padded canvas — seconds of
+      // WASM CPU where a themed tile costs a fraction of one — and every
+      // client asking for a style asks for the same tiles.
+      //
+      // A tuned one does not. Each distinct set of knobs is its own
+      // namespace, so persisting them buys storage for pictures nobody
+      // asks for twice. Tuned tiles stay in the per-PoP edge cache, which
+      // is what someone dragging a slider and then panning actually
+      // re-reads.
+      persist: params.canonical === "",
+      render: async () => {
+        const encoded = await renderEzuStyleTile(
+          request,
+          env,
+          ctx,
+          {
+            // `rev` in the key, so a republished style builds a new
+            // renderer instead of a warm isolate serving the old document.
+            key: `paint:${style.name}:${style.rev}`,
+            doc: await paintDocument(env, style),
+            fetchAsset: (path) => paintAsset(env, style, path),
+            sources,
+          },
+          coords,
+          { format, ...(params.canonical ? { params: params.values } : {}) },
+        );
+        // An archive can move between the key above and the reads: a new
+        // Overture release, a rebuilt Natural Earth file. A picture from
+        // the new data must not be cached under the old key.
+        if (readsExtraSources) {
+          const after = await paintSourceVersion(env, style, sources);
+          if (after !== sourceVersion) {
+            throw new PaintSourceError("version", `sources moved from ${sourceVersion} to ${after}`);
+          }
+        }
+        return encoded;
+      },
+    });
+  } catch (e) {
+    if (e instanceof PaintSourceError) return paintSourceUnavailable(style, coords, e);
+    throw e;
+  }
   const stats = ezuRenderStats();
   const out = new Response(served.body, served);
   out.headers.set("x-ezu-heap", String(stats.heapBytes));
@@ -578,6 +612,32 @@ async function handlePaint(
   // nothing" from "the knob was never read".
   out.headers.set("x-ezu-params", params.canonical || "default");
   return out;
+}
+
+/** A paint tile whose extra sources could not be read, cut or kept still
+ *  long enough to render. One log line, and a 503 the next request retries,
+ *  where an uncaught throw would be a 1101 with no CORS header. */
+function paintSourceUnavailable(
+  style: PaintStyle,
+  coords: { z: number; x: number; y: number },
+  e: PaintSourceError,
+): Response {
+  console.error(
+    JSON.stringify({
+      evt: "paint.source_unavailable",
+      stage: e.stage,
+      style: style.name,
+      rev: style.rev,
+      z: coords.z,
+      x: coords.x,
+      y: coords.y,
+      error: e.message,
+    }),
+  );
+  return new Response("paint source unavailable", {
+    status: 503,
+    headers: { "retry-after": "1", "cache-control": "no-store" },
+  });
 }
 
 function tileShard(coords: { z: number; x: number; y: number }): number {

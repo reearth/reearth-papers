@@ -28,6 +28,9 @@
 // The manifest is written last, so a half-uploaded revision is not a
 // visible one: readers only ever see `rev`s whose objects are complete.
 
+import { archiveVersion } from "./archive.js";
+import { type PaintSources, planVectorSources } from "./paint_sources.js";
+
 /** Namespaces paint renders against the renderer that produced them.
  *
  *  A style's `rev` covers the document and its assets, which is
@@ -361,6 +364,40 @@ export async function paintDocument(
   const doc = JSON.parse(await obj.text()) as Record<string, unknown>;
   documents.set(key, doc);
   return doc;
+}
+
+/** What a paint tile's cache key says about the vector data behind it.
+ *
+ *  The manifest's `sourceVersion`, as published, for a style whose `mvt`
+ *  sources all bind as today. A style that binds other tilesets gains
+ *  `+<tileset>@<archive etag>` for each, sorted, so a rebuilt archive or a
+ *  new Overture release moves its key. The document is read for this
+ *  before the cache is, so a failed read falls back to the manifest's
+ *  value and the styles that bind nothing extra keep their cache hits. */
+export async function paintSourceVersion(
+  env: Env,
+  style: PaintStyle,
+  sources: PaintSources,
+): Promise<string> {
+  let doc: Record<string, unknown>;
+  try {
+    doc = await paintDocument(env, style);
+  } catch (e) {
+    console.warn(`paint: ${style.name} source version from the manifest: ${String(e)}`);
+    return style.sourceVersion;
+  }
+  const tilesets = [...new Set(planVectorSources(doc, sources.readable).extras.map((e) => e.tileset))];
+  if (!tilesets.length) return style.sourceVersion;
+  const versions = await Promise.all(
+    tilesets.sort().map(async (id) => `${id}@${await archiveVersion(await sources.archive(id))}`),
+  );
+  return [style.sourceVersion || "-", ...versions].join("+");
+}
+
+/** The okibi epoch `source` of a paint style: the Protomaps snapshot and
+ *  `paintSourceVersion`, spelled once for the route and the epochs file. */
+export function paintEpochSource(date: string, sourceVersion: string): string {
+  return `${date}/${sourceVersion || "-"}`;
 }
 
 /** One asset the document loads (`"src": "file:brushes/2B_pencil.myb"`
