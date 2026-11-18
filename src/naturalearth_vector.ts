@@ -388,6 +388,8 @@ class R2PmtilesSource implements Source {
   }
 }
 
+export { getArchive as neVectorArchive };
+
 function getArchive(env: Env, key: string): PMTiles {
   let pm = archiveCache.get(key);
   if (!pm) {

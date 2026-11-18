@@ -30,6 +30,8 @@
 // registry — they're style permutations of one source with their own
 // route shape and a per-theme style.json (see style.ts).
 
+import type { PMTiles } from "pmtiles";
+
 import { type CreditGroupId, attributionOf } from "./credits.js";
 import {
   BLACKMARBLE_ATTRIBUTION,
@@ -46,6 +48,7 @@ import {
   handleNeVectorTile,
   kindGeometry,
   naturalEarthVectorStyle,
+  neVectorArchive,
   NE_VECTOR_ATTRIBUTION,
   NE_VECTOR_TILESETS,
 } from "./naturalearth_vector.js";
@@ -53,8 +56,9 @@ import {
   handleOvertureTile,
   OVERTURE_ATTRIBUTION,
   OVERTURE_TILESETS,
+  overtureArchive,
 } from "./overture.js";
-import { handleVectorTile, readMirrorPointer } from "./pmtiles.js";
+import { handleVectorTile, protomapsArchive, readMirrorPointer } from "./pmtiles.js";
 import type { SourceFile } from "./source_file.js";
 import {
   handleWatercolorTile,
@@ -138,6 +142,9 @@ export interface TilesetDef {
    *  TileJSON `vector_layers` array (required by TileJSON 3.0 for
    *  vector). */
   vectorLayers?: readonly VectorLayerInfo[];
+  /** Vector tilesets: the archive `handleTile` serves from, opened the
+   *  same way, so its metadata describes exactly those tiles. */
+  archive?: (env: Env) => Promise<PMTiles>;
   /** Vector tilesets that ship their own cartography: builds the
    *  MapLibre style served at /<id>/style.json and linked from the
    *  catalog, so clients (the viewer) can render it directly. */
@@ -165,6 +172,7 @@ const SPECS: readonly TilesetSpec[] = [
     minzoom: 0,
     maxzoom: 15,
     handleTile: (_request, env, _ctx, coords) => handleVectorTile(coords, env),
+    archive: protomapsArchive,
     // The Protomaps basemap schema layers (ids from the archive's
     // metadata); lets the viewer's inspector enumerate + toggle them.
     vectorLayers: [
@@ -203,6 +211,7 @@ const SPECS: readonly TilesetSpec[] = [
       maxzoom: d.maxzoom,
       handleTile: (_request, env, _ctx, coords) =>
         handleNeVectorTile(d.archiveKey, coords, env),
+      archive: async (env) => neVectorArchive(env, d.archiveKey),
       vectorLayers: d.layers.map((l) => ({
         id: l.id,
         description: l.description,
@@ -239,6 +248,7 @@ const SPECS: readonly TilesetSpec[] = [
       // Range-read from Overture's S3 on demand; we mirror nothing.
       proxy: true,
       handleTile: (_request, _env, _ctx, coords) => handleOvertureTile(d.theme, coords),
+      archive: () => overtureArchive(d.theme),
       vectorLayers: d.layers.map((l) => ({
         id: l.id,
         description: l.description,

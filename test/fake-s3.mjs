@@ -15,8 +15,9 @@ function varints(values) {
 }
 
 /** A PMTiles v3 archive with no compression, holding `tiles`
- *  (`{ z, x, y, data }`, `data` a string) and declaring the zoom range. */
-export function buildArchive(tiles, { minZoom = 0, maxZoom = 1 } = {}) {
+ *  (`{ z, x, y, data }`, `data` a string), declaring the zoom range, and
+ *  carrying `metadata` as its JSON metadata when given. */
+export function buildArchive(tiles, { minZoom = 0, maxZoom = 1, metadata } = {}) {
   const entries = tiles
     .map((t) => ({ id: zxyToTileId(t.z, t.x, t.y), bytes: new TextEncoder().encode(t.data) }))
     .sort((a, b) => a.id - b.id);
@@ -40,7 +41,9 @@ export function buildArchive(tiles, { minZoom = 0, maxZoom = 1 } = {}) {
       ...placed.map((e) => e.offset + 1),
     ]),
   );
-  const dataOffset = HEADER_BYTES + dir.length;
+  const json = new TextEncoder().encode(metadata === undefined ? "" : JSON.stringify(metadata));
+  const jsonOffset = HEADER_BYTES + dir.length;
+  const dataOffset = jsonOffset + json.length;
   const buf = new Uint8Array(dataOffset + offset);
   const dv = new DataView(buf.buffer);
   buf.set(new TextEncoder().encode("PMTiles"), 0);
@@ -48,8 +51,8 @@ export function buildArchive(tiles, { minZoom = 0, maxZoom = 1 } = {}) {
   const u64 = (at, n) => dv.setBigUint64(at, BigInt(n), true);
   u64(8, HEADER_BYTES);
   u64(16, dir.length);
-  u64(24, dataOffset);
-  u64(32, 0);
+  u64(24, jsonOffset);
+  u64(32, json.length);
   u64(40, dataOffset);
   u64(48, 0);
   u64(56, dataOffset);
@@ -64,6 +67,7 @@ export function buildArchive(tiles, { minZoom = 0, maxZoom = 1 } = {}) {
   buf[100] = minZoom;
   buf[101] = maxZoom;
   buf.set(dir, HEADER_BYTES);
+  buf.set(json, jsonOffset);
   for (const e of placed) buf.set(e.bytes, dataOffset + e.offset);
   return buf;
 }

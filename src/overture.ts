@@ -293,6 +293,9 @@ async function resolveArchive(theme: string): Promise<{ archive: PMTiles; releas
   }
 }
 
+export const overtureArchive = async (theme: string): Promise<PMTiles> =>
+  (await resolveArchive(theme)).archive;
+
 export async function handleOvertureTile(
   theme: string,
   match: { z: number; x: number; y: number },

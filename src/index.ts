@@ -288,7 +288,7 @@ async function dispatch(
   const tj = url.pathname.match(TILESET_TILEJSON_RE);
   if (tj) {
     const def = TILESETS_BY_ID.get(tj[1]);
-    if (def) return handleTilesetTilejson(request, def);
+    if (def) return handleTilesetTilejson(request, def, env, ctx);
   }
   // Vector tilesets that ship their own cartography expose a MapLibre
   // style at /<id>/style.json (linked from the catalog).

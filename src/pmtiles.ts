@@ -79,6 +79,8 @@ export async function readMirrorPointer(env: Env): Promise<MirrorPointer> {
   return parsed;
 }
 
+export { getArchive as protomapsArchive };
+
 async function getArchive(env: Env): Promise<PMTiles> {
   const pointer = await readMirrorPointer(env);
   if (archiveCache && archiveCache.key === pointer.key) return archiveCache.pmtiles;
