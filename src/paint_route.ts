@@ -98,7 +98,12 @@ export async function servePaintTile(t: PaintTile, io: PaintTileIo): Promise<Res
         // Overture release, a rebuilt Natural Earth file. A picture from
         // the new data must not be cached under the old key.
         if (readsExtraSources) {
-          const after = await paintSourceVersion(env, style, sources);
+          let after: string;
+          try {
+            after = await paintSourceVersion(env, style, sources);
+          } catch (e) {
+            throw new PaintSourceError("version", `source version after render: ${String(e)}`, { cause: e });
+          }
           if (after !== sourceVersion) {
             throw new PaintSourceError("version", `sources moved from ${sourceVersion} to ${after}`);
           }

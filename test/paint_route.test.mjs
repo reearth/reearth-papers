@@ -178,3 +178,22 @@ test("an archive that moves during the render answers a logged 503 and stores no
   assert.deepEqual(seen.stored, []);
   assert.deepEqual(errors.map((e) => e.stage), ["version"]);
 });
+
+test("an archive that cannot be opened after the render answers a logged 503 and stores nothing", async () => {
+  const style = styleOf("lost");
+  const sources = overtureSources();
+  const { res, seen } = await serveOne({
+    style,
+    env: envWith(style, docOf({ extras: true })),
+    sources,
+    render: async () => {
+      sources.failing = true;
+      return PNG;
+    },
+  });
+
+  assert.equal(res.status, 503);
+  assert.deepEqual(seen.stored, []);
+  assert.deepEqual(errors.map((e) => e.stage), ["version"]);
+  assert.match(errors[0].error, /Bad response code: 503/);
+});
