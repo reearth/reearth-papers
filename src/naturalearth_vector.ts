@@ -18,7 +18,7 @@
 
 import { openArchive } from "./archive.js";
 import { attributionOf, headerSafeHtml } from "./credits.js";
-import type { PMTiles, RangeResponse, Source } from "pmtiles";
+import { EtagMismatch, type PMTiles, type RangeResponse, type Source } from "pmtiles";
 
 // Public domain — no attribution required; we credit Natural Earth
 // anyway, matching the raster side (src/naturalearth.ts).
@@ -379,10 +379,22 @@ class R2PmtilesSource implements Source {
     return `r2://${this.#key}`;
   }
 
-  async getBytes(offset: number, length: number): Promise<RangeResponse> {
+  async getBytes(
+    offset: number,
+    length: number,
+    _signal?: AbortSignal,
+    etag?: string,
+  ): Promise<RangeResponse> {
     const obj = await this.#bucket.get(this.#key, { range: { offset, length } });
     if (!obj) {
       throw new Error(`natural earth vector archive not found in R2: ${this.#key}`);
+    }
+    // These archives are rebuilt in place under the same key. pmtiles keeps
+    // the header it read first and passes its etag here; a mismatch makes
+    // `getZxy` drop that header and read the new archive, where otherwise
+    // the old directory would be used to range-read the new file.
+    if (etag && obj.httpEtag !== etag) {
+      throw new EtagMismatch(`${this.#key}: etag ${obj.httpEtag}, header read at ${etag}`);
     }
     return { data: await obj.arrayBuffer(), etag: obj.httpEtag };
   }
