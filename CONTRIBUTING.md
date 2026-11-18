@@ -235,6 +235,273 @@ style's tiles. There is no version constant to bump.
 A paint style has no `style.json`: an ezu document is a node graph, and
 no MapLibre style means the same thing.
 
+### Writing a paint style
+
+A paint style is an ezu document on the shelf plus one entry in the
+manifest. This section says what the worker does with a document, how to
+check a document on your machine, and what the manifest entry holds. The
+worker code behind each rule is named so you can check it.
+
+#### Install the renderer the worker runs
+
+The worker renders with the `@reearth/ezu` version that
+`package-lock.json` pins. To print it, run:
+
+```bash
+npm ls @reearth/ezu
+```
+
+Install the ezu CLI at that version. For 0.15.0, run:
+
+```bash
+cargo install ezu-cli --version =0.15.0
+```
+
+A different version can draw a different picture. For example, ezu
+0.11.0 changed `buffer`, `hatch` spacing and the other geometry lengths
+from MVT extent units to canvas pixels, which is an eighth of the old
+length on a 512 px tile. The comment on `PAINT_RUNTIME_VERSION` in
+`src/paint_styles.ts` lists what each upgrade of the shelf changed.
+
+#### Declare one `mvt` source
+
+`ensureState` in `src/ezu.ts` reads the document's `sources` and binds
+each type as follows.
+
+| Source type | What the worker binds |
+|---|---|
+| `mvt` | The Protomaps archive this worker serves at `/protomaps`, whatever the source's `url` says. Past z15 it binds the z15 ancestor (`EZU_MAXZOOM`). With more than one `mvt` source it binds the last one and nothing to the others, with no warning. With none, every tile request fails. |
+| `dem` | Tiles from the `url` template, only when its host is `terrain.reearth.land` (`DEM_HOSTS`). With any other host the tile renders without terrain and the worker logs `dem host not allowed`. |
+| `brush`, `image` | The `file:` path, read from `{id}/{rev}/assets/` on the shelf. A missing asset is logged, and ezu draws with its fallback. |
+| `glyphs` | Glyphs for the source's `fontstack`, from this worker's `/fonts`. The worker does not fetch the source's `url`. |
+| `sprite` | The `image` and `index` URLs. If either fetch fails, the tile request fails. |
+| Any other type, such as `raster`, `geojson` or `pmtiles` | Nothing. The worker logs `declares unsupported source type`. |
+
+Declare exactly one `mvt` source, with this `url` and no `max-zoom`:
+
+```json
+"sources": {
+  "basemap": { "type": "mvt", "url": "https://papers.reearth.land/protomaps/tilejson.json" }
+}
+```
+
+With that declaration the CLI fetches the tiles the worker binds and
+overzooms past z15 as the worker does, so `ezu tile` draws the worker's
+pixels. In November 2026 the two gave identical pixels at z14, z17 and
+z20 for a document with only this source. With the template
+`https://papers.reearth.land/protomaps/{z}/{x}/{y}.mvt` as the `url`,
+they differed at z20. Parity was not measured for documents that read
+`dem`, `brush`, `image`, `glyphs` or `sprite` sources.
+
+With a second `mvt` source the CLI fetches both, and the worker binds
+one. The CLI then no longer shows what the worker serves, and
+`ezu check --strict` does not warn about it.
+
+"The last one" means the last in JavaScript object key order, which is
+not always the order in the file. A source name that is a non-negative
+integer, such as `"2"` or `"10"`, moves ahead of every other name. For
+sources declared as `base`, `2`, `extra`, `10`, the worker binds
+`extra`. Do not give a source an integer name.
+
+#### Keep filters inside the tile buffer
+
+The worker binds the centre tile and the neighbours that
+`requestedNeighborOffsets` names. For an `mvt` source, ezu names
+neighbours only for label collision. A `buffer`, `blur` or other filter
+near a tile edge therefore sees only the geometry that the centre tile
+carries past its edge.
+
+In November 2026, on four Protomaps tiles from z10 to z15, `earth` and
+`water` reached 16 px past each edge of a 512 px tile. `roads`,
+`landuse`, `buildings` and `boundaries` reached 8 px. One z15 `water`
+tile reached 89 px. A filter that reaches further than the layer it
+reads draws a band along every tile edge.
+
+`ezu check --json` prints how far the document's filters reach, in
+pixels, as `pad.needed`. If `pad.needed` is larger than the reach of a
+layer that a filter reads, render a mosaic and look at the shared edge.
+For example, a `blur` on `earth` with `sigma-max` 20 needs 60 px. At
+`sigma` 20, an all-land z14 tile turns toward the water colour within
+about 40 px of each edge. At `sigma` 4 it stays one colour.
+
+#### Check a document before you publish it
+
+The commands below use this document as `style.json`:
+
+```json
+{
+  "name": "sample",
+  "version": "1",
+  "params": {
+    "water": { "type": "color", "default": "#7fa9c8", "description": "Water." },
+    "soft": { "type": "number", "default": 4, "min": 0, "max": 20, "description": "Blur on land." }
+  },
+  "sources": {
+    "basemap": { "type": "mvt", "url": "https://papers.reearth.land/protomaps/tilejson.json" }
+  },
+  "nodes": {
+    "sea": { "op": "solid", "color": "$water" },
+    "earth_f": { "op": "features", "source": "basemap", "layer": "earth" },
+    "earth": { "op": "fill-solid", "features": "@earth_f", "fill": "#efe9dc" },
+    "soft": { "op": "blur", "input": "@earth", "sigma": "$soft", "sigma-max": 20 },
+    "out": { "op": "stack", "layers": ["@sea", "@soft"] }
+  },
+  "output": "@out"
+}
+```
+
+1. Validate the document. The command exits non-zero on a parse, graph
+   or asset error, and on a build warning:
+
+   ```bash
+   ezu check --json --strict style.json
+   ```
+
+   Keep the output. Its `params` object goes into the manifest entry,
+   and `pad.needed` is the filter reach from the previous section.
+
+2. Render a tile on the coast near Tokyo:
+
+   ```bash
+   ezu tile --style style.json --tile 14/14553/6454 --out t.png
+   ```
+
+3. Render a tile past z15, which the worker draws from the z15
+   ancestor:
+
+   ```bash
+   ezu tile --style style.json --tile 20/931441/413107 --out deep.png
+   ```
+
+4. Render two neighbouring tiles as one image, and look at the shared
+   edge in the middle of `mosaic.png`:
+
+   ```bash
+   ezu bbox --style style.json --bbox 139.7571,35.6823,139.7791,35.6859 --zoom 14 --out mosaic.png
+   ```
+
+5. Repeat steps 2 to 4 with `--param name=value` for the extreme value
+   of each param. The CLI refuses a value outside the declared range, as
+   the tile route does.
+
+#### Write the manifest entry
+
+`paintStyles` in `src/paint_styles.ts` reads `latest.json`, and
+`validate` checks each entry. A failed check drops that entry, and the
+worker logs `paint: skipping malformed entry <name>`.
+
+| Field | Rule |
+|---|---|
+| `name` | The route id: `/styles/{name}/...`. Lowercase letters and hyphens, starting with a letter. Start it with `paint-`, as every published style does. |
+| `rev` | Lowercase letters and digits. A new value for every change to the document or its assets. |
+| `title` | Display name in the catalog and the TileJSON. The default is `name`. |
+| `description` | The TileJSON `description`. The default is `""`. |
+| `attribution` | One HTML string. The TileJSON `attribution` carries it as written, and each tile carries it in the `x-attribution` header. |
+| `tileSize` | An integer: the document's `tile-size`, or 512. |
+| `maxzoom` | An integer from 0 to 24. The tile route answers 404 above it. |
+| `params` | The `params` object from `ezu check --json`, as printed, or `null`. |
+| `sourceVersion` | Versions of the external data the document reads, such as `terrain:5`, or `""`. It is part of every tile's cache key. |
+
+Three rules are easy to miss:
+
+- `name` is the route id, not the document's `name`. The style below is
+  served at `/styles/paint-sample/`, and its params schema keeps the
+  title `sample parameters`.
+- `validate` accepts digits in `name`, but every `/styles/` route
+  matches only `[a-z-]+`. A name with a digit is listed in
+  `/catalog.json` and answers 404 on every route.
+- A bundled theme (`papers-*`, `protomaps-*`) takes its name on the tile
+  and TileJSON routes. A paint style with a theme's name is not served
+  there.
+
+A worked entry for the document above, with example values for `rev` and
+`sourceVersion`:
+
+```json
+{
+  "styles": [
+    {
+      "name": "paint-sample",
+      "rev": "3f9a1c0d",
+      "title": "Sample",
+      "description": "",
+      "attribution": "<a href=\"https://papers.reearth.land/attribution\">Re:Earth Papers</a> · &copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
+      "tileSize": 512,
+      "maxzoom": 22,
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "soft": {
+            "default": 4,
+            "description": "Blur on land.",
+            "maximum": 20.0,
+            "minimum": 0.0,
+            "type": "number"
+          },
+          "water": {
+            "default": "#7fa9c8",
+            "description": "Water.",
+            "format": "color",
+            "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$",
+            "type": "string"
+          }
+        },
+        "title": "sample parameters",
+        "type": "object"
+      },
+      "sourceVersion": ""
+    }
+  ]
+}
+```
+
+The tile route checks a request's params against the manifest's
+`params`, not against the document. A value outside the declared range
+answers 400. `readParams` then joins the non-default values, sorted, as
+`k=v&...`. If that string is longer than 512 characters
+(`CANONICAL_MAX`), the route answers 400. A colour param costs its name
+plus 9 characters, so 23 colour params with 9-character names take 413
+characters, and 29 take 521.
+
+`maxzoom` is chosen per style. A deep tile can take much longer to
+render the first time than a shallow one, so render a tile at the zoom
+you advertise before you publish it.
+
+#### Publish
+
+Upload in this order, as [Paint styles](#paint-styles) describes:
+
+1. The assets, under `{id}/{rev}/assets/`.
+2. The document, as strict JSON, at `{id}/{rev}/style.json`. The worker
+   reads it with `JSON.parse` (`paintDocument`), so blank the comments
+   that ezu accepts.
+3. The manifest, `latest.json`, last.
+
+After the manifest is written:
+
+- Each isolate keeps the manifest it read for up to 10 minutes
+  (`MANIFEST_TTL_MS`), so the new entry appears gradually over that
+  time.
+- If `latest.json` is missing or does not parse, an isolate that reads
+  it serves no paint styles for the next 10 minutes. A parse error is
+  logged as `paint: manifest read`.
+- An isolate keeps every document it has read, keyed by `{name}/{rev}`.
+  A change published under an old `rev` is not seen there, and the tiles
+  cached under that `rev` stay.
+- A publish cannot recall a tile a browser already holds. The tile URL
+  does not contain `rev` (`handlePaintTilejson`), and tiles go out
+  `public, max-age=31536000, immutable` (`serveRenderedTile`).
+
+Two things this repository does not answer:
+
+- How `rev` is computed: which hash, over which bytes, and how long. The
+  worker requires only lowercase letters and digits.
+- Where the tool that uploads documents, assets and the manifest lives,
+  and who runs it with which R2 credentials.
+
+Ask the code owners in `.github/CODEOWNERS`.
+
 ### Tuning a paint style (unreleased)
 
 Each style declares its own parameters, and the tile route takes them:
