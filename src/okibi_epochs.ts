@@ -22,6 +22,7 @@ import { ezuRecipeVersion } from "./ezu.js";
 import {
   PAINT_RUNTIME_VERSION,
   type PaintStyle,
+  paintDocument,
   paintEpochSource,
   paintSourceVersion,
   paintStyles,
@@ -60,10 +61,12 @@ export async function okibiEpochs(env: Env): Promise<Record<string, Epoch>> {
   // One style whose extra sources cannot be read costs that style's
   // epoch, not the endpoint: it reports what the manifest says.
   const versionOf = (style: PaintStyle) =>
-    paintSourceVersion(env, style, sources).catch((e: unknown) => {
-      console.warn(`okibi: ${style.name} source version: ${String(e)}`);
-      return style.sourceVersion;
-    });
+    paintDocument(env, style)
+      .then((doc) => paintSourceVersion(style, doc, sources))
+      .catch((e: unknown) => {
+        console.warn(`okibi: ${style.name} source version: ${String(e)}`);
+        return style.sourceVersion;
+      });
 
   for (const style of await paintStyles(env)) {
     // The parameterless picture. A style's parameters are part of its key and

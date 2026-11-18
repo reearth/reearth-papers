@@ -46,13 +46,16 @@ function docOf({ extras }) {
   };
 }
 
-/** An R2 binding holding one style document, whose reads fail while
- *  `failing` is set. */
+/** An R2 binding holding one style document, whose next `failures`
+ *  reads fail. */
 function envWith(style, doc) {
   const r2 = {
-    failing: false,
+    failures: 0,
     async get(key) {
-      if (r2.failing) throw new Error("R2 get failed");
+      if (r2.failures > 0) {
+        r2.failures -= 1;
+        throw new Error("R2 get failed");
+      }
       if (key !== `styles/${style.name}/${style.rev}/style.json`) return null;
       return { text: async () => JSON.stringify(doc) };
     },
@@ -196,4 +199,35 @@ test("an archive that cannot be opened after the render answers a logged 503 and
   assert.deepEqual(seen.stored, []);
   assert.deepEqual(errors.map((e) => e.stage), ["version"]);
   assert.match(errors[0].error, /Bad response code: 503/);
+});
+
+test("a style binding nothing extra whose document is unread before the lookup renders under the manifest's key", async () => {
+  const style = styleOf("plain-unread");
+  const env = envWith(style, docOf({ extras: false }));
+  env.R2.failures = 1;
+  const { res, seen } = await serveOne({ style, env, sources: overtureSources() });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(seen.stored, [`cache/paint/plain-unread/${style.rev}/r3/${DATE}/terrain:5/default/3/2/3.png`]);
+});
+
+test("a style binding Overture whose document is unread before the lookup answers a logged 503 without rendering", async () => {
+  const style = styleOf("extra-unread");
+  const env = envWith(style, docOf({ extras: true }));
+  env.R2.failures = 1;
+  let renders = 0;
+  const { res, seen } = await serveOne({
+    style,
+    env,
+    sources: overtureSources(),
+    render: async () => {
+      renders += 1;
+      return PNG;
+    },
+  });
+
+  assert.equal(res.status, 503);
+  assert.equal(renders, 0);
+  assert.deepEqual(seen.stored, []);
+  assert.deepEqual(errors.map((e) => [e.stage, e.style]), [["version", "extra-unread"]]);
 });

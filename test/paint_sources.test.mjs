@@ -164,11 +164,6 @@ test("an extra source's declared min-zoom is carried into its plan", () => {
   assert.equal(planVectorSources(doc, PAINT_SOURCE_IDS).extras[0].minzoom, 3);
 });
 
-/** An R2 stand-in for the paint shelf: documents by key. */
-function shelf(objects) {
-  return { R2: { get: async (key) => (key in objects ? { text: async () => JSON.stringify(objects[key]) } : null) } };
-}
-
 const memoryArchive = async (etag) => {
   const { openArchive } = await loadSrc("archive");
   const bytes = buildArchive([{ z: 0, x: 0, y: 0, data: "t" }], { maxZoom: 0 });
@@ -177,32 +172,21 @@ const memoryArchive = async (etag) => {
 
 test("only a style that binds extra sources gains their versions in its cache key", async () => {
   const { paintSourceVersion, paintEpochSource } = await loadSrc("paint_styles");
-  const style = (name, sourceVersion) => ({ name, rev: "r1", sourceVersion });
+  const style = (sourceVersion) => ({ name: "s", rev: "r1", sourceVersion });
   const archives = { overture_base: await memoryArchive('"o-77"'), naturalearth_bathymetry: await memoryArchive('"n1"') };
   const sources = { readable: PAINT_SOURCE_IDS, archive: async (id) => archives[id] };
-  const env = shelf({
-    "styles/plain/r1/style.json": docOf({ basemap: URL_OF.protomaps }),
-    "styles/two/r1/style.json": docOf({ ov: URL_OF.overture, ne: "https://papers.reearth.land/naturalearth_bathymetry/tilejson.json", basemap: URL_OF.protomaps }),
-    "styles/bare/r1/style.json": docOf({ ov: URL_OF.overture, basemap: URL_OF.protomaps }),
-  });
+  const plain = docOf({ basemap: URL_OF.protomaps });
+  const two = docOf({ ov: URL_OF.overture, ne: "https://papers.reearth.land/naturalearth_bathymetry/tilejson.json", basemap: URL_OF.protomaps });
+  const bare = docOf({ ov: URL_OF.overture, basemap: URL_OF.protomaps });
 
-  assert.equal(await paintSourceVersion(env, style("plain", "terrain:5"), sources), "terrain:5");
-  assert.equal(await paintSourceVersion(env, style("plain", ""), sources), "");
+  assert.equal(await paintSourceVersion(style("terrain:5"), plain, sources), "terrain:5");
+  assert.equal(await paintSourceVersion(style(""), plain, sources), "");
   assert.equal(
-    await paintSourceVersion(env, style("two", "terrain:5"), sources),
+    await paintSourceVersion(style("terrain:5"), two, sources),
     "terrain:5+naturalearth_bathymetry@n1+overture_base@o-77",
   );
-  assert.equal(await paintSourceVersion(env, style("bare", ""), sources), "-+overture_base@o-77");
+  assert.equal(await paintSourceVersion(style(""), bare, sources), "-+overture_base@o-77");
   assert.equal(paintEpochSource("20261101", ""), "20261101/-");
   assert.equal(paintEpochSource("20261101", "-+overture_base@o-77"), "20261101/-+overture_base@o-77");
   assert.deepEqual(warnings, []);
-});
-
-test("a style document that cannot be read keys on the manifest's source version", async () => {
-  const { paintSourceVersion } = await loadSrc("paint_styles");
-  const sources = { readable: PAINT_SOURCE_IDS, archive: () => assert.fail("no archive read") };
-  const version = await paintSourceVersion(shelf({}), { name: "gone", rev: "r1", sourceVersion: "terrain:5" }, sources);
-  assert.equal(version, "terrain:5");
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /^paint: gone source version from the manifest: .*no document for gone\/r1/);
 });

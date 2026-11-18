@@ -7,7 +7,7 @@
 
 import type { RenderedTileOptions } from "./render_cache.js";
 import type { TileCoords } from "./tilesets.js";
-import { type PaintSources, PaintSourceError } from "./paint_sources.js";
+import { type PaintSources, PaintSourceError, planVectorSources } from "./paint_sources.js";
 import {
   PAINT_RUNTIME_VERSION,
   type PaintFormat,
@@ -42,15 +42,27 @@ export interface PaintTileIo {
 export async function servePaintTile(t: PaintTile, io: PaintTileIo): Promise<Response> {
   const { style, coords, format, params, date } = t;
   const { env, sources } = io;
-  let sourceVersion: string;
+  // A style that binds nothing extra keys on the manifest alone, so its
+  // cache hits do not wait on the document. Without the document there is
+  // no telling which kind a style is, so the render below checks before it
+  // draws anything.
+  let doc: Record<string, unknown> | null = null;
   try {
-    sourceVersion = await paintSourceVersion(env, style, sources);
+    doc = await paintDocument(env, style);
   } catch (e) {
-    return paintSourceUnavailable(
-      style,
-      coords,
-      new PaintSourceError("read", `source version: ${String(e)}`, { cause: e }),
-    );
+    console.warn(`paint: ${style.name} keyed on the manifest's source version: ${String(e)}`);
+  }
+  let sourceVersion = style.sourceVersion;
+  if (doc) {
+    try {
+      sourceVersion = await paintSourceVersion(style, doc, sources);
+    } catch (e) {
+      return paintSourceUnavailable(
+        style,
+        coords,
+        new PaintSourceError("read", `source version: ${String(e)}`, { cause: e }),
+      );
+    }
   }
   const readsExtraSources = sourceVersion !== style.sourceVersion;
   const version =
@@ -93,14 +105,20 @@ export async function servePaintTile(t: PaintTile, io: PaintTileIo): Promise<Res
       // re-reads.
       persist: params.canonical === "",
       render: async () => {
-        const encoded = await io.render(await paintDocument(env, style));
+        const read = doc ?? (await paintDocument(env, style));
+        // A style with extra sources has no tile under the manifest's
+        // version, and must not get one: R2 would keep it for good.
+        if (!doc && planVectorSources(read, sources.readable).extras.length) {
+          throw new PaintSourceError("version", "document unread when the key was built, and it binds extra sources");
+        }
+        const encoded = await io.render(read);
         // An archive can move between the key above and the reads: a new
         // Overture release, a rebuilt Natural Earth file. A picture from
         // the new data must not be cached under the old key.
         if (readsExtraSources) {
           let after: string;
           try {
-            after = await paintSourceVersion(env, style, sources);
+            after = await paintSourceVersion(style, read, sources);
           } catch (e) {
             throw new PaintSourceError("version", `source version after render: ${String(e)}`, { cause: e });
           }

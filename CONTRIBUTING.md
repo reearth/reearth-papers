@@ -286,7 +286,10 @@ never fetches a URL from a document.
   `+<tileset>@<archive etag>` appended to its `sourceVersion` in the tile
   cache key and the okibi epoch, so a new Overture release or a rebuilt
   Natural Earth archive re-renders it. A style that binds none keys exactly
-  as before.
+  as before. When the document cannot be read before the cache lookup, the
+  tile is looked up under the manifest's `sourceVersion` alone, and on a
+  miss it renders only if the document then turns out to bind nothing
+  extra. A style with extra sources answers 503 there instead.
 
 ### Tuning a paint style (unreleased)
 

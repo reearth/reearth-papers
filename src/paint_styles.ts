@@ -371,21 +371,12 @@ export async function paintDocument(
  *  The manifest's `sourceVersion`, as published, for a style whose `mvt`
  *  sources all bind as today. A style that binds other tilesets gains
  *  `+<tileset>@<archive etag>` for each, sorted, so a rebuilt archive or a
- *  new Overture release moves its key. The document is read for this
- *  before the cache is, so a failed read falls back to the manifest's
- *  value and the styles that bind nothing extra keep their cache hits. */
+ *  new Overture release moves its key. */
 export async function paintSourceVersion(
-  env: Env,
   style: PaintStyle,
+  doc: Record<string, unknown>,
   sources: PaintSources,
 ): Promise<string> {
-  let doc: Record<string, unknown>;
-  try {
-    doc = await paintDocument(env, style);
-  } catch (e) {
-    console.warn(`paint: ${style.name} source version from the manifest: ${String(e)}`);
-    return style.sourceVersion;
-  }
   const tilesets = [...new Set(planVectorSources(doc, sources.readable).extras.map((e) => e.tileset))];
   if (!tilesets.length) return style.sourceVersion;
   const versions = await Promise.all(
