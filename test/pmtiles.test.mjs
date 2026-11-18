@@ -27,7 +27,7 @@ test("a Protomaps tile answers 200 with its bytes, a zoom out of range 404", asy
 
   const tile = await handleVectorTile({ z: 0, x: 0, y: 0 }, env);
   assert.equal(tile.status, 200);
-  assert.equal(tile.headers.get("content-type"), "application/vnd.mapbox-vector-tile");
+  assert.equal(tile.headers.get("content-type"), "application/x-protobuf");
   assert.equal(await tile.text(), "protomaps-0/0/0");
 
   const deep = await handleVectorTile({ z: 2, x: 0, y: 0 }, env);

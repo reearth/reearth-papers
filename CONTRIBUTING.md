@@ -609,6 +609,36 @@ readable archive was found and `tile` when the tile read itself failed,
 and its `error` is the library's message. Search Workers Logs for that
 event before deciding on a retry or a release fallback.
 
+### 12. A vector tile's content type decides whether it is compressed
+
+Cloudflare's edge compresses a Worker response only when its content
+type is on the
+[compression list](https://developers.cloudflare.com/speed/optimization/content/compression/).
+`application/x-protobuf` is on it and the registered
+`application/vnd.mapbox-vector-tile` is not, so tiles labelled with the
+registered type went out uncompressed, megabytes at a time.
+
+Build every vector tile response in this worker with
+`vectorTileResponse` from `src/mvt_response.ts`. It sends the decoded
+MVT as `application/x-protobuf` with `vary: accept-encoding`, and the
+edge picks zstd, br or gzip for each client. Its header type rejects
+`content-type` and `content-encoding` in a header object written inline
+in the call, so `npm run typecheck` fails on that mistake. It cannot
+catch a header object built elsewhere and passed in, or a handler that
+builds its own `Response`. The mirror worker's internal `/protomaps`
+route keeps the registered type; only the renderer container reads it.
+
+Never set `Content-Encoding` from the request's `Accept-Encoding`. The
+Worker sees `accept-encoding: br, gzip` on every request, whatever the
+client sent. Only `request.cf.clientAcceptEncoding` holds the client's
+value. Raw MVT once went out labelled gzip and broke maplibre-native's
+libcurl.
+
+Compression depends on that list and the zone's settings, which live
+outside this repository. `scripts/smoke.mjs` fetches each vector
+tileset's tile with `accept-encoding: gzip` after every deploy and fails
+with "not compressed" if the edge stops compressing it.
+
 ## Other notes
 
 - `package-lock.json` is committed. `npm ci` in CI; `npm install` for

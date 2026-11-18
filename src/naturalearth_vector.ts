@@ -18,6 +18,7 @@
 
 import { openArchive } from "./archive.js";
 import { attributionOf, headerSafeHtml } from "./credits.js";
+import { vectorTileResponse } from "./mvt_response.js";
 import type { PMTiles, RangeResponse, Source } from "pmtiles";
 
 // Public domain — no attribution required; we credit Natural Earth
@@ -417,18 +418,13 @@ export async function handleNeVectorTile(
   // rationale as pmtiles.ts.
   if (!tile) return new Response(null, { status: 204 });
 
-  // `getZxy` returns already-decompressed bytes; send raw with no
-  // Content-Encoding — see the note in pmtiles.ts.
-  return new Response(tile.data, {
-    headers: {
-      "content-type": "application/vnd.mapbox-vector-tile",
-      // The archive can be rebuilt in place under the same key (e.g. to
-      // regenerate feature ids), so don't cache as immutable — a
-      // moderate TTL with SWR lets a fresh build reach clients within a
-      // day instead of being pinned for a year.
-      "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
-      "x-attribution": headerSafeHtml(NE_VECTOR_ATTRIBUTION),
-    },
+  return vectorTileResponse(tile.data, {
+    // The archive can be rebuilt in place under the same key (e.g. to
+    // regenerate feature ids), so don't cache as immutable — a
+    // moderate TTL with SWR lets a fresh build reach clients within a
+    // day instead of being pinned for a year.
+    "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
+    "x-attribution": headerSafeHtml(NE_VECTOR_ATTRIBUTION),
   });
 }
 
