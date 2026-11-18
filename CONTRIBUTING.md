@@ -651,8 +651,11 @@ in the Cache API for 30 days under
 
 - Bump `LITE_VERSION` whenever `liteTile` can return other bytes for the
   same input, or old copies keep being served for up to 30 days.
-  `test/mvt_lite.test.mjs` pins a digest per version and fails until you
-  record the new one.
+  `test/mvt_lite.test.mjs` pins `LITE_RULES` and a fixture's output
+  digest per version, so a rule change fails until you bump the version
+  and record the new rules. A change to `filterTile` itself fails only
+  if it changes the fixture's output, so bump the version by hand when
+  it changes what the filter keeps.
 - The stored copy carries no `Vary`, so a hit never depends on how
   `cache.match` treats `Vary: accept-encoding`. The response a client
   gets is built by `vectorTileResponse` and has it.

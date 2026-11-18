@@ -135,14 +135,25 @@ for (const [name, bytes] of Object.entries(malformed)) {
 
 // Stored lite tiles and their ETags are keyed on LITE_VERSION, so the
 // same input must give the same bytes until the version moves. Record
-// a new digest when bumping it.
-const DIGESTS = {
-  1: "fa4c5481a93f79631b3097ba7ea1fbf46c67a88cc238a94472a1bded131f4559",
+// the new rules and digest when bumping it.
+const PINNED = {
+  1: {
+    rules: { dropKeys: ["id", "source_tags", "sources"], dropLayersWhenUntagged: ["bathymetry"] },
+    digest: "fa4c5481a93f79631b3097ba7ea1fbf46c67a88cc238a94472a1bded131f4559",
+  },
 };
+
+test("LITE_RULES are pinned to LITE_VERSION", () => {
+  const rules = {
+    dropKeys: [...LITE_RULES.dropKeys].sort(),
+    dropLayersWhenUntagged: [...LITE_RULES.dropLayersWhenUntagged].sort(),
+  };
+  assert.deepEqual(rules, PINNED[LITE_VERSION]?.rules);
+});
 
 test("lite output is pinned to LITE_VERSION", () => {
   const out = liteTile(encodeTile([WATER, BATHYMETRY_UNTAGGED]));
-  assert.equal(createHash("sha256").update(out).digest("hex"), DIGESTS[LITE_VERSION]);
+  assert.equal(createHash("sha256").update(out).digest("hex"), PINNED[LITE_VERSION]?.digest);
 });
 
 // LITE_REAL_TILES=a.mvt,b.mvt npm test reruns the first and fourth
