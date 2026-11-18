@@ -29,7 +29,8 @@ const args = Object.fromEntries(
 const BASE = args.base ?? "https://papers.reearth.land";
 // `wrangler dev` does not compress, so a local run checks vector tiles
 // for their labels only.
-const LOCAL = ["localhost", "127.0.0.1"].includes(new URL(BASE).hostname);
+const LOCAL_HOST = /^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\]|.+\.localhost)$/;
+const LOCAL = LOCAL_HOST.test(new URL(BASE).hostname);
 const RUN = `smoke-${Date.now()}`;
 
 // Fixed serving-path probe: central Tokyo, always has data.

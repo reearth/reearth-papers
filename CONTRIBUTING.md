@@ -607,12 +607,15 @@ type is on the
 `application/vnd.mapbox-vector-tile` is not, so tiles labelled with the
 registered type went out uncompressed, megabytes at a time.
 
-Build every vector tile response with `vectorTileResponse` from
-`src/mvt_response.ts`. It sends the decoded MVT as
-`application/x-protobuf` with `vary: accept-encoding`, and the edge
-picks zstd, br or gzip for each client. Its header type rejects
-`content-type` and `content-encoding`, so `npm run typecheck` fails if a
-handler sets either.
+Build every vector tile response in this worker with
+`vectorTileResponse` from `src/mvt_response.ts`. It sends the decoded
+MVT as `application/x-protobuf` with `vary: accept-encoding`, and the
+edge picks zstd, br or gzip for each client. Its header type rejects
+`content-type` and `content-encoding` in a header object written inline
+in the call, so `npm run typecheck` fails on that mistake. It cannot
+catch a header object built elsewhere and passed in, or a handler that
+builds its own `Response`. The mirror worker's internal `/protomaps`
+route keeps the registered type; only the renderer container reads it.
 
 Never set `Content-Encoding` from the request's `Accept-Encoding`. The
 Worker sees `accept-encoding: br, gzip` on every request, whatever the
