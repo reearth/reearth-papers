@@ -47,7 +47,7 @@ test("a tile answers 200 with its headers, an absent tile 204, a zoom out of ran
   const hit = await tile(0, 0, 0);
   assert.equal(hit.status, 200);
   assert.equal(await hit.text(), "base-v1");
-  assert.equal(hit.headers.get("content-type"), "application/vnd.mapbox-vector-tile");
+  assert.equal(hit.headers.get("content-type"), "application/x-protobuf");
   assert.equal(hit.headers.get("cache-control"), "public, max-age=3600, stale-while-revalidate=86400");
   assert.equal(hit.headers.get("x-overture-release"), NEWEST);
   assert.match(hit.headers.get("x-attribution"), /Overture/);

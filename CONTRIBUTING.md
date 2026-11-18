@@ -609,6 +609,63 @@ readable archive was found and `tile` when the tile read itself failed,
 and its `error` is the library's message. Search Workers Logs for that
 event before deciding on a retry or a release fallback.
 
+### 12. A vector tile's content type decides whether it is compressed
+
+Cloudflare's edge compresses a Worker response only when its content
+type is on the
+[compression list](https://developers.cloudflare.com/speed/optimization/content/compression/).
+`application/x-protobuf` is on it and the registered
+`application/vnd.mapbox-vector-tile` is not, so tiles labelled with the
+registered type went out uncompressed, megabytes at a time.
+
+Build every vector tile response in this worker with
+`vectorTileResponse` from `src/mvt_response.ts`. It sends the decoded
+MVT as `application/x-protobuf` with `vary: accept-encoding`, and the
+edge picks zstd, br or gzip for each client. Its header type rejects
+`content-type` and `content-encoding` in a header object written inline
+in the call, so `npm run typecheck` fails on that mistake. It cannot
+catch a header object built elsewhere and passed in, or a handler that
+builds its own `Response`. The mirror worker's internal `/protomaps`
+route keeps the registered type; only the renderer container reads it.
+
+Never set `Content-Encoding` from the request's `Accept-Encoding`. The
+Worker sees `accept-encoding: br, gzip` on every request, whatever the
+client sent. Only `request.cf.clientAcceptEncoding` holds the client's
+value. Raw MVT once went out labelled gzip and broke maplibre-native's
+libcurl.
+
+Compression depends on that list and the zone's settings, which live
+outside this repository. `scripts/smoke.mjs` fetches each vector
+tileset's tile with `accept-encoding: gzip` after every deploy and fails
+with "not compressed" if the edge stops compressing it.
+
+### 13. A lite tile is keyed on `LITE_VERSION`
+
+`overture_base_lite` passes each `overture_base` tile through
+`liteTile` (`src/mvt_lite.ts`), which removes the keys in
+`LITE_RULES` by renumbering each layer's keys and values and rewriting
+each feature's tags. Geometry is copied as bytes. The result is stored
+in the Cache API for 30 days under
+`/__lite/<LITE_VERSION>/<release>/<theme>/<z>/<x>/<y>.mvt`, and its
+`ETag` is `W/"lite<LITE_VERSION>-<release>"`.
+
+- Bump `LITE_VERSION` whenever `liteTile` can return other bytes for the
+  same input, or old copies keep being served for up to 30 days.
+  `test/mvt_lite.test.mjs` pins `LITE_RULES` and a fixture's output
+  digest per version, so a rule change fails until you bump the version
+  and record the new rules. A change to `filterTile` itself fails only
+  if it changes the fixture's output, so bump the version by hand when
+  it changes what the filter keeps.
+- The stored copy carries no `Vary`, so a hit never depends on how
+  `cache.match` treats `Vary: accept-encoding`. The response a client
+  gets is built by `vectorTileResponse` and has it.
+- The registry marks the lite entry with `tileFilter: LITE_RULES`.
+  TileJSON drops those keys from `fields` because of it. Any other code
+  that reads tiles through a tileset's `archive` must apply
+  `tileFilter` too, or it reads bytes that id never serves.
+- `LITE_REAL_TILES=a.mvt,b.mvt npm test` reruns the filter checks on
+  saved tiles and prints the sizes and times.
+
 ## Other notes
 
 - `package-lock.json` is committed. `npm ci` in CI; `npm install` for

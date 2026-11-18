@@ -3,13 +3,14 @@
 //
 // Flow: pointer file (`{prefix}/latest.json`) → R2 object key → walk
 // the PMTiles directory tree to find the requested z/x/y → range-read
-// the tile bytes → return them with the archive's declared
-// Content-Encoding. The pmtiles library handles directory caching
+// the tile bytes → return them decoded, for the edge to compress (see
+// mvt_response.ts). The pmtiles library handles directory caching
 // across requests within a worker instance.
 
 import type { PMTiles, RangeResponse, Source } from "pmtiles";
 
 import { openArchive } from "./archive.js";
+import { vectorTileResponse } from "./mvt_response.js";
 
 const POINTER_TTL_MS = 60 * 60 * 1000;
 
@@ -103,19 +104,10 @@ export async function handleVectorTile(
   const tile = await archive.getZxy(match.z, match.x, match.y);
   if (!tile) return new Response(null, { status: 204 });
 
-  // The pmtiles library's `getZxy` returns *already-decompressed* tile
-  // bytes (it consults the archive's tileCompression header internally).
-  // We had a bug where we passed these bytes through with
-  // `Content-Encoding: gzip`, which broke maplibre-native's libcurl with
-  // a "Failure when receiving data from the peer" mid-transfer error —
-  // it was trying to gunzip raw MVT bytes. Just send them raw.
-  return new Response(tile.data, {
-    headers: {
-      "content-type": "application/vnd.mapbox-vector-tile",
-      // Archive is mirrored monthly and addressed by date in the pointer,
-      // but the URL path is stable across runs. Use a moderate TTL with
-      // SWR so a freshly mirrored archive reaches clients within a day.
-      "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
-    },
+  return vectorTileResponse(tile.data, {
+    // Archive is mirrored monthly and addressed by date in the pointer,
+    // but the URL path is stable across runs. Use a moderate TTL with
+    // SWR so a freshly mirrored archive reaches clients within a day.
+    "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
   });
 }

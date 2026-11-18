@@ -108,6 +108,11 @@ export async function readArchiveLayers(pm: ArchiveHandle): Promise<readonly Arc
   return layers;
 }
 
+function withoutFields(layer: ArchiveLayer, dropped: ReadonlySet<string>): ArchiveLayer {
+  const fields = Object.fromEntries(Object.entries(layer.fields).filter(([k]) => !dropped.has(k)));
+  return { ...layer, fields };
+}
+
 /** How long a vector TileJSON waits for its archive's layers. A warm
  *  isolate answers from memory; this bounds a cold one, where Overture
  *  pays a bucket listing, a header read and a metadata read. */
@@ -145,7 +150,7 @@ async function readArchiveLayersWithin(
  *  registry's layers with no fields, as before archives were read, kept
  *  briefly so a later request tries the archive again. */
 export async function tilesetVectorLayers(
-  def: Pick<TilesetDef, "id" | "minzoom" | "maxzoom" | "archive">,
+  def: Pick<TilesetDef, "id" | "minzoom" | "maxzoom" | "archive" | "tileFilter">,
   registry: readonly VectorLayerInfo[],
   env: Env,
   waitUntil: (promise: Promise<unknown>) => void,
@@ -155,7 +160,9 @@ export async function tilesetVectorLayers(
   if (!archive) return { layers: mergeVectorLayers(registry, [], def), maxAge: 300 };
   const read = await readArchiveLayersWithin(() => archive(env), budgetMs, waitUntil);
   if (read.status === "read") {
-    return { layers: mergeVectorLayers(registry, read.layers, def), maxAge: 300 };
+    const dropped = def.tileFilter?.dropKeys;
+    const layers = dropped ? read.layers.map((l) => withoutFields(l, dropped)) : read.layers;
+    return { layers: mergeVectorLayers(registry, layers, def), maxAge: 300 };
   }
   const why = read.status === "failed" ? String(read.error) : `no answer in ${budgetMs} ms`;
   console.warn(`tilejson: ${def.id} archive layers unavailable (${why})`);
