@@ -105,9 +105,21 @@ export const OVERTURE_TILESETS: readonly OvertureTileset[] = [
     layers: [
       { id: "land", description: "Land polygons", geometry: "polygon", minzoom: 0 },
       { id: "land_cover", description: "Land cover polygons", geometry: "polygon", minzoom: 0 },
-      { id: "land_use", description: "Land use polygons", geometry: "polygon", minzoom: 6 },
+      {
+        id: "land_use",
+        description:
+          "Land use polygons. Below z13 most features carry no `class` or `subtype` (release 2026-11-18.0)",
+        geometry: "polygon",
+        minzoom: 6,
+      },
       { id: "water", description: "Water polygons and waterways", geometry: "polygon", minzoom: 0 },
-      { id: "bathymetry", description: "Bathymetry depth polygons", geometry: "polygon", minzoom: 0 },
+      {
+        id: "bathymetry",
+        description:
+          "Bathymetry depth polygons. Features carry no properties at z0-4; `depth` starts at z5 (release 2026-11-18.0)",
+        geometry: "polygon",
+        minzoom: 0,
+      },
       {
         id: "infrastructure",
         description: "Infrastructure (mixed point/line/polygon)",
