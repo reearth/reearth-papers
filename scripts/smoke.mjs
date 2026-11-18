@@ -184,6 +184,15 @@ for (const t of tilesets) {
       const tpl = tj?.tiles?.[0];
       if (!tpl) return;
 
+      // Vector layers' fields are read from the tileset's archive
+      // (src/vector_layers.ts). When that read fails the TileJSON still
+      // answers, with every layer's `fields` empty, so check it here.
+      if (Array.isArray(tj.vector_layers)) {
+        const label = `${t.id} vector_layers fields`;
+        if (tj.vector_layers.some((l) => Object.keys(l.fields ?? {}).length > 0)) ok(label);
+        else fail(label, "no layer lists a field");
+      }
+
       if (themed) {
         // Styles must build for every theme — including the papers
         // ones, which take a different code path than the stock
