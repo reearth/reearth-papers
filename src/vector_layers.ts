@@ -101,6 +101,9 @@ export async function readArchiveLayers(pm: ArchiveHandle): Promise<readonly Arc
   const known = memo.get(pm);
   if (known) return known;
   const layers = parseArchiveLayers(await pm.getMetadata());
+  // An archive with no usable layer list is treated as unread, so its
+  // TileJSON keeps the short max-age and a later request reads again.
+  if (layers.length === 0) throw new Error("archive metadata lists no vector layers");
   memo.set(pm, layers);
   return layers;
 }

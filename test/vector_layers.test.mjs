@@ -146,7 +146,7 @@ test("an archive that cannot be opened answers today's layers, cached 30 s, with
   assert.match(warnings[0], /^tilejson: protomaps archive layers unavailable \(.*latest\.json not found/);
 });
 
-test("an archive with no metadata, or metadata with no layers, answers no fields", async () => {
+test("an archive with no metadata, or metadata with no layers, answers no fields briefly", async () => {
   const { protomapsArchive } = await loadSrc("pmtiles");
   const { tilesetVectorLayers } = await loadSrc("vector_layers");
   const def = { id: "protomaps", minzoom: 0, maxzoom: 15, archive: protomapsArchive };
@@ -160,7 +160,7 @@ test("an archive with no metadata, or metadata with no layers, answers no fields
   const empty = await fresh(
     { ...def, archive: freshArchive }, PROTOMAPS_REGISTRY, protomapsEnv({ name: "no layers" }), waitUntilSpy(),
   );
-  assert.equal(empty.maxAge, 300);
+  assert.equal(empty.maxAge, 30);
   assert.deepEqual(empty.layers, withoutFields(PROTOMAPS_REGISTRY, 15));
 });
 
