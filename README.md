@@ -46,6 +46,7 @@ All responses are CORS-open (`access-control-allow-origin: *`).
 | `naturalearth_transport` | Natural Earth transport (roads, railroads, airports, ports, time zones) | `mvt` | 10 | `naturalearth_transport.pmtiles` | public domain |
 | `naturalearth_bathymetry` | Natural Earth ocean-bottom bathymetry (depth bands) | `mvt` | 6 | `naturalearth_bathymetry.pmtiles` | public domain |
 | `overture_base` | Overture Maps base (land, land cover/use, water, bathymetry, infrastructure) | `mvt` | 13 | — | ODbL / CDLA-Permissive-2.0 (per theme) |
+| `overture_base_lite` | `overture_base` without the `id`, `sources` and `source_tags` properties, and without `bathymetry` where no feature has a property | `mvt` | 13 | — | ODbL / CDLA-Permissive-2.0 (per theme) |
 | `overture_buildings` | Overture Maps buildings (footprints + 3D parts) | `mvt` | 14 | — | ODbL |
 | `overture_places` | Overture Maps places (POI points) | `mvt` | 14 | — | CDLA-Permissive-2.0 |
 | `overture_transportation` | Overture Maps transportation (road/rail/path segments, connectors) | `mvt` | 14 | — | ODbL |
@@ -73,6 +74,11 @@ we range-read Overture's official PMTiles from S3 on demand and re-serve
 the tiles from our origin, storing nothing, so there is no archive URL
 of ours to hand out. When that read fails, an `overture_*` tile answers
 503 with `Retry-After: 1`. The failure is not cached, so retry the tile.
+
+`overture_base_lite` serves the same tiles with the provenance
+properties removed: 6/32/22 is 2.4 MB instead of 16.4 MB. Use it to draw
+a map, and `overture_base` when you need `id` or `sources`. A lite tile
+that cannot be filtered answers 502.
 
 The registry behind this table lives in
 [`src/tilesets.ts`](src/tilesets.ts) — adding a dataset is one entry

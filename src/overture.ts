@@ -12,10 +12,11 @@
 // only ever talks to us (same origin), so S3 needs no CORS — only HTTP
 // Range, which it has.
 //
-// Cost note: we store nothing. Each cold tile is one or more Range GETs
+// Cost note: we store nothing in R2. Each tile is one or more Range GETs
 // to S3 us-west-2; the pmtiles library caches the archive's header +
-// directory per isolate, and the edge cache (cache-control below)
-// absorbs repeat hits. There's no R2 storage or egress on our side.
+// directory per isolate. Cloudflare does not cache a Worker's own
+// responses, so the cache-control below reaches browsers and nothing
+// at the edge: every tile request reads S3 again.
 //
 // Registry-driven, mirroring naturalearth_vector.ts: the central
 // registry (src/tilesets.ts) maps over OVERTURE_TILESETS. The MVT layer
@@ -26,6 +27,7 @@ import type { PMTiles } from "pmtiles";
 
 import { openArchive, WorkerFetchSource } from "./archive.js";
 import { attributionOf, headerSafeHtml } from "./credits.js";
+import { liteTile } from "./mvt_lite.js";
 import { vectorTileResponse } from "./mvt_response.js";
 
 // Overture ships monthly releases and the version is part of the S3
@@ -85,6 +87,8 @@ export interface OvertureTileset {
   /** Native max zoom (the archive's header maxZoom); clients overzoom. */
   maxzoom: number;
   layers: readonly OvertureLayer[];
+  /** Also serve `<id>_lite`: the same tiles through `liteTile`. */
+  lite?: true;
 }
 
 // Layer ids, zoom ranges and theme zoom caps were read from the live
@@ -103,6 +107,7 @@ export const OVERTURE_TILESETS: readonly OvertureTileset[] = [
     theme: "base",
     minzoom: 0,
     maxzoom: 13,
+    lite: true,
     layers: [
       { id: "land", description: "Land polygons", geometry: "polygon", minzoom: 0 },
       { id: "land_cover", description: "Land cover polygons", geometry: "polygon", minzoom: 0 },
@@ -309,10 +314,17 @@ async function resolveArchive(theme: string): Promise<{ archive: PMTiles; releas
 export const overtureArchive = async (theme: string): Promise<PMTiles> =>
   (await resolveArchive(theme)).archive;
 
-export async function handleOvertureTile(
-  theme: string,
-  match: { z: number; x: number; y: number },
-): Promise<Response> {
+type Coords = { z: number; x: number; y: number };
+
+/** What reading one tile from the current archive found. A failed read
+ *  has already been logged, and carries the 503 to answer. */
+type OvertureRead =
+  | { kind: "tile"; data: ArrayBuffer; release: string }
+  | { kind: "empty" }
+  | { kind: "out-of-range" }
+  | { kind: "failed"; response: Response };
+
+async function readOvertureTile(theme: string, match: Coords): Promise<OvertureRead> {
   // Everything below reads the remote archive, and the library throws
   // plain Errors for bad upstream data, so where a throw happens is what
   // says it was a read failure. Uncaught, it would be a 1101 with no
@@ -321,13 +333,76 @@ export async function handleOvertureTile(
   try {
     served = await resolveArchive(theme);
   } catch (e) {
-    return readFailed("header", theme, resolved?.release ?? OVERTURE_RELEASE, match, e);
+    const release = resolved?.release ?? OVERTURE_RELEASE;
+    return { kind: "failed", response: readFailed("header", theme, release, match, e) };
   }
+  const { archive, release } = served;
   try {
-    return await tileResponse(served, match);
+    const header = await archive.getHeader();
+    if (match.z < header.minZoom || match.z > header.maxZoom) return { kind: "out-of-range" };
+    const tile = await archive.getZxy(match.z, match.x, match.y);
+    return tile ? { kind: "tile", data: tile.data, release } : { kind: "empty" };
   } catch (e) {
-    return readFailed("tile", theme, served.release, match, e);
+    return { kind: "failed", response: readFailed("tile", theme, release, match, e) };
   }
+}
+
+/** The answer for every read that found no tile. */
+function noTile(read: Exclude<OvertureRead, { kind: "tile" }>): Response {
+  switch (read.kind) {
+    case "out-of-range":
+      return new Response("zoom out of range", { status: 404 });
+    case "empty":
+      // 204 (not 404) for an absent tile: MapLibre's vector source treats
+      // it as a successful empty tile, correct for sparse coverage. Same
+      // rationale as pmtiles.ts / naturalearth_vector.ts.
+      return new Response(null, { status: 204 });
+    case "failed":
+      return read.response;
+  }
+}
+
+// The route path doesn't change when the release does, so these tiles
+// can't be immutable: a moderate TTL with SWR is what lets a new release
+// reach clients within the day.
+const CLIENT_CACHE_CONTROL = "public, max-age=3600, stale-while-revalidate=86400";
+
+export async function handleOvertureTile(theme: string, match: Coords): Promise<Response> {
+  const read = await readOvertureTile(theme, match);
+  if (read.kind !== "tile") return noTile(read);
+  return vectorTileResponse(read.data, {
+    "cache-control": CLIENT_CACHE_CONTROL,
+    // Which release actually served this tile. Nothing pins it, so
+    // this is the only way to see from outside what the routes are
+    // currently reading.
+    "x-overture-release": read.release,
+    "x-attribution": headerSafeHtml(OVERTURE_ATTRIBUTION),
+  });
+}
+
+/** `<theme>_lite`: the tile without the attributes `liteTile` drops. */
+export async function handleOvertureLiteTile(theme: string, match: Coords): Promise<Response> {
+  const read = await readOvertureTile(theme, match);
+  if (read.kind !== "tile") return noTile(read);
+  let lite: Uint8Array<ArrayBuffer>;
+  try {
+    lite = liteTile(new Uint8Array(read.data));
+  } catch (e) {
+    // Never the unfiltered bytes: a client of this id may rely on their
+    // being smaller.
+    console.error(
+      JSON.stringify({ evt: "overture.lite_failed", theme, release: read.release, ...match, error: String(e) }),
+    );
+    return new Response("overture tile could not be filtered", {
+      status: 502,
+      headers: { "cache-control": "no-store" },
+    });
+  }
+  return vectorTileResponse(lite, {
+    "cache-control": CLIENT_CACHE_CONTROL,
+    "x-overture-release": read.release,
+    "x-attribution": headerSafeHtml(OVERTURE_ATTRIBUTION),
+  });
 }
 
 /** One line per failed tile request, for Workers Logs. `stage` is
@@ -365,34 +440,5 @@ function readFailed(
   return new Response("overture archive read failed", {
     status: 503,
     headers: { "retry-after": "1", "cache-control": "no-store" },
-  });
-}
-
-async function tileResponse(
-  { archive, release }: { archive: PMTiles; release: string },
-  match: { z: number; x: number; y: number },
-): Promise<Response> {
-  const header = await archive.getHeader();
-
-  if (match.z < header.minZoom || match.z > header.maxZoom) {
-    return new Response("zoom out of range", { status: 404 });
-  }
-
-  const tile = await archive.getZxy(match.z, match.x, match.y);
-  // 204 (not 404) for an absent tile: MapLibre's vector source treats it
-  // as a successful empty tile, correct for sparse coverage. Same
-  // rationale as pmtiles.ts / naturalearth_vector.ts.
-  if (!tile) return new Response(null, { status: 204 });
-
-  return vectorTileResponse(tile.data, {
-    // The route path doesn't change when the release does, so these
-    // tiles can't be immutable: a moderate TTL with SWR is what lets a
-    // new release reach clients within the day.
-    "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
-    // Which release actually served this tile. Nothing pins it, so
-    // this is the only way to see from outside what the routes are
-    // currently reading.
-    "x-overture-release": release,
-    "x-attribution": headerSafeHtml(OVERTURE_ATTRIBUTION),
   });
 }

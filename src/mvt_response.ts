@@ -18,7 +18,10 @@ export interface VectorTileHeaders {
   "x-overture-release"?: string;
 }
 
-export function vectorTileResponse(mvt: ArrayBuffer, headers: VectorTileHeaders): Response {
+export function vectorTileResponse(
+  mvt: ArrayBuffer | Uint8Array<ArrayBuffer>,
+  headers: VectorTileHeaders,
+): Response {
   return new Response(mvt, {
     headers: { ...headers, "content-type": "application/x-protobuf", vary: "accept-encoding" },
   });

@@ -33,6 +33,7 @@
 import type { PMTiles } from "pmtiles";
 
 import { type CreditGroupId, attributionOf } from "./credits.js";
+import { type FilterRules, LITE_RULES } from "./mvt_lite.js";
 import {
   BLACKMARBLE_ATTRIBUTION,
   BLACKMARBLE_COG_KEY,
@@ -53,10 +54,12 @@ import {
   NE_VECTOR_TILESETS,
 } from "./naturalearth_vector.js";
 import {
+  handleOvertureLiteTile,
   handleOvertureTile,
   OVERTURE_ATTRIBUTION,
   OVERTURE_TILESETS,
   overtureArchive,
+  type OvertureTileset,
 } from "./overture.js";
 import { handleVectorTile, protomapsArchive, readMirrorPointer } from "./pmtiles.js";
 import type { SourceFile } from "./source_file.js";
@@ -145,6 +148,11 @@ export interface TilesetDef {
   /** Vector tilesets: the archive `handleTile` serves from, opened the
    *  same way, so its metadata describes exactly those tiles. */
   archive?: (env: Env) => Promise<PMTiles>;
+  /** Vector tilesets whose tiles are `archive`'s tiles passed through
+   *  `filterTile` with these rules. TileJSON leaves the dropped keys out
+   *  of `fields`, and anything else that reads tiles through `archive`
+   *  must apply the rules too, or serve bytes this id never does. */
+  tileFilter?: FilterRules;
   /** Vector tilesets that ship their own cartography: builds the
    *  MapLibre style served at /<id>/style.json and linked from the
    *  catalog, so clients (the viewer) can render it directly. */
@@ -233,30 +241,7 @@ const SPECS: readonly TilesetSpec[] = [
   // `source` (the archive lives off our origin) and no `styleJson` (the
   // viewer auto-colours from `vector_layers`, same as the protomaps
   // entry).
-  ...OVERTURE_TILESETS.map(
-    (d): TilesetSpec => ({
-      id: d.id,
-      catalogId: d.catalogId,
-      name: d.name,
-      catalogName: d.catalogName,
-      description: d.description,
-      credits: "overture",
-      type: "vector",
-      formats: ["mvt"],
-      minzoom: d.minzoom,
-      maxzoom: d.maxzoom,
-      // Range-read from Overture's S3 on demand; we mirror nothing.
-      proxy: true,
-      handleTile: (_request, _env, _ctx, coords) => handleOvertureTile(d.theme, coords),
-      archive: () => overtureArchive(d.theme),
-      vectorLayers: d.layers.map((l) => ({
-        id: l.id,
-        description: l.description,
-        minzoom: l.minzoom,
-        geometry: l.geometry,
-      })),
-    }),
-  ),
+  ...OVERTURE_TILESETS.flatMap((d) => (d.lite ? [overtureSpec(d), overtureLiteSpec(d)] : [overtureSpec(d)])),
   {
     id: "watercolor",
     name: "Re:Earth Papers — watercolor",
@@ -372,6 +357,49 @@ const SPECS: readonly TilesetSpec[] = [
     ],
   },
 ];
+
+function overtureSpec(d: OvertureTileset): TilesetSpec {
+  return {
+    id: d.id,
+    catalogId: d.catalogId,
+    name: d.name,
+    catalogName: d.catalogName,
+    description: d.description,
+    credits: "overture",
+    type: "vector",
+    formats: ["mvt"],
+    minzoom: d.minzoom,
+    maxzoom: d.maxzoom,
+    // Range-read from Overture's S3 on demand; we mirror nothing.
+    proxy: true,
+    handleTile: (_request, _env, _ctx, coords) => handleOvertureTile(d.theme, coords),
+    archive: () => overtureArchive(d.theme),
+    vectorLayers: d.layers.map((l) => ({
+      id: l.id,
+      description: l.description,
+      minzoom: l.minzoom,
+      geometry: l.geometry,
+    })),
+  };
+}
+
+/** The same archive as `overtureSpec(d)`, served through `liteTile`. */
+function overtureLiteSpec(d: OvertureTileset): TilesetSpec {
+  const dropped = [...LITE_RULES.dropKeys].map((k) => `\`${k}\``).join(", ");
+  return {
+    ...overtureSpec(d),
+    id: `${d.id}_lite`,
+    catalogId: `${d.catalogId}-lite`,
+    name: `${d.name} (lite)`,
+    catalogName: `${d.catalogName} Lite`,
+    description:
+      `${d.description} Lite: the same tiles without the ${dropped} properties, ` +
+      "and without `bathymetry` where none of its features has a property " +
+      "(z0–4 in release 2026-11-18.0). For drawing; read the full tileset for provenance.",
+    handleTile: (_request, _env, _ctx, coords) => handleOvertureLiteTile(d.theme, coords),
+    tileFilter: LITE_RULES,
+  };
+}
 
 export const TILESETS: readonly TilesetDef[] = SPECS.map((spec) => ({
   ...spec,
