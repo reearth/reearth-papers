@@ -93,15 +93,15 @@ export interface PaintStyle {
   tileSize: number;
   /** Deepest zoom this style renders; the route answers 404 above it.
    *
-   *  Not a property of the cartography, and — since ezu 0.8.0 reprojects
-   *  a DEM from its ancestor the way it always did for vector tiles — no
-   *  longer a property of what the style samples either. What sets it
-   *  today is a renderer bug: past a zoom that varies by style, the wasm
-   *  build panics inside the noise crate, so the shelf advertises a depth
-   *  every style survives. Clients stretch the last tile past it.
+   *  Not a property of the cartography, and, since ezu 0.8.0 reprojects
+   *  a DEM from its ancestor the way it always did for vector tiles, not
+   *  a property of what the style samples either. The noise-crate panic
+   *  that once capped it was fixed in ezu 0.8.1. The publisher picks it
+   *  per style, and what limits it is the cost of a first render at
+   *  depth, which differs by style. Clients stretch the last tile past it.
    *
    *  It travels with the style rather than being a constant here, so
-   *  raising it when the renderer is fixed is a republish. */
+   *  changing it is a republish. */
   maxzoom: number;
   /** JSON Schema for the document's `params` (ezu's own
    *  `Document::params_schema`), or null where it declares none. */
@@ -246,10 +246,11 @@ const COLOR_RE = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
  *  knobs can be seen at. */
 const PARAM_DECIMALS = 4;
 
-/** Defensive ceiling on the canonical string, since it lands in an R2
- *  key (1024 bytes) and an edge-cache URL. Declared params cannot reach
- *  it; a manifest that somehow declares hundreds would fail loudly here
- *  rather than by writing an unusable key. */
+/** Ceiling on the canonical string, since it lands in an R2 key (1024
+ *  bytes) and an edge-cache URL. A style with a second full palette can
+ *  reach it: 29 colour params with 9-character names take 521
+ *  characters. Past it the tile route answers 400 rather than writing
+ *  an unusable key. */
 const CANONICAL_MAX = 512;
 
 /** Read the params a request asks for.

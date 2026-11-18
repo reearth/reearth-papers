@@ -432,6 +432,9 @@ function ensureState(style: EzuStyle): EzuState {
   let sprite: EzuState["sprite"] = null;
   const demSources: DemSource[] = [];
   const assetSources: AssetSource[] = [];
+  // CONTRIBUTING.md "Writing a paint style" tells authors these binding
+  // rules. Change it with them.
+  //
   // Every source kind the documents we serve declare. `raster` and
   // `geojson` are ezu features nothing here uses yet; they would be
   // bound the same way DEM is, so they fall through to the warning
