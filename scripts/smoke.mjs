@@ -27,6 +27,9 @@ const args = Object.fromEntries(
   }),
 );
 const BASE = args.base ?? "https://papers.reearth.land";
+// `wrangler dev` does not compress, so a local run checks vector tiles
+// for their labels only.
+const LOCAL = ["localhost", "127.0.0.1"].includes(new URL(BASE).hostname);
 const RUN = `smoke-${Date.now()}`;
 
 // Fixed serving-path probe: central Tokyo, always has data.
@@ -38,6 +41,7 @@ const RENDER_BOX = { west: 139.4, south: 35.5, east: 140.0, north: 35.85 };
 
 const failures = [];
 const warnings = [];
+let vectorTilesCompressed = 0;
 const ok = (label) => console.log(`ok      ${label}`);
 const fail = (label, why) => {
   console.error(`FAIL    ${label} — ${why}`);
@@ -66,11 +70,11 @@ function randomRenderTile(z = RENDER_Z) {
 
 /** Fetch with a timeout and one retry — cold containers legitimately
  *  take several seconds on the first render. */
-async function get(url, { timeoutMs = 90_000, tries = 2 } = {}) {
+async function get(url, { timeoutMs = 90_000, tries = 2, headers } = {}) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
       if (res.status >= 500 && i + 1 < tries) {
         lastErr = new Error(`HTTP ${res.status}`);
         continue;
@@ -142,6 +146,44 @@ async function checkTile(label, url, { expectPng = false, allowEmpty = false } =
   }
 }
 
+/** A vector tile has to come back as identity bytes to a client that
+ *  asks for nothing else, and gzip-encoded to one that asks for gzip.
+ *  The second half is the edge's work, decided by the content type
+ *  (src/mvt_response.ts), so it is checked against the deployed host. */
+async function checkVectorTile(label, url) {
+  try {
+    const plain = await get(url, { headers: { "accept-encoding": "identity" } });
+    if (plain.status === 204) return ok(`${label} (204 empty)`);
+    if (plain.status !== 200) return fail(label, `HTTP ${plain.status}`);
+    const sent = plain.headers.get("content-encoding");
+    if (sent) return fail(label, `content-encoding ${sent} to a client that asked for identity`);
+    const identity = Buffer.from(await plain.arrayBuffer());
+    if (identity.length === 0) return fail(label, "empty body");
+    if (LOCAL || identity.length < 1024) return ok(`${label} (${identity.length} bytes, compression not checked)`);
+
+    const res = await get(url, { headers: { "accept-encoding": "gzip" } });
+    if (res.status !== 200) return fail(label, `HTTP ${res.status} with accept-encoding: gzip`);
+    const encoding = res.headers.get("content-encoding");
+    if (encoding !== "gzip") {
+      return fail(
+        label,
+        `not compressed: content-encoding ${encoding ?? "absent"} for accept-encoding: gzip ` +
+          `(content-type ${res.headers.get("content-type")}, ${identity.length} bytes)`,
+      );
+    }
+    if (!identity.equals(Buffer.from(await res.arrayBuffer()))) {
+      return fail(label, "the gzip body decodes to different bytes than the identity body");
+    }
+    if (!/\baccept-encoding\b/i.test(res.headers.get("vary") ?? "")) {
+      warn(label, "compressed, but vary does not name accept-encoding");
+    }
+    vectorTilesCompressed += 1;
+    ok(`${label} (gzip, ${identity.length} bytes decoded)`);
+  } catch (e) {
+    fail(label, e.message);
+  }
+}
+
 async function checkJson(label, url) {
   try {
     const res = await get(url);
@@ -168,6 +210,7 @@ const fill = (tpl, t) => tpl.replace("{z}", t.z).replace("{x}", t.x).replace("{y
 async function runSuite() {
   failures.length = 0;
   warnings.length = 0;
+  vectorTilesCompressed = 0;
 
   const catalog = await checkJson("catalog.json", `${BASE}/catalog.json`);
   const tilesets = catalog?.tilesets ?? [];
@@ -257,7 +300,8 @@ for (const t of tilesets) {
         }
         return;
       }
-      await checkTile(label, fill(tpl, tile), { allowEmpty: true });
+      if (t.type === "vector") await checkVectorTile(label, fill(tpl, tile));
+      else await checkTile(label, fill(tpl, tile), { allowEmpty: true });
     })(),
   );
 }
@@ -326,6 +370,11 @@ jobs.push(
 );
 
   await Promise.all(jobs);
+  // Every vector tile can come back 204 or small, which would pass the
+  // run without testing compression at all.
+  if (!LOCAL && vectorTilesCompressed === 0) {
+    fail("vector tiles", "none came back compressed (each was 204, under 1 KiB or failed)");
+  }
 }
 
 await runSuite();
