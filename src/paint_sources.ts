@@ -164,7 +164,7 @@ function layersRead(
 }
 
 /** Why a paint tile that reads extra sources could not be rendered now.
- *  The route answers 503, uncached, so the next request tries again. */
+ *  The route answers 503, uncached. */
 export class PaintSourceError extends Error {
   override name = "PaintSourceError";
   readonly stage: "admission" | "read" | "slice" | "version";

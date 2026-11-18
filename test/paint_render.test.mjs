@@ -205,3 +205,38 @@ test("a source whose URL names no readable tileset is left unbound with one warn
       "names no Papers vector tileset a style may read; left unbound",
   ]);
 });
+
+test("a tile over the slice limit answers 503 again without being read again", async () => {
+  const ezu = await loadSrc("ezu");
+  const route = await loadSrc("paint_route");
+  const doc = issueDoc();
+  const big = tile(squareLayer("bathymetry", 3072, 600 * 1024));
+  const { counter, sources } = overtureSources(big);
+  const style = { name: "over-limit", rev: "r1", attribution: "a", sourceVersion: "" };
+  const env = { R2: { get: async () => ({ text: async () => JSON.stringify(doc) }) } };
+  const errors = [];
+  const realError = console.error;
+  console.error = (line) => errors.push(JSON.parse(line));
+  const serveTile = () =>
+    route.servePaintTile(
+      { style, coords: AT, format: "png", params: { values: {}, canonical: "" }, date: "20261101" },
+      {
+        env,
+        sources,
+        serve: async (o) => new Response(await o.render()),
+        render: (d) => ezu.renderEzuStyleTile(request, protomapsEnv(), ctx, { key: "over-limit", doc: d, sources }, AT, { format: "png" }),
+      },
+    );
+  try {
+    const first = await serveTile();
+    const readsAfterFirst = counter.reads;
+    const second = await serveTile();
+
+    assert.deepEqual([first.status, second.status], [503, 503]);
+    assert.equal(readsAfterFirst, 1);
+    assert.equal(counter.reads, 1, "the repeat reads nothing");
+  } finally {
+    console.error = realError;
+  }
+  assert.deepEqual(errors.map((e) => e.stage), ["slice", "slice"]);
+});

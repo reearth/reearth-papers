@@ -281,7 +281,10 @@ never fetches a URL from a document.
   stored tile over 32 MiB is not read, and extra-source reads run one at a
   time per isolate, with a 20 s wait. Past any of them the tile answers
   503 with `Retry-After: 1`, uncached, and a `paint.source_unavailable`
-  log line.
+  log line. A tile over the 512 KiB limit stays over it until its archive
+  or the style changes, so an isolate remembers it and answers its repeats
+  without reading it again. Fix such a tile in the style: raise the
+  source's `min-zoom` or keep fewer layers.
 - **Cache key.** A style that binds extra sources has
   `+<tileset>@<archive etag>` appended to its `sourceVersion` in the tile
   cache key and the okibi epoch, so a new Overture release or a rebuilt

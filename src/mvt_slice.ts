@@ -12,6 +12,11 @@ export class MvtSliceError extends Error {
   override name = "MvtSliceError";
 }
 
+/** The layers kept from a tile pass the byte limit it was cut with. */
+export class MvtLimitError extends MvtSliceError {
+  override name = "MvtLimitError";
+}
+
 /** How far into a layer its `name` may sit. Encoders put it first or
  *  just after `version`; a layer whose name is further in is not worth
  *  holding the prefix for. */
@@ -100,7 +105,7 @@ export async function sliceLayers(
   const emit = (bytes: Uint8Array | readonly number[]): void => {
     keptBytes += bytes.length;
     if (keptBytes > maxBytes) {
-      throw new MvtSliceError(`kept layers pass the ${maxBytes}-byte limit`);
+      throw new MvtLimitError(`kept layers pass the ${maxBytes}-byte limit`);
     }
     kept.push(Uint8Array.from(bytes));
   };

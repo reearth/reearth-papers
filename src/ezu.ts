@@ -43,7 +43,7 @@ import {
   loadStoreSeed,
   serializeStore,
 } from "./glyphs.js";
-import { MvtSliceError, sliceLayers } from "./mvt_slice.js";
+import { MvtLimitError, MvtSliceError, sliceLayers } from "./mvt_slice.js";
 import {
   type ExtraSourcePlan,
   type PaintSources,
@@ -603,6 +603,19 @@ const EXTRA_READ_WAIT_MS = 20_000;
 
 let extraReadBusy = false;
 
+/** Stored tiles whose kept layers passed the byte budget they were cut
+ *  with, keyed by tileset, archive etag, tile and kept layers, with the
+ *  largest such budget (a tile is read only with more than it holds). The cut is deterministic, so a render with no more
+ *  budget left fails at once instead of reading up to 32 MiB again. */
+const overLimit = new Map<string, number>();
+const OVER_LIMIT_ENTRIES = 1024;
+
+function rememberOverLimit(key: string, budget: number): void {
+  overLimit.delete(key);
+  if (overLimit.size >= OVER_LIMIT_ENTRIES) overLimit.delete(overLimit.keys().next().value!);
+  overLimit.set(key, budget);
+}
+
 /** Extra-source reads run one at a time per isolate, since a stored
  *  Overture tile at low zoom is up to 17 MB before anything is cut from
  *  it. Polling for the same reason `acquireRenderPermit` polls; unlike
@@ -654,7 +667,7 @@ async function readExtraSources(
     const bound: ExtraBinding[] = [];
     for (const e of reading) {
       const archive = await sources.archive(e.tileset);
-      const { minZoom, maxZoom } = await archive.getHeader();
+      const { minZoom, maxZoom, etag } = await archive.getHeader();
       for (const [dx, dy] of [[0, 0] as [number, number], ...e.offsets]) {
         let at = st.renderer.sourceTile(e.name, coords.z, coords.x + dx, coords.y + dy) as {
           z: number;
@@ -668,8 +681,18 @@ async function readExtraSources(
         if (at.z < minZoom || at.y < 0 || at.y >= 2 ** at.z) continue;
         const key = `${e.name}/${at.z}/${at.x}/${at.y}`;
         if (!read.has(key)) {
+          const cut = etag && `${e.tileset}@${etag}/${at.z}/${at.x}/${at.y}/${JSON.stringify(e.keep)}`;
+          if (cut && (overLimit.get(cut) ?? -1) >= budget) {
+            throw new PaintSourceError("slice", `slice: ${cut} keeps more than ${budget} bytes, as read before`);
+          }
           const stream = await archiveTileStream(archive, at);
-          const bytes = stream && (await sliceLayers(stream, e.keepSet, budget));
+          let bytes: Uint8Array | null;
+          try {
+            bytes = stream && (await sliceLayers(stream, e.keepSet, budget));
+          } catch (err) {
+            if (cut && err instanceof MvtLimitError) rememberOverLimit(cut, budget);
+            throw err;
+          }
           budget -= bytes?.length ?? 0;
           read.set(key, bytes);
         }

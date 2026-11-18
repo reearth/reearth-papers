@@ -139,8 +139,10 @@ export async function servePaintTile(t: PaintTile, io: PaintTileIo): Promise<Res
 }
 
 /** A paint tile whose extra sources could not be read, cut or kept still
- *  long enough to render. One log line, and a 503 the next request retries,
- *  where an uncaught throw would be a 1101 with no CORS header. */
+ *  long enough to render. One log line and an uncached 503, where an
+ *  uncaught throw would be a 1101 with no CORS header. A busy slot or a
+ *  failed read may pass by the next request; a tile over the slice limit
+ *  does not, and this isolate answers it from memory (`readExtraSources`). */
 function paintSourceUnavailable(
   style: PaintStyle,
   coords: TileCoords,
