@@ -289,7 +289,10 @@ never fetches a URL from a document.
   as before. When the document cannot be read before the cache lookup, the
   tile is looked up under the manifest's `sourceVersion` alone, and on a
   miss it renders only if the document then turns out to bind nothing
-  extra. A style with extra sources answers 503 there instead.
+  extra. A style with extra sources answers 503 there instead. While its
+  archives cannot be read, the okibi watch keeps the epoch it last
+  recorded for the style, and `/okibi/epochs.json` leaves the style out,
+  so a failed read is never taken for data that moved.
 
 ### Tuning a paint style (unreleased)
 

@@ -231,3 +231,47 @@ test("a style binding Overture whose document is unread before the lookup answer
   assert.deepEqual(seen.stored, []);
   assert.deepEqual(errors.map((e) => [e.stage, e.style]), [["version", "extra-unread"]]);
 });
+
+test("okibi sees a style's epoch hold, not move, while its extra sources cannot be read", async () => {
+  const route = await loadSrc("paint_route");
+  const styles = ["plain", "extra", "down", "unread", "new-down"].map(styleOf);
+  const [plain, extra, down, unread, newDown] = styles;
+  const docs = {
+    plain: docOf({ extras: false }),
+    extra: docOf({ extras: true }),
+    down: docOf({ extras: true }),
+    "new-down": docOf({ extras: true }),
+  };
+  const env = {
+    PAINT_STYLES_PREFIX: "epochs",
+    R2: {
+      async get(key) {
+        if (key === "epochs/latest.json") return { text: async () => JSON.stringify({ styles }) };
+        const name = key.split("/")[1];
+        if (name === "unread") throw new Error("R2 get failed");
+        return { text: async () => JSON.stringify(docs[name]) };
+      },
+    },
+  };
+  const sources = overtureSources();
+  const at = (style, version) => ({ source: `${DATE}/${version}`, algo: "paint-r3", param: style.rev });
+
+  const first = await route.paintEpochs(env, DATE, sources);
+  assert.deepEqual(first, {
+    plain: at(plain, "terrain:5"),
+    extra: at(extra, "terrain:5+overture_base@o1"),
+    down: at(down, "terrain:5+overture_base@o1"),
+    "new-down": at(newDown, "terrain:5+overture_base@o1"),
+  });
+
+  sources.failing = true;
+  const recorded = { ...first, unread: at(unread, "terrain:5") };
+  delete recorded["new-down"];
+  const failing = await route.paintEpochs(env, DATE, sources, recorded);
+  assert.deepEqual(failing, {
+    plain: at(plain, "terrain:5"),
+    extra: first.extra,
+    down: first.down,
+    unread: recorded.unread,
+  });
+});

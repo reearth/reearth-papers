@@ -5,6 +5,8 @@
 // Kept apart from src/index.ts, and importing no module that only workerd can
 // load, so that the tests drive this wiring as the route runs it.
 
+import type { Epoch } from "@reearth/okibi/writer";
+
 import type { RenderedTileOptions } from "./render_cache.js";
 import type { TileCoords } from "./tilesets.js";
 import { type PaintSources, PaintSourceError, planVectorSources } from "./paint_sources.js";
@@ -16,6 +18,7 @@ import {
   paintDocument,
   paintEpochSource,
   paintSourceVersion,
+  paintStyles,
 } from "./paint_styles.js";
 
 export interface PaintTile {
@@ -159,4 +162,42 @@ function paintSourceUnavailable(
     status: 503,
     headers: { "retry-after": "1", "cache-control": "no-store" },
   });
+}
+
+/**
+ * The okibi epoch of each paint style's parameterless picture, spelled the
+ * way `servePaintTile` spells a tile's.
+ *
+ * A style whose source version cannot be read now keeps the epoch `recorded`
+ * for it, or is left out when there is none. The manifest's version in its
+ * place would look like a change of data to okibi, and the next good read
+ * like a change back, each one warmed. A tileset left out is one okibi sees
+ * no change for.
+ */
+export async function paintEpochs(
+  env: Env,
+  date: string,
+  sources: PaintSources,
+  recorded: Readonly<Record<string, Epoch>> = {},
+): Promise<Record<string, Epoch>> {
+  const epochs: Record<string, Epoch> = {};
+  for (const style of await paintStyles(env)) {
+    let sourceVersion: string;
+    try {
+      sourceVersion = await paintSourceVersion(style, await paintDocument(env, style), sources);
+    } catch (e) {
+      console.warn(`okibi: ${style.name} source version: ${String(e)}`);
+      if (recorded[style.name]) epochs[style.name] = recorded[style.name];
+      continue;
+    }
+    // The parameterless picture. A style's parameters are part of its key and
+    // there are unboundedly many of them; what an invalidation moves is the
+    // style, and every parameterisation of it moves with it.
+    epochs[style.name] = {
+      source: paintEpochSource(date, sourceVersion),
+      algo: `paint-r${PAINT_RUNTIME_VERSION}`,
+      param: style.rev,
+    };
+  }
+  return epochs;
 }
