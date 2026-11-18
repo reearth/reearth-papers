@@ -26,6 +26,7 @@ import type { PMTiles } from "pmtiles";
 
 import { openArchive, WorkerFetchSource } from "./archive.js";
 import { attributionOf, headerSafeHtml } from "./credits.js";
+import { vectorTileResponse } from "./mvt_response.js";
 
 // Overture ships monthly releases and the version is part of the S3
 // path, but nothing here pins one. Overture holds a rolling window of
@@ -368,21 +369,15 @@ async function tileResponse(
   // rationale as pmtiles.ts / naturalearth_vector.ts.
   if (!tile) return new Response(null, { status: 204 });
 
-  // The archives are gzip-compressed, but `getZxy` returns
-  // already-decompressed bytes (it consults the header's tileCompression
-  // internally). Send raw with no Content-Encoding — see pmtiles.ts.
-  return new Response(tile.data, {
-    headers: {
-      "content-type": "application/vnd.mapbox-vector-tile",
-      // The route path doesn't change when the release does, so these
-      // tiles can't be immutable: a moderate TTL with SWR is what lets a
-      // new release reach clients within the day.
-      "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
-      // Which release actually served this tile. Nothing pins it, so
-      // this is the only way to see from outside what the routes are
-      // currently reading.
-      "x-overture-release": release,
-      "x-attribution": headerSafeHtml(OVERTURE_ATTRIBUTION),
-    },
+  return vectorTileResponse(tile.data, {
+    // The route path doesn't change when the release does, so these
+    // tiles can't be immutable: a moderate TTL with SWR is what lets a
+    // new release reach clients within the day.
+    "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
+    // Which release actually served this tile. Nothing pins it, so
+    // this is the only way to see from outside what the routes are
+    // currently reading.
+    "x-overture-release": release,
+    "x-attribution": headerSafeHtml(OVERTURE_ATTRIBUTION),
   });
 }
