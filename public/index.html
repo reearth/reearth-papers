@@ -21,6 +21,9 @@
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <!-- The Re:Earth nav bar shared with Terrain and Buildings. Loaded
+       here, without defer, so --reearth-nav-h is set before layout. -->
+  <script src="/reearth-nav.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css" />
   <style>
     /* EB Garamond (SIL OFL 1.1) — the face the social card is set in
@@ -71,6 +74,9 @@
     body {
       display: grid;
       grid-template-columns: 248px 1fr;
+      /* The nav bar is solid here, so the panel and the map start
+         below it rather than under it. */
+      padding-top: var(--reearth-nav-h);
       font: 13px/1.45 var(--font-sans);
       color: var(--ink);
       background: var(--paper);
@@ -98,6 +104,22 @@
       pointer-events: none;
     }
 
+    /* -- Re:Earth nav bar ---------------------------------------------- */
+    /* The shared bar, set in the panel's paper and ink. Solid rather
+       than transparent: a basemap can be light, dark or imagery, and
+       no one text colour reads on all of them. */
+    reearth-nav {
+      --fg: var(--ink);
+      --fg-dim: var(--ink-soft);
+      --bg: var(--paper);
+      --line: var(--paper-edge);
+      --mark: var(--accent);
+      /* A size up from the panel's wordmark (18px), since the bar's
+         links are spaced for 14px sans. */
+      --font: 400 18px/1 var(--font-display);
+      letter-spacing: .027em;
+    }
+
     /* -- panel ------------------------------------------------------- */
     #panel {
       display: flex;
@@ -112,30 +134,18 @@
       border-right: 1px solid var(--paper-edge);
     }
     #panel header {
-      padding: 14px 16px 10px;
+      padding: 12px 16px 10px;
       border-bottom: 1px solid var(--paper-edge);
     }
-    #panel h1 {
-      margin: 0;
-      /* The wordmark, set as the social card sets it: EB Garamond at
-         its regular weight, tracked out (the card's 3px at 112px). 18px
-         because Garamond's small x-height reads a size down. */
-      font: 400 18px/1.2 var(--font-display);
-      letter-spacing: .027em;
-    }
-    #panel .brand {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
+    /* In the nav bar's end slot. */
     #open-help {
       flex: none;
-      width: 18px;
-      height: 18px;
+      width: 24px;
+      height: 24px;
       padding: 0;
       display: grid;
       place-items: center;
-      font: 600 11px/1 var(--font-mono);
+      font: 600 12px/1 var(--font-mono);
       color: var(--accent);
       background: none;
       border: 1px solid var(--accent);
@@ -143,21 +153,12 @@
       cursor: pointer;
     }
     #open-help:hover { background: var(--accent); color: var(--card); }
-    /* The favicon, at title size. Its own ground is the same paper the
-       panel is on, so it needs no plate or border of its own. */
-    #panel .mark {
-      flex: none;
-      width: 20px;
-      height: 20px;
-      border-radius: 3px;
-    }
 
     /* -- tabs (one per catalog category) ------------------------------ */
     #tabs {
       display: flex;
       flex-wrap: wrap;
       gap: 4px;
-      margin-top: 10px;
     }
     #tabs .tab {
       flex: 1 1 auto;
@@ -338,24 +339,17 @@
       #panel header {
         display: flex;
         align-items: baseline;
-        /* Wrap when the brand + a full row of tabs doesn't fit the
-           viewport: at ~375px a four-tab shelf plus the wordmark is
-           wider than the screen, and without wrap the whole page
-           takes a horizontal scrollbar. */
+        /* Wrap when a full row of tabs doesn't fit the viewport;
+           without wrap the whole page takes a horizontal scrollbar. */
         flex-wrap: wrap;
         gap: 6px 8px;
         padding: 8px 12px 6px;
         border-bottom: none;
       }
-      #panel h1 { font-size: 15.5px; white-space: nowrap; }
-      /* The strip is one line: mark, title, help, tabs. */
-      #panel .mark { width: 16px; height: 16px; }
-      /* Prefer the one-line layout: tabs sit to the right when there's
-         room. When there isn't, they wrap to the next row (via the
-         header's flex-wrap) rather than pushing the panel wider than
-         the viewport. min-width:0 keeps a shrinkable tabs container so
-         even a very narrow phone can wrap the tabs themselves. */
-      #tabs { margin: 0 0 0 auto; flex: 0 1 auto; min-width: 0; }
+      /* min-width:0 keeps a shrinkable tabs container so even a very
+         narrow phone can wrap the tabs themselves rather than push the
+         panel wider than the viewport. */
+      #tabs { flex: 0 1 auto; min-width: 0; }
       /* Keep the tabs at their intrinsic size (no desktop-style stretch);
          wrapping is what handles the narrow case, not shrinking each
          tab into an unreadable stub. */
@@ -764,15 +758,13 @@
   </style>
 </head>
 <body>
+  <reearth-nav current="papers" solid>
+    <button id="open-help" slot="end" type="button"
+            title="About Re:Earth Papers"
+            aria-label="About Re:Earth Papers">?</button>
+  </reearth-nav>
   <aside id="panel">
     <header>
-      <div class="brand">
-        <img class="mark" src="/favicon.svg" alt="" width="20" height="20" />
-        <h1>Re:Earth Papers</h1>
-        <button id="open-help" type="button"
-                title="About Re:Earth Papers"
-                aria-label="About Re:Earth Papers">?</button>
-      </div>
       <!-- One tab per category present in /catalog.json, built at load
            time: a tileset shelf that appears server-side shows up here
            without an edit. -->
