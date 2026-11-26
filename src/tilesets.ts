@@ -238,7 +238,7 @@ const SPECS: readonly TilesetSpec[] = [
       maxzoom: d.maxzoom,
       // Range-read from Overture's S3 on demand; we mirror nothing.
       proxy: true,
-      handleTile: (_request, _env, _ctx, coords) => handleOvertureTile(d.theme, coords),
+      handleTile: (request, env, ctx, coords) => handleOvertureTile(d, coords, request, env, ctx),
       vectorLayers: d.layers.map((l) => ({
         id: l.id,
         description: l.description,
