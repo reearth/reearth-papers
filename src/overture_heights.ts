@@ -15,7 +15,6 @@
 // complete. Only a child that could not be fetched leaves it partial.
 // Nothing here throws.
 
-/** The z14 attributes each layer gains. */
 export const HEIGHT_FIELDS = {
   building: ["height", "num_floors", "min_height", "has_parts", "is_underground"],
   building_part: ["height", "num_floors", "min_height", "is_underground"],
@@ -68,11 +67,8 @@ export type JoinState = "complete" | "partial" | "unjoined";
 export interface Enriched {
   bytes: Uint8Array;
   state: JoinState;
-  /** Parent features per layer that gained values. */
   matched: Record<LayerName, number>;
-  /** z14 features kept in memory for the join. */
   donors: number;
-  /** Parent-donor pairs scored. */
   pairs: number;
 }
 
@@ -82,7 +78,6 @@ export interface Enricher {
    *  does not have. Returns false when the child does not parse, which
    *  then counts as empty. */
   ingest(slot: ChildSlot, child: Uint8Array | null): boolean;
-  /** A child that could not be fetched. */
   markMissing(slot: ChildSlot): void;
   finish(): Enriched;
 }
@@ -191,8 +186,6 @@ export function createEnricher(z: ParentZoom, parent: Uint8Array): Enricher | nu
   };
 }
 
-// -- reading ------------------------------------------------------------------
-
 class ParseError extends Error {}
 
 function fail(): never {
@@ -223,7 +216,6 @@ class Reader {
     return fail();
   }
 
-  /** The next field's tag, as [field number, wire type]. */
   tag(): [number, number] {
     const t = this.varint();
     const field = Math.floor(t / 8);
@@ -231,7 +223,6 @@ class Reader {
     return [field, t % 8];
   }
 
-  /** Steps over a length-delimited payload and returns its [start, end). */
   span(): [number, number] {
     const len = this.varint();
     if (len > this.end - this.pos) fail();
@@ -262,9 +253,7 @@ interface LayerScan {
   start: number;
   end: number;
   keys: string[];
-  /** Flat [start, end) pairs of each Value message. */
   values: number[];
-  /** Flat [start, end) pairs of each Feature message. */
   features: number[];
 }
 
@@ -306,7 +295,6 @@ function scanLayer(buf: Uint8Array, fieldStart: number, start: number, end: numb
   return layer;
 }
 
-/** A feature's tag pairs and the bounding box of its geometry. */
 function scanFeature(layer: LayerScan, buf: Uint8Array, start: number, end: number): { tags: number[]; box: Box | null } {
   const r = new Reader(buf, start, end);
   const tags: number[] = [];
@@ -378,8 +366,6 @@ function byteString(buf: Uint8Array, start: number, end: number): string {
   return s;
 }
 
-// -- the join -----------------------------------------------------------------
-
 const clip = (b: Box, extent: number): Box => ({
   x0: Math.max(0, b.x0),
   y0: Math.max(0, b.y0),
@@ -402,7 +388,6 @@ function iou(a: Box, b: Box): number {
 
 const GRID = 64;
 
-/** One parent layer's clipped feature boxes on a uniform grid. */
 class ParentIndex {
   private readonly cells: number[][] = Array.from({ length: GRID * GRID }, () => []);
   private readonly stamp: Int32Array;
@@ -473,7 +458,6 @@ class ParentIndex {
   }
 }
 
-/** Every distinct raw Value message a tile's donors carry, stored once. */
 class ValueTable {
   private readonly ids = new Map<string, number>();
   readonly raw: Uint8Array[] = [];
@@ -580,7 +564,6 @@ function grow<T extends Float64Array | Int32Array>(a: T, length: number): T {
   return next;
 }
 
-/** A z14 feature read from one child, before it joins a pool. */
 interface Found {
   layer: LayerName;
   key: string;
@@ -715,8 +698,6 @@ function assign(
   return out;
 }
 
-// -- writing ------------------------------------------------------------------
-
 class Writer {
   private buf = new Uint8Array(1 << 16);
   pos = 0;
@@ -745,7 +726,6 @@ class Writer {
     this.pos += end - start;
   }
 
-  /** A length-delimited field. */
   field(field: number, src: Uint8Array, start = 0, end = src.length): void {
     this.varint(field * 8 + 2);
     this.varint(end - start);

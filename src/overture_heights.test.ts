@@ -4,7 +4,6 @@ import { test } from "node:test";
 import { type ChildSlot, type ParentZoom, createEnricher } from "./overture_heights.ts";
 
 type Val = string | number | boolean;
-/** A Value message written as given, valid or not. */
 interface RawValue {
   raw: number[];
 }
@@ -24,8 +23,6 @@ const rect = (x0: number, y0: number, x1: number, y1: number): Ring => [
   [x1, y1],
   [x0, y1],
 ];
-
-// -- a minimal MVT encoder and decoder ---------------------------------------
 
 class Out {
   bytes: number[] = [];
@@ -184,8 +181,6 @@ function decodeTile(buf: Uint8Array): Map<string, FeatureOut[]> {
   return layers;
 }
 
-// -- helpers -------------------------------------------------------------------
-
 /** Runs the join with `children` keyed by "dx,dy"; every other slot is a
  *  child upstream does not have. */
 function enrich(z: ParentZoom, parent: Uint8Array, children: Record<string, Uint8Array>) {
@@ -198,8 +193,6 @@ function enrich(z: ParentZoom, parent: Uint8Array, children: Record<string, Uint
 const tall = { id: "08b-tall", height: 42.5, num_floors: 12, min_height: 3.5, has_parts: true, is_underground: false };
 const z12Parent = (ring: Ring, props: Record<string, Val> = { "@height_source": "OpenStreetMap" }) =>
   encodeTile([{ name: "building", features: [{ props, ring }] }]);
-
-// -- behaviour -------------------------------------------------------------------
 
 test("a z12 building gains the five fields of the z14 building under it, footprint untouched", () => {
   const parent = z12Parent(rect(100, 100, 200, 200));

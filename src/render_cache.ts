@@ -71,7 +71,6 @@ export interface RenderedTileOptions {
    *  because `cacheVersion` rotates them; a client URL that carries no
    *  version needs a shorter life in the browser. */
   browserCacheControl?: string;
-  /** Status when `render` returns null. */
   emptyStatus?: 204 | 404;
   /** Set on every response that carries a tile. */
   headers?: Record<string, string>;
