@@ -12,10 +12,11 @@
 // only ever talks to us (same origin), so S3 needs no CORS — only HTTP
 // Range, which it has.
 //
-// Cost note: we store nothing. Each cold tile is one or more Range GETs
-// to S3 us-west-2; the pmtiles library caches the archive's header +
-// directory per isolate, and the edge cache (cache-control below)
-// absorbs repeat hits. There's no R2 storage or egress on our side.
+// Cost note: we store nothing, except the z12–13 buildings tiles that
+// carry heights joined from z14 (see overture_heights.ts), which cost up
+// to 17 Range GETs to build and are kept in R2 per release. Every other
+// cold tile is one or more Range GETs to S3 us-west-2; the pmtiles
+// library caches the archive's header + directory per isolate.
 //
 // Registry-driven, mirroring naturalearth_vector.ts: the central
 // registry (src/tilesets.ts) maps over OVERTURE_TILESETS. The MVT layer
@@ -25,7 +26,8 @@
 import { attributionOf } from "./credits.js";
 import { FetchSource, PMTiles } from "pmtiles";
 
-import { headerSafeHtml } from "./render_cache.js";
+import { HEIGHTS_VERSION, type ParentZoom, createEnricher } from "./overture_heights.js";
+import { type UnstoredTile, headerSafeHtml, serveRenderedTile } from "./render_cache.js";
 
 // Overture ships monthly releases and the version is part of the S3
 // path, but nothing here pins one. Overture holds a rolling window of
@@ -84,6 +86,9 @@ export interface OvertureTileset {
   /** Native max zoom (the archive's header maxZoom); clients overzoom. */
   maxzoom: number;
   layers: readonly OvertureLayer[];
+  /** Zooms whose buildings get their z14 heights joined on (see
+   *  overture_heights.ts). */
+  heightZooms?: readonly ParentZoom[];
 }
 
 // Layer ids, zoom ranges and theme zoom caps were read from the live
@@ -127,6 +132,7 @@ export const OVERTURE_TILESETS: readonly OvertureTileset[] = [
     theme: "buildings",
     minzoom: 0,
     maxzoom: 14,
+    heightZooms: [12, 13],
     layers: [
       { id: "building", description: "Building footprint polygons", geometry: "polygon", minzoom: 4 },
       {
@@ -288,15 +294,63 @@ async function resolveArchive(theme: string): Promise<{ archive: PMTiles; releas
   }
 }
 
+const TILE_CACHE_CONTROL = "public, max-age=3600, stale-while-revalidate=86400";
+const MVT = "application/vnd.mapbox-vector-tile";
+
+/** The release name goes into an R2 key, and it comes from a bucket
+ *  listing we do not control. */
+const RELEASE_NAME = /^\d{4}-\d{2}-\d{2}\.\d+$/;
+
+/** z14 children in flight at once. A decoded child runs to 11 MB. */
+const CHILD_CONCURRENCY = 4;
+const CHILDREN_DEADLINE_MS = 20_000;
+
+/** Joins running at once in this isolate. Each holds up to four children
+ *  and its donors, and the isolate has 128 MB. A count, not a queue of
+ *  promises: a workerd request cannot await a promise another request
+ *  settles, so a waiting request polls on its own timer. */
+const MAX_JOINS = 2;
+const JOIN_WAIT_MS = 10_000;
+const JOIN_POLL_MS = 50;
+let joinsRunning = 0;
+
+async function takeJoinSlot(): Promise<boolean> {
+  const until = Date.now() + JOIN_WAIT_MS;
+  while (joinsRunning >= MAX_JOINS) {
+    if (Date.now() >= until) return false;
+    await new Promise((resolve) => setTimeout(resolve, JOIN_POLL_MS));
+  }
+  joinsRunning++;
+  return true;
+}
+
 export async function handleOvertureTile(
-  theme: string,
+  tileset: OvertureTileset,
   match: { z: number; x: number; y: number },
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
 ): Promise<Response> {
-  const { archive, release } = await resolveArchive(theme);
+  const { archive, release } = await resolveArchive(tileset.theme);
   const header = await archive.getHeader();
 
   if (match.z < header.minZoom || match.z > header.maxZoom) {
     return new Response("zoom out of range", { status: 404 });
+  }
+
+  const z = tileset.heightZooms?.find((h) => h === match.z);
+  if (z !== undefined && RELEASE_NAME.test(release)) {
+    return serveRenderedTile(request, env, ctx, {
+      cacheKey: `cache/${tileset.id}/v${HEIGHTS_VERSION}/${release}/${z}/${match.x}/${match.y}.mvt`,
+      cacheVersion: `${HEIGHTS_VERSION}/${release}`,
+      contentType: MVT,
+      attribution: OVERTURE_ATTRIBUTION,
+      persist: true,
+      browserCacheControl: TILE_CACHE_CONTROL,
+      emptyStatus: 204,
+      headers: { "x-overture-release": release, "x-overture-heights": "joined" },
+      render: () => renderWithHeights(archive, z, match.x, match.y),
+    });
   }
 
   const tile = await archive.getZxy(match.z, match.x, match.y);
@@ -310,11 +364,11 @@ export async function handleOvertureTile(
   // internally). Send raw with no Content-Encoding — see pmtiles.ts.
   return new Response(tile.data, {
     headers: {
-      "content-type": "application/vnd.mapbox-vector-tile",
+      "content-type": MVT,
       // The route path doesn't change when the release does, so these
       // tiles can't be immutable: a moderate TTL with SWR is what lets a
       // new release reach clients within the day.
-      "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
+      "cache-control": TILE_CACHE_CONTROL,
       // Which release actually served this tile. Nothing pins it, so
       // this is the only way to see from outside what the routes are
       // currently reading.
@@ -322,4 +376,63 @@ export async function handleOvertureTile(
       "x-attribution": headerSafeHtml(OVERTURE_ATTRIBUTION),
     },
   });
+}
+
+/** The parent with its z14 children's heights joined on. Only a tile built
+ *  from every child is stored. One missing a child is served briefly and
+ *  retried; one the join cannot read or rewrite, or that waited too long
+ *  for a join slot, goes out as upstream sent it. */
+async function renderWithHeights(
+  archive: PMTiles,
+  z: ParentZoom,
+  x: number,
+  y: number,
+): Promise<Uint8Array | UnstoredTile | null> {
+  const tile = await archive.getZxy(z, x, y);
+  if (!tile) return null;
+  const parent = new Uint8Array(tile.data);
+  const upstream = (cacheControl: string): UnstoredTile => ({
+    bytes: parent,
+    cacheControl,
+    headers: { "x-overture-heights": "none" },
+  });
+  if (!(await takeJoinSlot())) return upstream("public, max-age=60");
+  try {
+    const enricher = createEnricher(z, parent);
+    if (!enricher) return upstream(TILE_CACHE_CONTROL);
+    const n = 1 << (14 - z);
+    const signal = AbortSignal.timeout(CHILDREN_DEADLINE_MS);
+    const queue = [...enricher.slots];
+    const worker = async () => {
+      for (let slot = queue.shift(); slot; slot = queue.shift()) {
+        if (signal.aborted) {
+          enricher.markMissing(slot);
+          continue;
+        }
+        try {
+          const child = await archive.getZxy(14, x * n + slot.dx, y * n + slot.dy, signal);
+          enricher.ingest(slot, child ? new Uint8Array(child.data) : null);
+        } catch {
+          enricher.markMissing(slot);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: CHILD_CONCURRENCY }, worker));
+    const out = enricher.finish();
+    switch (out.state) {
+      case "complete":
+        return out.bytes;
+      case "partial":
+        console.warn(`overture heights: ${z}/${x}/${y} built without every child`);
+        return { bytes: out.bytes, cacheControl: "public, max-age=60", headers: { "x-overture-heights": "partial" } };
+      case "unjoined":
+        console.error(`overture heights: ${z}/${x}/${y}: rewrite failed`);
+        return upstream(TILE_CACHE_CONTROL);
+    }
+  } catch (e) {
+    console.error(`overture heights: ${z}/${x}/${y}: ${String(e)}`);
+    return upstream(TILE_CACHE_CONTROL);
+  } finally {
+    joinsRunning--;
+  }
 }

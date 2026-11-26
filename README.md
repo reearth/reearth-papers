@@ -73,6 +73,20 @@ we range-read Overture's official PMTiles from S3 on demand and re-serve
 the tiles from our origin, storing nothing, so there is no archive URL
 of ours to hand out.
 
+Overture keeps building attributes to z14 only. So that clients can
+extrude buildings from z12, `overture_buildings` tiles at z12 and z13
+also carry `height`, `num_floors`, `min_height`, `is_underground` and,
+on `building`, `has_parts`. The worker copies them from the z14 tiles
+underneath, matching each footprint to the z14 building whose bounding
+box overlaps it best (IoU above 0.3), and leaves the footprints as
+Overture drew them. About 95% of footprints find a match; the rest,
+mostly small ones, carry no height. Joined tiles are about 10–20%
+larger, and are stored in R2 per Overture release. The
+`x-overture-heights` response header says `joined`, `partial` (a z14
+tile could not be fetched; served for 60 s and retried) or `none` (the
+tile as Overture sent it, served for 60 s when the worker was too busy
+to join it). A z14 tile that arrives but does not parse counts as empty.
+
 The registry behind this table lives in
 [`src/tilesets.ts`](src/tilesets.ts) — adding a dataset is one entry
 there (plus a mirror pipeline under [`mirror/`](mirror/README.md) if

@@ -32,6 +32,13 @@ export function headerSafeHtml(html: string): string {
   return html.replace(/[^\x20-\x7E]/gu, (c) => `&#${c.codePointAt(0)};`);
 }
 
+/** A tile served this once and stored in neither cache layer. */
+export interface UnstoredTile {
+  bytes: Uint8Array;
+  cacheControl: string;
+  headers?: Record<string, string>;
+}
+
 export interface RenderedTileOptions {
   /** Full R2 object key for the rendered tile (embeds the cache
    *  version, format, and z/x/y). Only touched when `persist` is on. */
@@ -52,7 +59,7 @@ export interface RenderedTileOptions {
   /** Render + encode the tile. `null` means "no data here" → 404
    *  (left uncached; MapLibre's raster source marks the tile errored
    *  and fills the hole with the nearest loaded ancestor). */
-  render: () => Promise<Uint8Array | null>;
+  render: () => Promise<Uint8Array | UnstoredTile | null>;
   /** What okibi records about this request, if anything.
    *
    *  This is the one place that knows all three parts of an event at
@@ -60,6 +67,13 @@ export interface RenderedTileOptions {
    *  bytes went out. Split across the callers it would be three
    *  measurements of a thing that happened here. */
   demand?: Demand;
+  /** Cache-Control sent to the client. Stored copies stay `immutable`,
+   *  because `cacheVersion` rotates them; a client URL that carries no
+   *  version needs a shorter life in the browser. */
+  browserCacheControl?: string;
+  emptyStatus?: 204 | 404;
+  /** Set on every response that carries a tile. */
+  headers?: Record<string, string>;
 }
 
 export async function serveRenderedTile(
@@ -87,6 +101,12 @@ export async function serveRenderedTile(
     if (o.demand) writeDemand(env, request, o.demand, status, layer, genMs, bytes);
   };
 
+  const toClient = (response: Response): Response => {
+    if (o.browserCacheControl) response.headers.set("cache-control", o.browserCacheControl);
+    for (const [k, v] of Object.entries(o.headers ?? {})) response.headers.set(k, v);
+    return response;
+  };
+
   const cache = caches.default;
   const cacheReq = edgeCacheRequest(request, o.cacheVersion);
   const edge = await cache.match(cacheReq);
@@ -97,7 +117,7 @@ export async function serveRenderedTile(
     const response = new Response(edge.body, edge);
     response.headers.set("x-cache", "edge-hit");
     record("hit", "edge", 0, Number(response.headers.get("content-length") ?? 0));
-    return response;
+    return toClient(response);
   }
 
   if (o.persist) {
@@ -113,16 +133,30 @@ export async function serveRenderedTile(
       });
       ctx.waitUntil(cache.put(cacheReq, response.clone()));
       record("hit", "store", 0, cached.size);
-      return response;
+      return toClient(response);
     }
   }
 
   const encoded = await o.render();
   if (!encoded) {
+    if (o.emptyStatus === 204) return new Response(null, { status: 204 });
     // A tile with no data behind it is not demand for a tile: nothing here
     // could ever be warmed, and counting it would put a cell in the ledger
     // that no plan can act on.
     return new Response("no data", { status: 404 });
+  }
+  if (!(encoded instanceof Uint8Array)) {
+    record("miss", undefined, Date.now() - startedAt, encoded.bytes.byteLength);
+    return new Response(encoded.bytes, {
+      headers: {
+        "content-type": o.contentType,
+        "cache-control": encoded.cacheControl,
+        "x-cache": "miss",
+        "x-attribution": headerSafeHtml(o.attribution),
+        ...o.headers,
+        ...encoded.headers,
+      },
+    });
   }
 
   const response = new Response(encoded, {
@@ -155,7 +189,7 @@ export async function serveRenderedTile(
     })(),
   );
 
-  return response;
+  return toClient(response);
 }
 
 function edgeCacheRequest(request: Request, version: string | number): Request {

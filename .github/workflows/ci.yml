@@ -58,6 +58,9 @@ jobs:
       - name: TypeScript typecheck
         run: npm run typecheck
 
+      - name: Unit tests
+        run: npm test
+
       # `wrangler deploy --dry-run` validates the config (bindings, DO
       # migrations, container image path) and bundles the worker —
       # catches issues the typecheck won't. We pass a dummy token so the
