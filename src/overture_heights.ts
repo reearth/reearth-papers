@@ -10,7 +10,9 @@
 //
 // The input is a third party's bytes, so every length is checked against
 // the buffer and every count is capped. A parent that does not parse
-// yields `null`; a child that does not parse leaves the result incomplete.
+// yields `null`. A child that does not parse, and anything past a cap, is
+// left out; that is the same on every build, so the tile still counts as
+// complete. Only a child that could not be fetched leaves it partial.
 // Nothing here throws.
 
 /** The z14 attributes each layer gains. */
@@ -34,14 +36,21 @@ const LIMITS = {
   featuresPerLayer: 500_000,
   /** Grid cells covered by parent boxes, summed over a layer. */
   indexEntries: 1_000_000,
-  /** Kept z14 features per parent tile, both layers together. */
-  donors: 200_000,
+  /** Estimated heap held by the donor pools and value table of one tile. */
+  retainedBytes: 16 * 1024 * 1024,
+  /** Parent-donor pairs scored per tile, both layers together. */
+  pairs: 400_000,
   /** Longest id or value worth carrying over. */
   valueBytes: 256,
 };
 
+/** Rough heap cost of one donor beyond its key's characters: its box,
+ *  slot and value indices, its Map entry and its key's string header. */
+const DONOR_BYTES = 160;
+const VALUE_BYTES = 96;
+
 type LayerName = keyof typeof HEIGHT_FIELDS;
-const isLayerName = (name: string): name is LayerName => name in HEIGHT_FIELDS;
+const isLayerName = (name: string): name is LayerName => Object.hasOwn(HEIGHT_FIELDS, name);
 
 export type ParentZoom = 12 | 13;
 
@@ -51,21 +60,27 @@ export interface ChildSlot {
   dy: number;
 }
 
+/** `complete`: every child was read, so the tile may be stored.
+ *  `partial`: a child could not be fetched; worth retrying.
+ *  `unjoined`: the rewrite failed and `bytes` is the parent as it came. */
+export type JoinState = "complete" | "partial" | "unjoined";
+
 export interface Enriched {
   bytes: Uint8Array;
-  /** Every child was read. False when one failed or was marked missing. */
-  complete: boolean;
+  state: JoinState;
   /** Parent features per layer that gained values. */
   matched: Record<LayerName, number>;
   /** z14 features kept in memory for the join. */
   donors: number;
+  /** Parent-donor pairs scored. */
+  pairs: number;
 }
 
 export interface Enricher {
   readonly slots: readonly ChildSlot[];
   /** Reduce one child to what the join needs. `null` is a child upstream
-   *  does not have, which is empty rather than missing. Returns false when
-   *  the child does not parse. */
+   *  does not have. Returns false when the child does not parse, which
+   *  then counts as empty. */
   ingest(slot: ChildSlot, child: Uint8Array | null): boolean;
   /** A child that could not be fetched. */
   markMissing(slot: ChildSlot): void;
@@ -95,11 +110,12 @@ export function createEnricher(z: ParentZoom, parent: Uint8Array): Enricher | nu
   const slots: ChildSlot[] = [];
   for (let dy = 0; dy < n; dy++) for (let dx = 0; dx < n; dx++) slots.push({ dx, dy });
 
-  const pools = new Map<LayerName, Map<string, Donor>>();
-  for (const name of parents.keys()) pools.set(name, new Map());
+  const table = new ValueTable();
+  const pools = new Map<LayerName, DonorPool>();
+  for (const name of parents.keys()) pools.set(name, new DonorPool(HEIGHT_FIELDS[name].length));
   const seen = new Set<number>();
-  let donors = 0;
-  let broken = false;
+  let retained = 0;
+  let missing = false;
   let result: Enriched | null = null;
 
   const slotIndex = (s: ChildSlot): number | null =>
@@ -114,55 +130,62 @@ export function createEnricher(z: ParentZoom, parent: Uint8Array): Enricher | nu
       if (i === null || seen.has(i) || result) return false;
       seen.add(i);
       if (child === null) return true;
+      let found: Found[];
       try {
-        const found = scanChild(child, slot, i, n, parents);
-        let added = 0;
-        for (const d of found) if (!pools.get(d.layer)!.has(d.key)) added++;
-        if (donors + added > LIMITS.donors) throw new ParseError();
-        for (const d of found) {
-          const pool = pools.get(d.layer)!;
-          const had = pool.get(d.key);
-          if (!had) {
-            pool.set(d.key, d);
-            donors++;
-          } else {
-            had.box = union(had.box, d.box);
-            if (d.from < had.from) {
-              had.values = d.values;
-              had.from = d.from;
-            }
-          }
-        }
-        return true;
+        found = scanChild(child, slot, i, n, parents);
       } catch {
-        broken = true;
         return false;
       }
+      for (const d of found) {
+        const pool = pools.get(d.layer)!;
+        const at = pool.find(d.key);
+        if (at === undefined) {
+          const cost = DONOR_BYTES + d.key.length + table.costOf(child, d.spans);
+          if (retained + cost > LIMITS.retainedBytes) continue;
+          retained += cost;
+          pool.add(d.key, d.box, table.intern(child, d.spans), d.from);
+        } else {
+          const cost = d.from < pool.from[at] ? table.costOf(child, d.spans) : Infinity;
+          const replace = retained + cost <= LIMITS.retainedBytes;
+          if (replace) retained += cost;
+          pool.merge(at, d.box, replace ? table.intern(child, d.spans) : null, d.from);
+        }
+      }
+      return true;
     },
     markMissing(slot) {
       const i = slotIndex(slot);
       if (i !== null) seen.add(i);
-      broken = true;
+      missing = true;
     },
     finish() {
       if (result) return result;
       const matched = { building: 0, building_part: 0 } satisfies Record<LayerName, number>;
-      const matches = new Map<LayerScan, Map<number, Donor>>();
+      const matches = new Map<LayerScan, Map<number, Int32Array>>();
+      const budget = { pairs: LIMITS.pairs, scored: 0 };
+      let donors = 0;
       for (const scan of scans) {
         if (!isLayerName(scan.name)) continue;
         const index = parents.get(scan.name)!;
         if (index.scan !== scan) continue;
-        const m = assign(index, pools.get(scan.name)!);
+        const pool = pools.get(scan.name)!;
+        donors += pool.size;
+        const m = assign(index, pool, budget);
         matched[scan.name] = m.size;
         if (m.size > 0) matches.set(scan, m);
       }
+      const complete = !missing && seen.size === n * n;
       let bytes = parent;
+      let state: JoinState = complete ? "complete" : "partial";
       try {
-        if (matches.size > 0) bytes = rewriteTile(parent, scans, matches);
+        if (matches.size > 0) bytes = rewriteTile(parent, scans, matches, table);
       } catch {
         bytes = parent;
+        state = "unjoined";
+        matched.building = 0;
+        matched.building_part = 0;
       }
-      result = { bytes, complete: !broken && seen.size === n * n, matched, donors };
+      result = { bytes, state, matched, donors, pairs: budget.scored };
       return result;
     },
   };
@@ -345,9 +368,13 @@ function geometryBox(r: Reader): Box | null {
 
 const zigzag = (n: number): number => (n % 2 === 1 ? -(n + 1) / 2 : n / 2);
 
+/** One flat string per call: a string built by `+=` is a rope of one
+ *  node per character, and donor keys are held for the whole join. */
 function byteString(buf: Uint8Array, start: number, end: number): string {
   let s = "";
-  for (let i = start; i < end; i++) s += String.fromCharCode(buf[i]);
+  for (let i = start; i < end; i += 4096) {
+    s += String.fromCharCode.apply(null, buf.subarray(i, Math.min(end, i + 4096)) as unknown as number[]);
+  }
   return s;
 }
 
@@ -361,13 +388,6 @@ const clip = (b: Box, extent: number): Box => ({
 });
 
 const area = (b: Box): number => Math.max(0, b.x1 - b.x0) * Math.max(0, b.y1 - b.y0);
-
-const union = (a: Box, b: Box): Box => ({
-  x0: Math.min(a.x0, b.x0),
-  y0: Math.min(a.y0, b.y0),
-  x1: Math.max(a.x1, b.x1),
-  y1: Math.max(a.y1, b.y1),
-});
 
 function iou(a: Box, b: Box): number {
   const inter = area({
@@ -453,18 +473,138 @@ class ParentIndex {
   }
 }
 
-/** A z14 feature as the join sees it, merged across the children it spans. */
-interface Donor {
-  layer: LayerName;
-  /** The GERS id, or a key unique to this piece when it has none. */
-  key: string;
-  /** In parent-grid units. */
-  box: Box;
-  /** Raw Value messages, aligned to `HEIGHT_FIELDS[layer]`. */
-  values: (Uint8Array | undefined)[];
+/** Every distinct raw Value message a tile's donors carry, stored once. */
+class ValueTable {
+  private readonly ids = new Map<string, number>();
+  readonly raw: Uint8Array[] = [];
+
+  /** Heap that interning `spans` would add. */
+  costOf(buf: Uint8Array, spans: readonly number[]): number {
+    let cost = 0;
+    for (let j = 0; j < spans.length; j += 2) {
+      if (spans[j] >= 0 && !this.ids.has(byteString(buf, spans[j], spans[j + 1]))) {
+        cost += VALUE_BYTES + 2 * (spans[j + 1] - spans[j]);
+      }
+    }
+    return cost;
+  }
+
+  /** One id per [start, end) pair in `spans`, -1 where the start is. */
+  intern(buf: Uint8Array, spans: readonly number[]): number[] {
+    const out: number[] = [];
+    for (let j = 0; j < spans.length; j += 2) {
+      if (spans[j] < 0) {
+        out.push(-1);
+        continue;
+      }
+      const s = byteString(buf, spans[j], spans[j + 1]);
+      let id = this.ids.get(s);
+      if (id === undefined) {
+        id = this.raw.length;
+        this.ids.set(s, id);
+        this.raw.push(buf.slice(spans[j], spans[j + 1]));
+      }
+      out.push(id);
+    }
+    return out;
+  }
+}
+
+/** One layer's z14 features as the join sees them, each merged across the
+ *  children it spans, in columns rather than one object per donor. */
+class DonorPool {
+  private readonly ids = new Map<string, number>();
+  /** The GERS id, or a key unique to the piece when it has none. */
+  readonly keys: string[] = [];
+  /** x0, y0, x1, y1 per donor, in parent-grid units. */
+  boxes = new Float64Array(4 * 64);
+  /** `width` value-table ids per donor, aligned to `HEIGHT_FIELDS`, -1 for none. */
+  values: Int32Array;
   /** Slot of the piece `values` came from, so the lowest slot wins
    *  whatever order children arrive in. */
+  from = new Int32Array(64);
+  readonly width: number;
+
+  constructor(width: number) {
+    this.width = width;
+    this.values = new Int32Array(width * 64);
+  }
+
+  get size(): number {
+    return this.keys.length;
+  }
+
+  find(key: string): number | undefined {
+    return this.ids.get(key);
+  }
+
+  box(d: number): Box {
+    const b = this.boxes;
+    return { x0: b[4 * d], y0: b[4 * d + 1], x1: b[4 * d + 2], y1: b[4 * d + 3] };
+  }
+
+  valuesOf(d: number): Int32Array {
+    return this.values.subarray(d * this.width, (d + 1) * this.width);
+  }
+
+  add(key: string, box: Box, values: number[], from: number): void {
+    const d = this.keys.length;
+    if (d === this.from.length) {
+      this.boxes = grow(this.boxes, 8 * d);
+      this.values = grow(this.values, 2 * d * this.width);
+      this.from = grow(this.from, 2 * d);
+    }
+    this.keys.push(key);
+    this.ids.set(key, d);
+    this.from[d] = from;
+    this.boxes.set([box.x0, box.y0, box.x1, box.y1], 4 * d);
+    this.values.set(values, d * this.width);
+  }
+
+  merge(d: number, box: Box, values: number[] | null, from: number): void {
+    const b = this.boxes;
+    b[4 * d] = Math.min(b[4 * d], box.x0);
+    b[4 * d + 1] = Math.min(b[4 * d + 1], box.y0);
+    b[4 * d + 2] = Math.max(b[4 * d + 2], box.x1);
+    b[4 * d + 3] = Math.max(b[4 * d + 3], box.y1);
+    if (values) {
+      this.values.set(values, d * this.width);
+      this.from[d] = from;
+    }
+  }
+}
+
+function grow<T extends Float64Array | Int32Array>(a: T, length: number): T {
+  const next = new (a.constructor as new (n: number) => T)(length);
+  next.set(a);
+  return next;
+}
+
+/** A z14 feature read from one child, before it joins a pool. */
+interface Found {
+  layer: LayerName;
+  key: string;
+  box: Box;
+  /** [start, end) of each field's Value message in the child, -1 for none. */
+  spans: number[];
   from: number;
+}
+
+/** MVT Value fields 1-7 (string, float, double, int64, uint64, sint64,
+ *  bool) and the wire type each must have. */
+const VALUE_WIRE = [-1, 2, 5, 1, 0, 0, 0, 0];
+
+/** A Value message is exactly one known field, filling the message. */
+function isValue(buf: Uint8Array, start: number, end: number): boolean {
+  try {
+    const r = new Reader(buf, start, end);
+    const [field, wire] = r.tag();
+    if (field > 7 || VALUE_WIRE[field] !== wire) return false;
+    r.skip(wire);
+    return r.pos === end;
+  } catch {
+    return false;
+  }
 }
 
 /** Keeps a z14 feature only if it could matter: its box overlaps a parent
@@ -477,8 +617,8 @@ function scanChild(
   from: number,
   n: number,
   parents: Map<LayerName, ParentIndex>,
-): Donor[] {
-  const found: Donor[] = [];
+): Found[] {
+  const found: Found[] = [];
   for (const layer of scanTile(buf)) {
     if (!isLayerName(layer.name)) continue;
     const index = parents.get(layer.name);
@@ -487,6 +627,7 @@ function scanChild(
     const toParent = index.extent / (ext * n);
     const idKey = layer.keys.indexOf("id");
     const fieldKeys = HEIGHT_FIELDS[layer.name].map((f) => layer.keys.indexOf(f));
+    const valid = new Map<number, boolean>();
     for (let i = 0; i < layer.features.length; i += 2) {
       const { tags, box } = scanFeature(layer, buf, layer.features[i], layer.features[i + 1]);
       if (!box) continue;
@@ -498,23 +639,31 @@ function scanChild(
       };
       const touchesEdge = box.x0 <= 0 || box.y0 <= 0 || box.x1 >= ext || box.y1 >= ext;
       if (!touchesEdge && !index.overlapsAny(pb)) continue;
-      const value = (key: number): Uint8Array | undefined => {
-        if (key < 0) return undefined;
-        for (let t = 0; t < tags.length; t += 2) {
+      const spans: number[] = [];
+      const value = (key: number): void => {
+        for (let t = 0; key >= 0 && t < tags.length; t += 2) {
           if (tags[t] !== key) continue;
           const v = tags[t + 1];
           const s = layer.values[2 * v];
           const e = layer.values[2 * v + 1];
-          return e - s <= LIMITS.valueBytes ? buf.slice(s, e) : undefined;
+          let ok = valid.get(v);
+          if (ok === undefined) valid.set(v, (ok = e - s <= LIMITS.valueBytes && isValue(buf, s, e)));
+          if (ok) {
+            spans.push(s, e);
+            return;
+          }
+          break;
         }
-        return undefined;
+        spans.push(-1, -1);
       };
-      const id = value(idKey);
+      value(idKey);
+      const [idStart, idEnd] = spans.splice(0, 2);
+      for (const k of fieldKeys) value(k);
       found.push({
         layer: layer.name,
-        key: id ? byteString(id, 0, id.length) : `\0${from}:${i / 2}`,
+        key: idStart >= 0 ? byteString(buf, idStart, idEnd) : `\0${from}:${i / 2}`,
         box: pb,
-        values: fieldKeys.map(value),
+        spans,
         from,
       });
     }
@@ -523,29 +672,45 @@ function scanChild(
 }
 
 /** Greedy one-to-one by descending IoU, ties broken by parent then donor
- *  key so the result does not depend on the order children arrived in. */
-function assign(index: ParentIndex, pool: Map<string, Donor>): Map<number, Donor> {
-  const pairs: { score: number; parent: number; donor: Donor }[] = [];
-  for (const donor of pool.values()) {
-    const db = clip(donor.box, index.extent);
+ *  key so the result does not depend on the order children arrived in.
+ *  Scoring stops once `budget` is spent, and the pairs scored by then are
+ *  assigned. Returns each matched parent's value-table ids. */
+function assign(
+  index: ParentIndex,
+  pool: DonorPool,
+  budget: { pairs: number; scored: number },
+): Map<number, Int32Array> {
+  const score: number[] = [];
+  const parentOf: number[] = [];
+  const donorOf: number[] = [];
+  for (let d = 0; d < pool.size && budget.scored < budget.pairs; d++) {
+    const db = clip(pool.box(d), index.extent);
     if (area(db) <= 0) continue;
     index.candidates(db, (parent, pbox) => {
-      const score = iou(pbox, db);
-      if (score > MIN_IOU) pairs.push({ score, parent, donor });
+      if (++budget.scored > budget.pairs) return true;
+      const s = iou(pbox, db);
+      if (s > MIN_IOU) {
+        score.push(s);
+        parentOf.push(parent);
+        donorOf.push(d);
+      }
     });
   }
-  pairs.sort(
-    (a, b) =>
-      b.score - a.score ||
-      a.parent - b.parent ||
-      (a.donor.key < b.donor.key ? -1 : a.donor.key > b.donor.key ? 1 : 0),
-  );
-  const out = new Map<number, Donor>();
-  const used = new Set<Donor>();
-  for (const { parent, donor } of pairs) {
-    if (out.has(parent) || used.has(donor)) continue;
-    out.set(parent, donor);
-    used.add(donor);
+  budget.scored = Math.min(budget.scored, budget.pairs);
+  const order = Array.from(score, (_, i) => i);
+  order.sort((a, b) => {
+    const ka = pool.keys[donorOf[a]];
+    const kb = pool.keys[donorOf[b]];
+    return score[b] - score[a] || parentOf[a] - parentOf[b] || (ka < kb ? -1 : ka > kb ? 1 : 0);
+  });
+  const out = new Map<number, Int32Array>();
+  const used = new Set<number>();
+  for (const i of order) {
+    const parent = parentOf[i];
+    const d = donorOf[i];
+    if (out.has(parent) || used.has(d)) continue;
+    out.set(parent, pool.valuesOf(d));
+    used.add(d);
   }
   return out;
 }
@@ -595,14 +760,19 @@ class Writer {
 /** Layers with no match, and every field outside a layer, are copied as
  *  they came. In a matched layer, new keys and values go after the existing
  *  ones so no index moves, and only matched features are re-emitted. */
-function rewriteTile(buf: Uint8Array, scans: LayerScan[], matches: Map<LayerScan, Map<number, Donor>>): Uint8Array {
+function rewriteTile(
+  buf: Uint8Array,
+  scans: LayerScan[],
+  matches: Map<LayerScan, Map<number, Int32Array>>,
+  table: ValueTable,
+): Uint8Array {
   const out = new Writer();
   let pos = 0;
   for (const scan of scans) {
     const m = matches.get(scan);
     if (!m) continue;
     out.bytes(buf, pos, scan.fieldStart);
-    const body = rewriteLayer(buf, scan, m);
+    const body = rewriteLayer(buf, scan, m, table);
     out.field(3, body);
     pos = scan.end;
   }
@@ -610,7 +780,7 @@ function rewriteTile(buf: Uint8Array, scans: LayerScan[], matches: Map<LayerScan
   return out.finish();
 }
 
-function rewriteLayer(buf: Uint8Array, scan: LayerScan, matches: Map<number, Donor>): Uint8Array {
+function rewriteLayer(buf: Uint8Array, scan: LayerScan, matches: Map<number, Int32Array>, table: ValueTable): Uint8Array {
   const fields = HEIGHT_FIELDS[scan.name as LayerName];
   const keys = new Map(scan.keys.map((k, i) => [k, i]));
   const newKeys: string[] = [];
@@ -641,7 +811,7 @@ function rewriteLayer(buf: Uint8Array, scan: LayerScan, matches: Map<number, Don
   };
 
   const replaced = new Map<number, Uint8Array>();
-  for (const [f, donor] of matches) {
+  for (const [f, ids] of matches) {
     const start = scan.features[2 * f];
     const end = scan.features[2 * f + 1];
     const { tags } = scanFeature(scan, buf, start, end);
@@ -649,8 +819,7 @@ function rewriteLayer(buf: Uint8Array, scan: LayerScan, matches: Map<number, Don
     for (let t = 0; t < tags.length; t += 2) has.add(scan.keys[tags[t]]);
     const extra: number[] = [];
     fields.forEach((name, j) => {
-      const raw = donor.values[j];
-      if (raw && !has.has(name)) extra.push(keyIndex(name), valueIndex(raw));
+      if (ids[j] >= 0 && !has.has(name)) extra.push(keyIndex(name), valueIndex(table.raw[ids[j]]));
     });
     if (extra.length > 0) replaced.set(f, rewriteFeature(buf, start, end, tags.concat(extra)));
   }

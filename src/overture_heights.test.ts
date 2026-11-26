@@ -4,9 +4,13 @@ import { test } from "node:test";
 import { type ChildSlot, type ParentZoom, createEnricher } from "./overture_heights.ts";
 
 type Val = string | number | boolean;
+/** A Value message written as given, valid or not. */
+interface RawValue {
+  raw: number[];
+}
 type Ring = [number, number][];
 interface FeatureIn {
-  props: Record<string, Val>;
+  props: Record<string, Val | RawValue>;
   ring: Ring;
 }
 interface LayerIn {
@@ -35,7 +39,7 @@ class Out {
   }
   field(n: number, body: number[]): this {
     this.varint(n * 8 + 2).varint(body.length);
-    this.bytes.push(...body);
+    for (const b of body) this.bytes.push(b);
     return this;
   }
 }
@@ -43,7 +47,8 @@ class Out {
 const utf8 = (s: string): number[] => [...new TextEncoder().encode(s)];
 const zz = (n: number): number => (n < 0 ? -2 * n - 1 : 2 * n);
 
-function encodeValue(v: Val): number[] {
+function encodeValue(v: Val | RawValue): number[] {
+  if (typeof v === "object") return v.raw;
   const o = new Out();
   if (typeof v === "string") o.field(1, utf8(v));
   else if (typeof v === "boolean") o.varint(7 * 8).varint(v ? 1 : 0);
@@ -60,7 +65,7 @@ function encodeTile(layers: LayerIn[]): Uint8Array {
   const tile = new Out();
   for (const layer of layers) {
     const keys: string[] = [];
-    const values: Val[] = [];
+    const values: (Val | RawValue)[] = [];
     const index = <T>(list: T[], v: T): number => {
       const i = list.indexOf(v);
       return i >= 0 ? i : list.push(v) - 1;
@@ -201,7 +206,7 @@ test("a z12 building gains the five fields of the z14 building under it, footpri
   const child = encodeTile([{ name: "building", features: [{ props: tall, ring: rect(400, 400, 800, 800) }] }]);
   const out = enrich(12, parent, { "0,0": child });
 
-  assert.equal(out.complete, true);
+  assert.equal(out.state, "complete");
   const [before] = decodeTile(parent).get("building")!;
   const [after] = decodeTile(out.bytes).get("building")!;
   assert.deepEqual(after.props, {
@@ -232,7 +237,7 @@ test("a tile with nothing to match comes back byte for byte", () => {
   const far = encodeTile([{ name: "building", features: [{ props: tall, ring: rect(3000, 3000, 3100, 3100) }] }]);
   const out = enrich(12, parent, { "0,0": far });
   assert.deepEqual(out.bytes, parent);
-  assert.equal(out.complete, true);
+  assert.equal(out.state, "complete");
 });
 
 test("unmatched features and other layers keep their exact bytes", () => {
@@ -373,12 +378,12 @@ test("a missing child leaves the tile incomplete but enriched from what arrived"
     else e.ingest(s, s.dx === 0 && s.dy === 0 ? child : null);
   }
   const out = e.finish();
-  assert.equal(out.complete, false);
+  assert.equal(out.state, "partial");
   assert.equal(decodeTile(out.bytes).get("building")![0].props.height, 42.5);
 
   const partial = createEnricher(12, parent)!;
   partial.ingest({ dx: 0, dy: 0 }, child);
-  assert.equal(partial.finish().complete, false, "children never read");
+  assert.equal(partial.finish().state, "partial", "children never read");
 });
 
 test("a parent that does not parse is refused", () => {
@@ -391,7 +396,7 @@ test("a parent that does not parse is refused", () => {
   assert.equal(createEnricher(12, encodeTile([{ name: "water", features: [] }])), null);
 });
 
-test("a child that does not parse leaves the parent's bytes and marks the tile incomplete", () => {
+test("a child that does not parse counts as empty, and the tile is still complete", () => {
   const parent = z12Parent(rect(100, 100, 200, 200));
   const child = encodeTile([{ name: "building", features: [{ props: tall, ring: rect(400, 400, 800, 800) }] }]);
   for (let n = 1; n < child.length; n++) {
@@ -401,8 +406,60 @@ test("a child that does not parse leaves the parent's bytes and marks the tile i
     }
     const out = e.finish();
     assert.deepEqual(out.bytes, parent, `prefix of ${n} bytes`);
-    assert.equal(out.complete, false);
+    assert.equal(out.state, "complete");
   }
+});
+
+test("a value that is not a well-formed MVT Value is dropped, and the others still join", () => {
+  const parent = z12Parent(rect(100, 100, 200, 200));
+  const run = (height: RawValue) => {
+    const child = encodeTile([
+      { name: "building", features: [{ props: { id: "a", height, num_floors: 12 }, ring: rect(400, 400, 800, 800) }] },
+    ]);
+    return decodeTile(enrich(12, parent, { "0,0": child }).bytes).get("building")![0].props;
+  };
+  const double = [0x19, 0, 0, 0, 0, 0, 0, 0x45, 0x40];
+  assert.equal(run({ raw: double }).height, 42);
+  const invalid: Record<string, number[]> = {
+    "field 0": [0x07],
+    "field 8": [0x40, 0x01],
+    "string as a varint": [0x08, 0x01],
+    "double as a varint": [0x18, 0x01],
+    "bool as fixed32": [0x3d, 0, 0, 0, 0],
+    "two fields": [...double, 0x38, 0x01],
+    "trailing byte": [...double, 0x00],
+    empty: [],
+  };
+  for (const [name, raw] of Object.entries(invalid)) {
+    assert.deepEqual(run({ raw }), { "@height_source": "OpenStreetMap", num_floors: 12 }, name);
+  }
+});
+
+test("only the building and building_part layers join, whatever the others are called", () => {
+  const box = { props: {}, ring: rect(100, 100, 200, 200) };
+  const donor = { props: tall, ring: rect(400, 400, 800, 800) };
+  const names = ["building", "toString", "constructor", "__proto__", "hasOwnProperty"];
+  const parent = encodeTile(names.map((name) => ({ name, features: [box] })));
+  const out = enrich(12, parent, { "0,0": encodeTile(names.map((name) => ({ name, features: [donor] }))) });
+  assert.deepEqual(out.matched, { building: 1, building_part: 0 });
+  const layers = decodeTile(out.bytes);
+  for (const name of names.slice(1)) assert.deepEqual(layers.get(name), decodeTile(parent).get(name), name);
+});
+
+test("thousands of identical boxes are matched in bounded time", () => {
+  const box = rect(0, 0, 1024, 1024);
+  const parent = encodeTile([{ name: "building", features: Array.from({ length: 2000 }, () => ({ props: {}, ring: box })) }]);
+  const child = encodeTile([
+    {
+      name: "building",
+      features: Array.from({ length: 20_000 }, () => ({ props: { height: 9 }, ring: rect(0, 0, 4096, 4096) })),
+    },
+  ]);
+  const started = performance.now();
+  const out = enrich(12, parent, { "0,0": child });
+  assert.ok(performance.now() - started < 3000, `took ${performance.now() - started} ms`);
+  assert.equal(out.state, "complete");
+  assert.ok(out.matched.building > 0, "assigned from the pairs scored before the cap");
 });
 
 test("mutated tiles never throw", () => {
@@ -444,9 +501,7 @@ test("mutated tiles never throw", () => {
     for (const s of e.slots) ok = e.ingest(s, s.dx === 0 && s.dy === 0 ? mutate(child) : null) && ok;
     const out = e.finish();
     assert.ok(out.bytes instanceof Uint8Array);
-    if (!ok) {
-      assert.equal(out.complete, false);
-      assert.deepEqual(out.bytes, p);
-    }
+    if (!ok) assert.deepEqual(out.bytes, p);
+    assert.equal(out.state, "complete");
   }
 });

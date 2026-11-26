@@ -83,7 +83,9 @@ Overture drew them. About 95% of footprints find a match; the rest,
 mostly small ones, carry no height. Joined tiles are about 10–20%
 larger, and are stored in R2 per Overture release. The
 `x-overture-heights` response header says `joined`, `partial` (a z14
-tile could not be read; served for 60 s and retried) or `none`.
+tile could not be fetched; served for 60 s and retried) or `none` (the
+tile as Overture sent it, served for 60 s when the worker was too busy
+to join it). A z14 tile that arrives but does not parse counts as empty.
 
 The registry behind this table lives in
 [`src/tilesets.ts`](src/tilesets.ts) — adding a dataset is one entry

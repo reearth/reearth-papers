@@ -305,6 +305,25 @@ const RELEASE_NAME = /^\d{4}-\d{2}-\d{2}\.\d+$/;
 const CHILD_CONCURRENCY = 4;
 const CHILDREN_DEADLINE_MS = 20_000;
 
+/** Joins running at once in this isolate. Each holds up to four children
+ *  and its donors, and the isolate has 128 MB. A count, not a queue of
+ *  promises: a workerd request cannot await a promise another request
+ *  settles, so a waiting request polls on its own timer. */
+const MAX_JOINS = 2;
+const JOIN_WAIT_MS = 10_000;
+const JOIN_POLL_MS = 50;
+let joinsRunning = 0;
+
+async function takeJoinSlot(): Promise<boolean> {
+  const until = Date.now() + JOIN_WAIT_MS;
+  while (joinsRunning >= MAX_JOINS) {
+    if (Date.now() >= until) return false;
+    await new Promise((resolve) => setTimeout(resolve, JOIN_POLL_MS));
+  }
+  joinsRunning++;
+  return true;
+}
+
 export async function handleOvertureTile(
   tileset: OvertureTileset,
   match: { z: number; x: number; y: number },
@@ -360,9 +379,9 @@ export async function handleOvertureTile(
 }
 
 /** The parent with its z14 children's heights joined on. Only a tile built
- *  from every child is stored; one missing a child is served briefly and
- *  retried, and one whose parent the join cannot read goes out as
- *  upstream sent it. */
+ *  from every child is stored. One missing a child is served briefly and
+ *  retried; one the join cannot read or rewrite, or that waited too long
+ *  for a join slot, goes out as upstream sent it. */
 async function renderWithHeights(
   archive: PMTiles,
   z: ParentZoom,
@@ -372,14 +391,15 @@ async function renderWithHeights(
   const tile = await archive.getZxy(z, x, y);
   if (!tile) return null;
   const parent = new Uint8Array(tile.data);
-  const upstream: UnstoredTile = {
+  const upstream = (cacheControl: string): UnstoredTile => ({
     bytes: parent,
-    cacheControl: TILE_CACHE_CONTROL,
+    cacheControl,
     headers: { "x-overture-heights": "none" },
-  };
+  });
+  if (!(await takeJoinSlot())) return upstream("public, max-age=60");
   try {
     const enricher = createEnricher(z, parent);
-    if (!enricher) return upstream;
+    if (!enricher) return upstream(TILE_CACHE_CONTROL);
     const n = 1 << (14 - z);
     const signal = AbortSignal.timeout(CHILDREN_DEADLINE_MS);
     const queue = [...enricher.slots];
@@ -399,11 +419,20 @@ async function renderWithHeights(
     };
     await Promise.all(Array.from({ length: CHILD_CONCURRENCY }, worker));
     const out = enricher.finish();
-    if (out.complete) return out.bytes;
-    console.warn(`overture heights: ${z}/${x}/${y} built without every child`);
-    return { bytes: out.bytes, cacheControl: "public, max-age=60", headers: { "x-overture-heights": "partial" } };
+    switch (out.state) {
+      case "complete":
+        return out.bytes;
+      case "partial":
+        console.warn(`overture heights: ${z}/${x}/${y} built without every child`);
+        return { bytes: out.bytes, cacheControl: "public, max-age=60", headers: { "x-overture-heights": "partial" } };
+      case "unjoined":
+        console.error(`overture heights: ${z}/${x}/${y}: rewrite failed`);
+        return upstream(TILE_CACHE_CONTROL);
+    }
   } catch (e) {
     console.error(`overture heights: ${z}/${x}/${y}: ${String(e)}`);
-    return upstream;
+    return upstream(TILE_CACHE_CONTROL);
+  } finally {
+    joinsRunning--;
   }
 }
